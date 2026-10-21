@@ -91,6 +91,12 @@ export async function homePage(el: HTMLElement) {
         </div>
         ${nextCard()}
 
+        <div class="span-12 quick-tiles">
+          <a class="qt" href="/house">${icon('sofa', 22)}<div><div class="h3">My home</div><div class="tiny muted">Furnish, garage, memorabilia</div></div></a>
+          <a class="qt" href="/transfers">${icon('swap', 22)}<div><div class="h3">Transfers</div><div class="tiny muted">Vacancies and players</div></div></a>
+          <a class="qt" href="/league?tab=cup">${icon('trophy', 22)}<div><div class="h3">The Cup</div><div class="tiny muted">Knockout bracket</div></div></a>
+        </div>
+
         <div class="card span-4">
           <div class="card-head"><div class="h2">Training</div><a class="card-link" href="/training">Open</a></div>
           ${training.ready

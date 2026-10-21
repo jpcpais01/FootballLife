@@ -48,7 +48,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   if (!data.ready) {
     const m: MatchBrief = data.match;
     const renderPre = () => mount(el, html`<div class="card hero-card" style="padding:34px 24px;text-align:center">
-      <div class="eyebrow">${m.kind === 'friendly' ? 'Friendly' : `League · Round ${m.round}`}</div>
+      <div class="eyebrow">${m.kind === 'friendly' ? 'Friendly' : m.cup ? `FootbalLife Cup · ${m.cup.name}` : `League · Round ${m.round}`}</div>
       <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;margin:26px 0">
         <a href="/club/${m.home.id}" class="stack" style="align-items:center;gap:10px">${badge(m.home, 96)}<div class="h2">${m.home.name}</div></a>
         <div><div class="countdown" style="font-size:44px" id="cd">${countdown(m.kickoffAt)}</div><div class="small muted">${kickoffLabel(m.kickoffAt)}</div></div>
@@ -83,6 +83,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   let stats: [TeamStats, TeamStats] | undefined = data.stats;
   let players: PlayerLine[] | undefined = data.players;
   let motm: number | undefined = data.motm;
+  let pens: { score: [number, number]; kicks: { s: 0 | 1; p: number; in: boolean }[] } | undefined = data.pens;
   const serverOffset = data.serverNow - Date.now();
   const kickoff: number = data.kickoffAt;
   const total = totalReal(timeline);
@@ -110,7 +111,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   mount(el, html`
     <div class="row between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
       <div class="row" style="gap:10px"><button class="btn sm ghost" onclick="history.back()" aria-label="Back">${icon('back', 16)}</button>
-        <div><div class="eyebrow">${m.kind === 'friendly' ? 'Friendly' : `League · Round ${m.round}`}</div><div class="h3">${m.home.name} vs ${m.away.name}</div></div></div>
+        <div><div class="eyebrow">${m.kind === 'friendly' ? 'Friendly' : m.cup ? `FootbalLife Cup · ${m.cup.name}` : `League · Round ${m.round}`}</div><div class="h3">${m.home.name} vs ${m.away.name}</div></div></div>
       <span class="chip" id="status"></span>
     </div>
     <div class="match-wrap">
@@ -122,6 +123,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
             <div><span>${lineups[1].short}</span>${kitBar(lineups[1].colors)}</div>
             <div class="sb-clock" id="clock">0'</div>
           </div>
+          <div id="pens"></div>
           <div class="stage-ticker" id="ticker"></div>
           <div class="stage-toolbar">
             <button data-cam="broadcast" title="Broadcast camera" class="on">${icon('camera')}</button>
@@ -198,6 +200,14 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
       if (e.k === 'offside') t.offsides++;
     }
     return s as [any, any];
+  };
+
+  // Penalty shootout result, shown once a drawn cup tie reaches full time.
+  const shootoutStrip = (): Raw => {
+    const p = pens!;
+    const row = (side: 0 | 1) => html`<div class="so-row"><b>${lineups[side].short}</b>${p.kicks.filter((k) => k.s === side).map((k) => html`<i class="${k.in ? 'in' : 'miss'}" title="${lineups[side].players[k.p]?.name ?? ''}"></i>`)}<b class="num">${p.score[side]}</b></div>`;
+    const w = p.score[0] > p.score[1] ? 0 : 1;
+    return html`<div class="shootout fade-in"><div class="tiny eyebrow">Penalties</div>${row(0)}${row(1)}<div class="tiny" style="margin-top:4px">${lineups[w].name} win ${Math.max(...p.score)}–${Math.min(...p.score)} on penalties</div></div>`;
   };
 
   const renderPanel = (t: number) => {
@@ -312,7 +322,10 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
     const lastEv = events[events.length - 1];
     const ended = finished && lastEv && t >= lastEv.t;
     const ht = Math.abs(t - halftimeAt) < 0.5 && events.some((e) => e.k === 'halftime' && e.t <= t);
-    el.querySelector('#clock')!.textContent = ended ? 'FT' : ht ? 'HT' : minuteLabel(t, halftimeAt);
+    el.querySelector('#clock')!.textContent = ended ? (pens ? 'PENS' : 'FT') : ht ? 'HT' : minuteLabel(t, halftimeAt);
+    const pensEl = el.querySelector('#pens')!;
+    const showPens = !!(ended && pens);
+    if (pensEl.childElementCount !== (showPens ? 1 : 0)) pensEl.innerHTML = showPens ? shootoutStrip().html : '';
     const ff = el.querySelector('#ff');
     if (ff) ff.textContent = rate > 6 ? '» Fast-forwarding build-up play' : '';
     // Goal flash + ticker on new events.
@@ -378,6 +391,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
           stats = d.stats;
           players = d.players;
           motm = d.motm;
+          pens = d.pens;
           clearInterval(poll);
         }
       } catch {

@@ -22,6 +22,8 @@ export interface MatchBrief {
   home: ClubBrief;
   away: ClubBrief;
   score: [number, number] | null;
+  pens?: [number, number] | null;
+  cup?: { stage: number; total: number; tie: number; name: string };
 }
 
 export const badge = (c: ClubBrief, size = 28) => badgeSvg(c.colors, c.badge, size, c.short);
@@ -36,9 +38,10 @@ export function ovrChip(v: number, sm = false): Raw {
 
 export function matchRow(m: MatchBrief, highlightClub?: string): Raw {
   let mid: Raw;
-  if (m.status === 'finished' && m.score) mid = html`<div class="score num">${m.score[0]}<span class="dim">:</span>${m.score[1]}</div><div class="tiny dim">${m.kind === 'friendly' ? 'Friendly · ' : ''}FT</div>`;
+  const tag = m.kind === 'friendly' ? 'Friendly' : m.cup ? `Cup ${m.cup.name}` : m.round ? `R${m.round}` : '';
+  if (m.status === 'finished' && m.score) mid = html`<div class="score num">${m.score[0]}<span class="dim">:</span>${m.score[1]}</div><div class="tiny dim">${m.pens ? html`<span class="lime">${m.pens[0]}–${m.pens[1]} pens</span>` : m.cup ? `${tag} · FT` : m.kind === 'friendly' ? 'Friendly · FT' : 'FT'}</div>`;
   else if (m.status === 'live') mid = html`<span class="chip live">LIVE</span><div class="tiny dim" style="margin-top:3px">Watch</div>`;
-  else mid = html`<div class="small" style="font-weight:700">${new Date(m.kickoffAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</div><div class="tiny dim">${kickoffLabel(m.kickoffAt).split(' ').slice(0, -1).join(' ') || ''}${m.kind === 'friendly' ? ' · Friendly' : m.round ? ` · R${m.round}` : ''}</div>`;
+  else mid = html`<div class="small" style="font-weight:700">${new Date(m.kickoffAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</div><div class="tiny dim">${kickoffLabel(m.kickoffAt).split(' ').slice(0, -1).join(' ') || ''}${tag ? ` · ${tag}` : ''}</div>`;
   const side = (c: ClubBrief, away: boolean) => html`<div class="team ${away ? 'away' : ''}">${badge(c, 28)}<span class="ellipsis" style="${c.id === highlightClub ? 'color:var(--lime)' : ''}">${c.name}</span></div>`;
   return html`<a class="match-row" href="/match/${m.id}">${side(m.home, false)}<div class="mid">${mid}</div>${side(m.away, true)}</a>`;
 }
