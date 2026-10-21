@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-21T17:00:00Z',
+    entries: [
+      { title: 'Server update', body: 'The game server now runs on a newer platform so the site can go live.' },
+    ],
+  },
+  {
     hour: '2026-10-21T16:00:00Z',
     entries: [
       { title: 'FootbalLife kicks off', body: 'Create an account and your own footballer: pick a name, one of eight positions and your look.' },

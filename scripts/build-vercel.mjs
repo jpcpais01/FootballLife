@@ -21,7 +21,7 @@ await build({
   banner: { js: "import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);" },
   logLevel: 'warning',
 });
-writeFileSync(`${fn}/.vc-config.json`, JSON.stringify({ runtime: 'nodejs20.x', handler: 'index.mjs', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 30 }, null, 2));
+writeFileSync(`${fn}/.vc-config.json`, JSON.stringify({ runtime: 'nodejs24.x', handler: 'index.mjs', launcherType: 'Nodejs', shouldAddHelpers: false, maxDuration: 30 }, null, 2));
 writeFileSync(`${fn}/package.json`, JSON.stringify({ type: 'module' }));
 
 writeFileSync(`${out}/config.json`, JSON.stringify({
