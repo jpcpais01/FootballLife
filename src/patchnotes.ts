@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-21T22:30:00Z',
+    entries: [
+      { title: 'A new app icon', body: 'FootbalLife has a new icon: a bold italic FL in lime on black, with speed lines. It shows on your home screen, in the app switcher and in your browser tab. If you installed the game before, the new icon may take a day to appear, or reinstall it to see it straight away.' },
+    ],
+  },
+  {
     hour: '2026-10-21T22:00:00Z',
     entries: [
       { title: 'A new menu dock', body: 'On phones, the menu is now a floating glass dock of icon tiles at the bottom of the screen, matching the home screen rail, with the page behind it fading darker toward the bottom. Your live or next match has its own tile (with a LIVE badge when it is on), Training glows when you are ready for a session, and the page you are on lights up. Every home screen tile is now labelled too.' },
