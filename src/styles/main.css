@@ -1095,6 +1095,7 @@ a.bk-tie:hover { border-color: var(--line-2); }
   .hero-cta .btn.lg { height: 42px; padding: 0 18px; font-size: 14px; }
   .spot-dots { padding-top: 10px; }
   .act-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .act-row .act-card.wide { grid-column: 1 / -1; }
 
   /* Match: like a console game, the pitch takes the whole screen height; commentary alongside. */
   .app.at-match .topnav { display: none; }
@@ -1156,7 +1157,7 @@ a.bk-tie:hover { border-color: var(--line-2); }
 
 /* ---------- Colour themes (picked in the avatar menu) ---------- */
 
-/* Aero: tropical sky and lagoon, glossy glass, bubbles and fresh green. */
+/* Aero: tropical sky and lagoon, glossy glass and fresh green. */
 :root[data-theme="aero"] {
   --bg: #032b3d;
   --bg-2: #06405a;
@@ -1183,18 +1184,8 @@ a.bk-tie:hover { border-color: var(--line-2); }
 }
 :root[data-theme="aero"] .ambient i { filter: blur(70px); opacity: 0.32; }
 :root[data-theme="aero"] .ambient .a3 { opacity: 0.12; }
-/* Floating bubbles over the lagoon. */
-:root[data-theme="aero"] .ambient .grain { opacity: 1; mask-image: none;
-  background-image:
-    radial-gradient(circle at 30% 30%, rgba(255,255,255,0.55) 0 2px, transparent 3px),
-    radial-gradient(circle, transparent 9px, rgba(255,255,255,0.22) 10px, transparent 11.5px),
-    radial-gradient(circle at 35% 35%, rgba(255,255,255,0.5) 0 1.5px, transparent 2.5px),
-    radial-gradient(circle, transparent 5px, rgba(255,255,255,0.18) 6px, transparent 7px),
-    linear-gradient(180deg, rgba(255,255,255,0.12), transparent 30%);
-  background-size: 260px 300px, 260px 300px, 170px 210px, 170px 210px, 100% 100%;
-  background-position: 40px 60px, 33px 53px, 120px 150px, 117px 147px, 0 0;
-  animation: aeroBubbles 40s linear infinite; }
-@keyframes aeroBubbles { to { background-position: 40px -240px, 33px -247px, 120px -60px, 117px -63px, 0 0; } }
+/* A soft gloss over the lagoon. */
+:root[data-theme="aero"] .ambient .grain { opacity: 1; mask-image: none; background: linear-gradient(180deg, rgba(255,255,255,0.12), transparent 30%); }
 :root[data-theme="aero"] .card { background: linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(160,235,255,0.12) 42%, rgba(60,170,220,0.10) 100%); }
 :root[data-theme="aero"] .card::before { content: ''; position: absolute; inset: 1px 1px auto 1px; height: 46%; border-radius: inherit; pointer-events: none;
   background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0)); }

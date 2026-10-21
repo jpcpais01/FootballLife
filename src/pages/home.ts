@@ -230,7 +230,6 @@ export async function homePage(el: HTMLElement) {
     const d = data;
     const unread = d.notifications.filter((n: any) => !n.read).length;
     const cards: Raw[] = [];
-    if (d.liveNow.length) cards.push(html`<div class="act-card"><div class="act-head"><span class="chip live">LIVE</span><span class="h3">Live now</span></div>${d.liveNow.slice(0, 3).map((m: MatchBrief) => matchRow(m, d.club?.id))}</div>`);
     cards.push(html`<div class="act-card"><div class="act-head"><span class="h3">Inbox</span>${unread ? html`<span class="chip lime">${unread} new</span><button class="btn sm ghost" data-read style="margin-left:auto">Mark read</button>` : ''}</div>
       ${d.notifications.length ? html`<div class="list">${d.notifications.slice(0, 4).map((n: any) => html`<${n.data?.matchId ? 'a' : 'div'} class="list-item" ${n.data?.matchId ? html`href="/match/${n.data.matchId}"` : ''} style="align-items:flex-start">
           <span style="color:${n.read ? 'var(--dim)' : 'var(--lime)'};margin-top:2px">${icon(n.kind === 'result' ? 'ball' : n.kind === 'season' ? 'trophy' : n.kind === 'collect' ? 'shirt' : 'bell', 16)}</span>

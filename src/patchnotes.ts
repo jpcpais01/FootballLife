@@ -9,8 +9,11 @@ export const PATCH_NOTES: PatchGroup[] = [
   {
     hour: '2026-10-21T23:30:00Z',
     entries: [
+      { title: 'A cleaner top bar', body: 'The big header is gone. Your coins, the refresh button, the inbox bell and your avatar now sit together in one floating glass pill in the corner, and pages you open from another page get a floating back button.' },
+      { title: 'Home screen tidy-up', body: 'The row of page buttons under the home spotlight is gone (swipe or use the arrows), and so is the separate Live now box. The league table on the home screen is now twice as wide and shows goals for and against, goal difference, red cards and recent form.' },
+      { title: 'Calmer Aero', body: 'The Aero theme no longer has floating bubbles in the background.' },
       { title: 'Refresh button', body: 'A new refresh button in the top bar reloads the whole game and picks up the latest update straight away, without waiting for the app to update itself in the background.' },
-      { title: 'Colour themes', body: 'Pick a look from the menu under your avatar. Floodlight is the classic dark-and-lime look. Aero is a glossy tropical lagoon of sky blue and fresh green, with floating bubbles. Ballon d\'Or is black lacquer and warm gold, like an awards night. Your choice is remembered on this device.' },
+      { title: 'Colour themes', body: 'Pick a look from the menu under your avatar. Floodlight is the classic dark-and-lime look. Aero is a glossy tropical lagoon of sky blue and fresh green. Ballon d\'Or is black lacquer and warm gold, like an awards night. Your choice is remembered on this device.' },
     ],
   },
   {
