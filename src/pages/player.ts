@@ -14,7 +14,7 @@ export async function playerPage(el: HTMLElement, [id]: string[]) {
   mount(el, html`${skeleton(200, 2)}`);
   let d: any;
   try {
-    d = await api.get(`/api/players/${id}`);
+    d = await api.page(`/api/players/${id}`);
   } catch (e) {
     return mount(el, errorBox((e as Error).message));
   }

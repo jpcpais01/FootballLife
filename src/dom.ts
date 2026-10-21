@@ -58,3 +58,8 @@ export function onAction(root: HTMLElement, handlers: Record<string, (el: HTMLEl
   root.addEventListener('click', fn);
   return () => root.removeEventListener('click', fn);
 }
+
+/** Resolves once the browser has painted the current DOM, so heavy work after it doesn't hold the page back. */
+export function afterPaint(): Promise<void> {
+  return new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+}

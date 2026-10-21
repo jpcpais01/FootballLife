@@ -1,6 +1,6 @@
 import './styles/main.css';
 import { registerSW } from 'virtual:pwa-register';
-import { api } from './api.ts';
+import { api, markTouched, newVisit, onStaleData } from './api.ts';
 import { avatarSvg, brandMark } from './art.ts';
 import { html, mount } from './dom.ts';
 import { icon } from './icons.ts';
@@ -28,6 +28,57 @@ addRoute('/house/:id', () => import('./pages/house.ts').then((m) => m.housePage)
 addRoute('/transfers', () => import('./pages/transfers.ts').then((m) => m.transfersPage));
 addRoute('/join/:code', () => import('./pages/join.ts').then((m) => m.joinPage));
 addRoute('/patch-notes', () => import('./pages/patchnotes.ts').then((m) => m.patchNotesPage));
+
+// The API data each page opens with, so it can be fetched before the tap lands.
+function dataFor(path: string): string | null {
+  const [, a, b] = path.split('?')[0].split('/');
+  if (!a || a === 'training') return '/api/home';
+  if (a === 'league' || a === 'shop' || a === 'transfers' || (a === 'clubs' && !b)) return `/api/${a}`;
+  if (a === 'club' && b) return `/api/clubs/${b}`;
+  if (a === 'player' && b) return `/api/players/${b}`;
+  if (a === 'house') return b || state.player ? `/api/house/${b ?? state.player!.id}` : null;
+  return null;
+}
+const warmed = new Set<string>();
+function prefetch(path: string) {
+  const m = match(path.split('?')[0]);
+  if (!m || !state.player) return;
+  if (!warmed.has(m.route.re.source)) { warmed.add(m.route.re.source); void m.route.page().catch(() => {}); }
+  const d = dataFor(path);
+  if (d) api.prefetch(d);
+}
+const hrefOf = (t: EventTarget | null) => {
+  const el = (t as HTMLElement | null)?.closest?.('a[href], [data-href]') as HTMLElement | null;
+  const h = el?.getAttribute('href') ?? el?.dataset.href;
+  return h && h.startsWith('/') && !h.startsWith('/api/') ? h : null;
+};
+// Start loading on press (and hover with a mouse), ~100 ms before the click fires.
+document.addEventListener('pointerdown', (e) => {
+  if ((e.target as HTMLElement).closest?.('#page')) markTouched();
+  const h = hrefOf(e.target);
+  if (h) prefetch(h);
+}, { capture: true, passive: true });
+document.addEventListener('keydown', (e) => { if ((e.target as HTMLElement).closest?.('#page')) markTouched(); }, { capture: true });
+document.addEventListener('pointerover', (e) => {
+  if (e.pointerType !== 'mouse') return;
+  const h = hrefOf(e.target);
+  if (h) prefetch(h);
+}, { passive: true });
+// Once the app is up, quietly load every page's code and the main tabs' data.
+let warmedUp = false;
+function warmUp() {
+  if (warmedUp || !state.player) return;
+  warmedUp = true;
+  const idle = (fn: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(fn, { timeout: 3000 }) : setTimeout(fn, 1200));
+  idle(() => {
+    for (const p of ['/', '/league', '/training', '/shop', '/clubs', '/transfers', '/house', '/patch-notes', '/match/x', '/player/x', '/club/x']) {
+      const m = match(p);
+      if (m && !warmed.has(m.route.re.source)) { warmed.add(m.route.re.source); void m.route.page().catch(() => {}); }
+    }
+    const mine = [state.player?.clubId ? `/club/${state.player.clubId}` : '/clubs', '/league', '/shop', '/'];
+    mine.forEach((p, i) => setTimeout(() => { const d = dataFor(p); if (d) api.prefetch(d); }, 400 * i));
+  });
+}
 
 const root = document.getElementById('app')!;
 
@@ -58,6 +109,13 @@ function isActive(href: string, path: string) {
 
 let shellMounted = false;
 let enterSeq = 0;
+// A background refresh found newer data: re-run the page in place, keeping the scroll.
+let quiet = false;
+onStaleData(() => {
+  const y = window.scrollY;
+  quiet = true;
+  void render(location.pathname).then(() => window.scrollTo({ top: y }));
+});
 
 const clockText = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -182,12 +240,18 @@ async function render(path: string) {
     shellMounted = false;
     el = root;
   }
-  el.innerHTML = '';
-  el.classList.remove('page-enter');
-  void el.offsetWidth;
-  el.classList.add('page-enter');
-  const enter = ++enterSeq;
-  setTimeout(() => { if (enter === enterSeq) el.classList.remove('page-enter'); }, 900);
+  newVisit();
+  if (quiet) {
+    quiet = false;
+  } else {
+    el.innerHTML = '';
+    el.classList.remove('page-enter');
+    void el.offsetWidth;
+    el.classList.add('page-enter');
+    const enter = ++enterSeq;
+    setTimeout(() => { if (enter === enterSeq) el.classList.remove('page-enter'); }, 400);
+  }
+  warmUp();
   try {
     const page = await m.route.page();
     await runPage(el, page, m.params);

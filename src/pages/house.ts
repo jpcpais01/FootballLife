@@ -5,7 +5,7 @@ import { CAR_BY_ID, CAR_COLORS, CARS, FLOOR_STYLES, FURNITURE, FURNITURE_BY_ID, 
 import { api } from '../api.ts';
 import { avatarSvg } from '../art.ts';
 import { badge } from '../components.ts';
-import { html, mount, type Raw } from '../dom.ts';
+import { afterPaint, html, mount, type Raw } from '../dom.ts';
 import { trophyArt } from '../gearArt.ts';
 import { icon } from '../icons.ts';
 import { refreshMe, state } from '../state.ts';
@@ -34,7 +34,7 @@ export async function housePage(el: HTMLElement, params: string[]) {
   mount(el, html`${skeleton(420, 1)}`);
   let d: HouseData;
   try {
-    d = await api.get(`/api/house/${id}`);
+    d = await api.page(`/api/house/${id}`);
   } catch (e) {
     mount(el, errorBox((e as Error).message));
     return;
@@ -203,6 +203,7 @@ export async function housePage(el: HTMLElement, params: string[]) {
     const host = el.querySelector<HTMLElement>('#h3d')!;
     try {
       const { createHomeScene } = await import('../viewer/home3d.ts');
+      await afterPaint();
       if (disposed) return;
       scene = createHomeScene(host);
       drawStage(true);

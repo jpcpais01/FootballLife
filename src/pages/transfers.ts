@@ -18,9 +18,9 @@ interface Market {
 export async function transfersPage(el: HTMLElement) {
   mount(el, html`${skeleton(300, 2)}`);
   let d: Market;
-  const load = async () => { d = await api.get('/api/transfers'); };
+  const load = async (first = false) => { d = first ? await api.page('/api/transfers') : await api.get('/api/transfers'); };
   try {
-    await load();
+    await load(true);
   } catch (e) {
     return mount(el, errorBox((e as Error).message));
   }

@@ -4,7 +4,7 @@ import { sanitizeAppearance, type Appearance } from '../../shared/appearance.ts'
 import { ITEM_BY_ID, ITEMS, RARITY_COLORS, SLOT_LABELS, SLOTS, gear, type Equipped, type Item, type Slot } from '../../shared/cosmetics.ts';
 import { api } from '../api.ts';
 import { avatarSvg } from '../art.ts';
-import { html, mount, type Raw } from '../dom.ts';
+import { afterPaint, html, mount, type Raw } from '../dom.ts';
 import { cardBackground, itemArt } from '../gearArt.ts';
 import { icon } from '../icons.ts';
 import { lookClick, lookEditor } from '../lookEditor.ts';
@@ -26,11 +26,14 @@ interface ShopData {
   equipped: Equipped;
 }
 
+// The turntable outlives the page so coming back to the shop is instant.
+let parkedTT: Turntable | null = null;
+
 export async function shopPage(el: HTMLElement, params: string[], initial: Tab = 'shop') {
   mount(el, html`${skeleton(420, 1)}`);
   let d: ShopData;
   try {
-    d = await api.get('/api/shop');
+    d = await api.page('/api/shop');
   } catch (e) {
     mount(el, errorBox((e as Error).message));
     return;
@@ -161,6 +164,12 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
   const mountStage = async () => {
     const host = el.querySelector<HTMLElement>('#tt');
     if (!host) return;
+    if (!tt && parkedTT) {
+      tt = parkedTT;
+      parkedTT = null;
+      await afterPaint();
+      if (disposed) return;
+    }
     if (tt) {
       tt.attach(host);
       tt.set(look, preview(), d.kit, me.position === 'GK');
@@ -170,6 +179,7 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
     loading = true;
     try {
       const { createTurntable } = await import('../viewer/turntable.ts');
+      await afterPaint();
       if (disposed) return;
       tt = createTurntable(el.querySelector<HTMLElement>('#tt') ?? host);
       tt.set(look, preview(), d.kit, me.position === 'GK');
@@ -282,7 +292,7 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
   return () => {
     disposed = true;
     clearInterval(rotTimer);
-    tt?.dispose();
+    if (tt) { parkedTT?.dispose(); tt.park(); parkedTT = tt; }
     if (lookDirty) toast('Unsaved look changes were discarded');
   };
 }

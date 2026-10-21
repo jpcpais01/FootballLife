@@ -10,7 +10,7 @@ export async function leaguePage(el: HTMLElement) {
   mount(el, html`${skeleton(300, 1)}`);
   let d: any;
   try {
-    d = await api.get('/api/league');
+    d = await api.page('/api/league');
   } catch (e) {
     return mount(el, errorBox((e as Error).message));
   }

@@ -1108,10 +1108,13 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse) {
       const match = url.pathname.match(re);
       if (!match) continue;
       // Keep the world moving on every request (cheap when nothing is due).
-      await tick(db).catch((e) => console.error('tick failed', e));
+      // Reads run alongside it so a page never waits for the tick; writes wait,
+      // since they act on the state it brings up to date.
+      const ticking = tick(db).catch((e) => console.error('tick failed', e));
+      if (method !== 'GET') await ticking;
       const ctx: Ctx = { db, req, res, user: await currentUser(db, req), body: await readJson(req), params: match.slice(1).map(decodeURIComponent), query: url.searchParams, secure };
       if (method !== 'GET' && !sameOrigin(req)) throw forbidden('Cross-site request blocked');
-      const out = await h(ctx);
+      const out = await h(ctx).finally(() => ticking);
       return sendJson(res, 200, out);
     }
     throw notFound('Unknown endpoint');

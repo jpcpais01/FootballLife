@@ -19,6 +19,10 @@ export interface TrainingGround {
   /** Back to the start positions. */
   reset(): void;
   cheer(): void;
+  /** Moves the canvas into a new container and resumes rendering. */
+  attach(host: HTMLElement): void;
+  /** Stops rendering and takes the canvas off the page, keeping everything loaded for the next visit. */
+  park(): void;
   dispose(): void;
 }
 
@@ -122,7 +126,8 @@ function ballTexture() {
 
 const ease = (u: number) => (u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2);
 
-export function createTrainingGround(host: HTMLElement): TrainingGround {
+export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
+  let host = initialHost;
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -784,6 +789,21 @@ export function createTrainingGround(host: HTMLElement): TrainingGround {
     cheer() {
       cheerUntil = elapsed + 3.4;
       if (me) burst(me.root.position.clone().setY(2.4), [LIME, 0xffffff, new THREE.Color(kit.primary).getHex()], 140);
+    },
+    attach(next) {
+      host = next;
+      host.appendChild(renderer.domElement);
+      ro.disconnect();
+      ro.observe(host);
+      resize();
+      if (!raf) loop();
+    },
+    park() {
+      cancelAnimationFrame(raf);
+      raf = 0;
+      ro.disconnect();
+      tasks.length = 0;
+      renderer.domElement.remove();
     },
     dispose() {
       cancelAnimationFrame(raf);

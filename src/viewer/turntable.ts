@@ -11,6 +11,8 @@ export interface Turntable {
   celebrate(): void;
   /** Moves the canvas into a new container (after the page re-renders). */
   attach(host: HTMLElement): void;
+  /** Stops rendering and takes the canvas off the page, keeping it ready for the next visit. */
+  park(): void;
   dispose(): void;
 }
 
@@ -131,12 +133,19 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
       scene.add(fig.root);
     },
     attach(next) {
-      if (next === host) return;
+      if (next === host && raf) return;
       host = next;
       host.appendChild(renderer.domElement);
       ro.disconnect();
       ro.observe(host);
       resize();
+      if (!raf) loop();
+    },
+    park() {
+      cancelAnimationFrame(raf);
+      raf = 0;
+      ro.disconnect();
+      renderer.domElement.remove();
     },
     celebrate() {
       celebrateUntil = clock.getElapsed() + 3.6;
