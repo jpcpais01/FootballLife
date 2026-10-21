@@ -27,8 +27,8 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
   let chatBusy = false;
   let gone = false;
 
-  const load = async () => {
-    d = await api.get(`/api/clubs/${id}`);
+  const load = async (first = false) => {
+    d = first ? await api.page(`/api/clubs/${id}`) : await api.get(`/api/clubs/${id}`);
     draft = { formation: d.club.formation, tactics: { ...d.club.tactics }, lineup: { ...d.lineup } };
     render();
   };
@@ -432,7 +432,7 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
   };
 
   try {
-    await load();
+    await load(true);
   } catch (e) {
     mount(el, errorBox((e as Error).message));
   }

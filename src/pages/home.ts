@@ -35,9 +35,9 @@ export async function homePage(el: HTMLElement) {
   let pointer = 'mouse';
   let downAt = 0;
 
-  const load = async () => {
+  const load = async (first = false) => {
     try {
-      data = await api.get('/api/home');
+      data = first ? await api.page('/api/home') : await api.get('/api/home');
       if (!alive) return;
       render();
     } catch (e) {
@@ -329,7 +329,7 @@ export async function homePage(el: HTMLElement) {
     }
   });
 
-  await load();
+  await load(true);
   void refreshMe().catch(() => {});
   timer = window.setInterval(() => {
     el.querySelectorAll<HTMLElement>('[data-countdown]').forEach((c) => {

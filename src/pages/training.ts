@@ -2,7 +2,7 @@
 // and bank XP scaled by how well you did. While recovering you can still practise.
 import { ATTR_GROUPS, ATTR_LABELS, KEY_ATTRS, xpToNext, type Attr, type Position } from '../../shared/attributes.ts';
 import { api } from '../api.ts';
-import { html, mount } from '../dom.ts';
+import { afterPaint, html, mount } from '../dom.ts';
 import { icon } from '../icons.ts';
 import { refreshMe } from '../state.ts';
 import { achievementToasts, countdown, errorBox, skeleton, toast } from '../ui.ts';
@@ -52,11 +52,13 @@ function targetsOf(focus: string, pos: Position): Attr[] {
 const grade = (s: number) => (s >= 90 ? 'S' : s >= 75 ? 'A' : s >= 55 ? 'B' : s >= 35 ? 'C' : 'D');
 const mult = (s: number) => Math.round((0.8 + s / 200) * 100) / 100;
 
+let parked: TrainingGround | null = null;
+
 export async function trainingPage(el: HTMLElement) {
   mount(el, html`<div class="stack">${skeleton(120, 3)}</div>`);
   let d: any;
   try {
-    d = await api.get('/api/home');
+    d = await api.page('/api/home');
   } catch (e) {
     mount(el, errorBox((e as Error).message));
     return;
@@ -192,9 +194,19 @@ export async function trainingPage(el: HTMLElement) {
   renderAll();
 
   // ---- 3D ----
-  const { createTrainingGround } = await import('../viewer/trainingGround.ts');
+  // Let the page paint first; the 3D pitch arrives a frame later, and is reused between visits.
+  await afterPaint();
   if (disposed) return;
-  tg = createTrainingGround($('#tg'));
+  if (parked) {
+    tg = parked;
+    parked = null;
+    tg.attach($('#tg'));
+    tg.reset();
+  } else {
+    const { createTrainingGround } = await import('../viewer/trainingGround.ts');
+    if (disposed) return;
+    tg = createTrainingGround($('#tg'));
+  }
   const kit = d.club?.colors ?? { primary: '#1d2329', secondary: '#c6ff3d' };
   tg.setPlayer(d.player.appearance, d.player.equipped ?? {}, kit, pos === 'GK');
   tg.setDrill(drillFor(focus, pos));
@@ -440,7 +452,7 @@ export async function trainingPage(el: HTMLElement) {
     clearInterval(tick);
     timers.forEach((id) => clearTimeout(id));
     window.removeEventListener('keydown', onKey);
-    tg?.dispose();
+    if (tg) { parked?.dispose(); tg.park(); parked = tg; }
   };
 }
 

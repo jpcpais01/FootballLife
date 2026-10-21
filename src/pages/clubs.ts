@@ -11,7 +11,7 @@ export async function clubsPage(el: HTMLElement) {
   mount(el, html`${skeleton(70, 6)}`);
   let data: any;
   try {
-    data = await api.get('/api/clubs');
+    data = await api.page('/api/clubs');
   } catch (e) {
     return mount(el, errorBox((e as Error).message));
   }
