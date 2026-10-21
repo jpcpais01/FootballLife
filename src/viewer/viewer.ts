@@ -75,7 +75,7 @@ export class MatchViewer {
   private teams: [ViewerTeam, ViewerTeam];
   private resizeObs: ResizeObserver;
   private camTarget = new THREE.Vector3();
-  private camPos = new THREE.Vector3(0, 40, 70);
+  private camPos = new THREE.Vector3(0, 22, 50);
   private lastClock = -1;
   private lastTime = performance.now();
   private elapsed = 0;
@@ -90,6 +90,7 @@ export class MatchViewer {
   constructor(container: HTMLElement, teams: [ViewerTeam, ViewerTeam], halftimeAt: number, opts: ViewerOptions) {
     this.container = container;
     this.teams = teams;
+    this.halftimeAt = halftimeAt;
     this.quality = opts.quality ?? defaultQuality();
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.quality === 'high' ? 2 : 1.25));
@@ -108,16 +109,19 @@ export class MatchViewer {
     this.scene.environment = env;
     this.scene.environmentIntensity = opts.night ? 0.3 : 0.4;
     pmrem.dispose();
-    this.scene.fog = new THREE.Fog(opts.night ? 0x070b16 : 0xb8d4ec, 160, 420);
+    this.scene.fog = new THREE.Fog(opts.night ? 0x070b16 : 0xb8d4ec, 180, 560);
 
     // Key light: the sun by day, the floodlight rig by night.
     this.sun = new THREE.DirectionalLight(opts.night ? 0xeef4ff : 0xffeacc, opts.night ? 2.0 : 2.4);
-    this.sun.position.set(opts.night ? 18 : -45, opts.night ? 90 : 70, opts.night ? 30 : 40);
+    // By day the sun sits low behind the camera-side roof, so its shadow falls
+    // across the near touchline like a real afternoon broadcast.
+    if (opts.night) this.sun.position.set(18, 90, 30).multiplyScalar(1.6);
+    else this.sun.position.set(-40, 55, 60).multiplyScalar(1.6);
     this.sun.castShadow = true;
-    const sz = this.quality === 'high' ? 4096 : 1024;
+    const sz = this.quality === 'high' ? 4096 : 2048;
     this.sun.shadow.mapSize.set(sz, sz);
     const sc = this.sun.shadow.camera;
-    sc.left = -70; sc.right = 70; sc.top = 50; sc.bottom = -50; sc.near = 10; sc.far = 220;
+    sc.left = -95; sc.right = 95; sc.top = 95; sc.bottom = -95; sc.near = 5; sc.far = 340;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.03;
     this.sun.shadow.radius = 3;
@@ -136,7 +140,9 @@ export class MatchViewer {
       away: teams[1].colors,
       homeName: teams[0].name,
       awayName: teams[1].name,
-      crowd: opts.crowd ?? (this.quality === 'high' ? 9000 : 3500),
+      homeShort: teams[0].short,
+      awayShort: teams[1].short,
+      crowd: opts.crowd ?? (this.quality === 'high' ? 13000 : 5000),
     });
     this.scene.add(this.stadium.group);
 
@@ -205,7 +211,7 @@ export class MatchViewer {
     if (q === this.quality) return;
     this.quality = q;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q === 'high' ? 2 : 1.25));
-    this.sun.shadow.mapSize.set(q === 'high' ? 4096 : 1024, q === 'high' ? 4096 : 1024);
+    this.sun.shadow.mapSize.set(q === 'high' ? 4096 : 2048, q === 'high' ? 4096 : 2048);
     this.sun.shadow.map?.dispose();
     this.sun.shadow.map = null;
     this.composer.dispose();
@@ -232,6 +238,22 @@ export class MatchViewer {
 
   setEvents(events: MatchEvent[]) {
     this.playback.setEvents(events);
+    this.goals = events.filter((e) => e.k === 'goal');
+    this.fullTimeAt = events.find((e) => e.k === 'fulltime')?.t ?? Infinity;
+  }
+
+  private goals: MatchEvent[] = [];
+  private fullTimeAt = Infinity;
+  private halftimeAt: number;
+
+  /** Score and minute for the stadium's big screens. */
+  private updateScoreboard(t: number) {
+    let sc: [number, number] = [0, 0];
+    for (const g of this.goals) if (g.t <= t && g.sc) sc = g.sc;
+    const ht = this.halftimeAt;
+    const min = t < ht ? Math.min(45, Math.floor(t / 60) + 1) : Math.min(90, 45 + Math.floor((t - ht) / 60) + 1);
+    const label = t <= 0 ? 'KICK-OFF' : Math.abs(t - ht) < 1 ? 'HALF-TIME' : t >= this.fullTimeAt ? 'FULL-TIME' : `${min}'`;
+    this.stadium.setScoreboard(sc[0], sc[1], label);
   }
 
   /** Celebration burst + crowd roar. */
@@ -349,6 +371,7 @@ export class MatchViewer {
     this.excitement = Math.max(0, this.excitement - realDt * 0.12);
     if (this.excitement < 0.05) this.stadium.setCheer(-1);
     this.stadium.update(this.elapsed, this.excitement);
+    this.updateScoreboard(t);
     this.updateConfetti(realDt);
     this.composer.render(realDt);
   }
@@ -444,12 +467,13 @@ export class MatchViewer {
       const slow = rate < 4;
       const attacking = Math.abs(bx) > PL / 2 - 26;
       const tight = slow && attacking ? 0.72 : 1;
-      const dist = (aspect < 1 ? 58 : 48) * tight;
-      const height = (aspect < 1 ? 34 : 27) * tight;
+      // Hung under the near roof, low enough that the far stand fills the top of the frame.
+      const dist = 50 * tight;
+      const height = 21.5 * tight;
       const followX = bx * (aspect < 1 ? 0.92 : 0.8);
       pos = new THREE.Vector3(followX, height, by * 0.25 + dist);
-      look = new THREE.Vector3(bx * 0.92, 0, by * 0.55);
-      fov = aspect < 1 ? 46 : 26 + (1.78 - Math.min(1.78, aspect)) * 18;
+      look = new THREE.Vector3(bx * 0.92, 0, by * 0.7 - 3);
+      fov = aspect < 1 ? 46 + (1 - aspect) * 20 : 26 + (1.78 - Math.min(1.78, aspect)) * 18;
       if (slow && attacking) fov *= 0.92;
     }
     const k = Math.min(1, dt * (this.mode === 'tactical' ? 3 : 1.6));
