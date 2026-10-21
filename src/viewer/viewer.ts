@@ -304,7 +304,8 @@ export class MatchViewer {
   }
 
   /** Renders the match at game clock `t` (seconds). `rate` is game s per real s. */
-  render(t: number, rate = 1) {
+  /** `draw` false updates the simulation without drawing, while something covers the pitch. */
+  render(t: number, rate = 1, draw = true) {
     if (this.disposed) return;
     const now = performance.now();
     const realDt = Math.min(0.1, (now - this.lastTime) / 1000);
@@ -396,7 +397,7 @@ export class MatchViewer {
     this.stadium.update(this.elapsed, this.excitement);
     this.updateScoreboard(t);
     this.updateConfetti(realDt);
-    this.composer.render(realDt);
+    if (draw) this.composer.render(realDt);
   }
 
   private accel = Array.from({ length: 22 }, () => new THREE.Vector2());
