@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-21T18:00:00Z',
+    entries: [
+      { title: 'Fullscreen', body: 'The game now goes fullscreen on your first tap. Installed on your home screen, it opens fullscreen straight away.' },
+    ],
+  },
+  {
     hour: '2026-10-21T17:00:00Z',
     entries: [
       { title: 'Server update', body: 'The game server now runs on a newer platform so the site can go live.' },
