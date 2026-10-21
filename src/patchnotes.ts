@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-21T23:30:00Z',
+    entries: [
+      { title: 'Colour themes', body: 'Pick a look from the menu under your avatar. Floodlight is the classic dark-and-lime look. Aero is a glossy tropical lagoon of sky blue and fresh green, with floating bubbles. Ballon d\'Or is black lacquer and warm gold, like an awards night. Your choice is remembered on this device.' },
+    ],
+  },
+  {
     hour: '2026-10-21T23:00:00Z',
     entries: [
       { title: 'Your live rating', body: 'When you play in a match, your own rating now sits at the end of the scorebug and updates live as you pass, tackle, shoot and score. It glows red, amber, green or lime as your game goes, flashes the change each time it moves, and shows a star if you finish as player of the match.' },
