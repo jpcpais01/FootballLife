@@ -5,7 +5,7 @@ import { html, mount, type Raw } from '../dom.ts';
 import { icon } from '../icons.ts';
 import { navigate } from '../router.ts';
 import { refreshMe } from '../state.ts';
-import { countdown, errorBox, kickoffLabel, relTime, skeleton } from '../ui.ts';
+import { countdown, errorBox, kickoffLabel, relTime, skeleton, toast } from '../ui.ts';
 
 export async function homePage(el: HTMLElement) {
   mount(el, html`<div class="dash">${skeleton(180, 4)}</div>`);
@@ -39,6 +39,9 @@ export async function homePage(el: HTMLElement) {
           <div class="h1" style="font-size:38px;margin:8px 0">Find your club</div>
           <p class="muted" style="max-width:460px;margin:0 0 18px">Every career needs a team. Create your own club and invite friends, or join a club that's recruiting. AI players fill any empty spots so you can play right away.</p>
           <div class="row wrap"><a class="btn primary" href="/clubs/new">${icon('plus')} Create a club</a><a class="btn" href="/clubs">Browse clubs</a></div>
+          ${d.invites?.length ? html`<div class="divider"></div><div class="label" style="margin-bottom:6px">Your invites & requests</div><div class="list">${d.invites.map((i: any) => html`<div class="list-item">${badge(i.club, 34)}
+            <div class="grow"><a href="/club/${i.club.id}" style="font-weight:700">${i.club.name}</a><div class="tiny muted">${i.kind === 'invite' ? `Invited by ${i.from ?? 'the club'}` : 'You asked to join'} · ${relTime(i.at)}</div></div>
+            ${i.kind === 'invite' ? html`<button class="btn sm primary" data-respond="${i.id}" data-accept="1">Accept</button><button class="btn sm ghost" data-respond="${i.id}" data-accept="0">Decline</button>` : html`<span class="chip">Pending</span>`}</div>`)}</div>` : ''}
         </div>`;
       }
       if (!m) {
@@ -77,7 +80,7 @@ export async function homePage(el: HTMLElement) {
               <div class="big-ovr">${p.ovr}</div>
               <div style="margin-top:6px">${posChip(p.position)}</div>
             </div>
-            ${avatarSvg(p.appearance, kit, 96, d.club ? p.shirt : undefined)}
+            ${avatarSvg(p.appearance, kit, 96, d.club ? p.shirt : undefined, { eq: p.equipped })}
           </div>
           <div class="pname" style="margin-top:12px">${p.name}</div>
           ${d.club ? html`<a href="/club/${d.club.id}" class="row" style="margin-top:8px;gap:8px">${badge(d.club, 22)}<span style="font-weight:600">${d.club.name}</span><span class="chip">${roleLabel(p.role)}</span></a>` : html`<div class="muted small" style="margin-top:8px">Free agent</div>`}
@@ -120,6 +123,13 @@ export async function homePage(el: HTMLElement) {
       </div>`);
     const tbl = el.querySelector('#tbl') as HTMLElement | null;
     if (tbl) linkRows(tbl, navigate);
+    el.querySelectorAll<HTMLElement>('[data-respond]').forEach((b) => b.addEventListener('click', async () => {
+      try {
+        const r = await api.post(`/api/invites/${b.dataset.respond}/respond`, { accept: b.dataset.accept === '1' });
+        await refreshMe();
+        if (r.clubId) { toast('Welcome to your new club!', 'ok'); navigate(`/club/${r.clubId}`); } else void load();
+      } catch (err) { toast((err as Error).message, 'err'); }
+    }));
     el.querySelector('[data-read]')?.addEventListener('click', async () => {
       await api.post('/api/notifications/read');
       void load();

@@ -1,3 +1,4 @@
+import { achievementToasts } from '../ui.ts';
 import { ATTR_GROUPS, ATTR_LABELS, KEY_ATTRS, xpToNext, type Attr } from '../../shared/attributes.ts';
 import { api } from '../api.ts';
 import { html, mount } from '../dom.ts';
@@ -75,6 +76,7 @@ export async function trainingPage(el: HTMLElement) {
         el.querySelector('#result')!.innerHTML = html`<div class="card fade-in" style="background:rgba(198,255,61,.07);border-color:rgba(198,255,61,.3)">
           <div class="h3 lime">Session complete${r.streak ? ' · regularity bonus' : ''}</div>
           <div class="small" style="margin-top:6px">${ups.length ? html`Level up! ${ups.map((u) => html`<b>${ATTR_LABELS[u.attr]} → ${u.to}</b> `)}` : 'XP banked. Keep it up — the next point is close.'}</div></div>`.html;
+        achievementToasts(r.achievements);
         toast(ups.length ? `Level up: ${ups.map((u) => ATTR_LABELS[u.attr]).join(', ')}` : 'Training complete', 'ok');
       } catch (err) {
         toast((err as Error).message, 'err');

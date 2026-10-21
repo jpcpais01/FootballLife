@@ -21,6 +21,9 @@ export interface PlayerRow {
   coins: number;
   last_train_at: Date | null;
   created_at: Date;
+  equipped: Record<string, string>;
+  motto: string;
+  train_count: number;
 }
 
 export interface ClubRow {

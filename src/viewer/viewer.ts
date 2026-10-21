@@ -1,6 +1,7 @@
 // The 3D match renderer. Owns the three.js scene, post-processing stack and
 // camera director; the page drives it with a clock value each frame.
 import * as THREE from 'three';
+import type { Equipped } from '../../shared/cosmetics.ts';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
@@ -26,7 +27,7 @@ export interface ViewerTeam {
   colors: Kit;
   formation: string;
   tactics: Tactics;
-  players: { name: string; number: number; app: Record<string, number> }[];
+  players: { name: string; number: number; app: Record<string, number>; eq?: Equipped }[];
 }
 
 export interface ViewerOptions {
@@ -145,7 +146,7 @@ export class MatchViewer {
     for (let side = 0; side < 2; side++) {
       for (let k = 0; k < 11; k++) {
         const p = teams[side].players[k];
-        const f = new Figure(kits[side], sanitizeAppearance(p?.app), k === 0, GK_KITS[side]);
+        const f = new Figure(kits[side], sanitizeAppearance(p?.app), k === 0, GK_KITS[side], p?.eq);
         this.figures.push(f);
         this.scene.add(f.root);
       }
@@ -330,6 +331,7 @@ export class MatchViewer {
       f.root.position.set(f.pos.x, 0, f.pos.y);
       f.root.rotation.y = f.heading;
       f.celebrate = fr.celebrating >= 0 && (i < 11) === (fr.celebrating < 11) ? 1 : 0;
+      f.star = fr.celebrating === i;
       // Visual speed: real-time-feel animation even when fast-forwarding.
       f.animate(realDt, Math.min(9, speed), this.elapsed);
       const ringMat = f.ring.material as THREE.MeshBasicMaterial;

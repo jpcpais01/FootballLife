@@ -25,6 +25,13 @@ const P: Record<string, string> = {
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
   notes: '<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7"/>',
   ball: '<circle cx="12" cy="12" r="8.5"/><path d="m12 7.5 3.2 2.3-1.2 3.8h-4l-1.2-3.8zM12 3.5v4M15.2 9.8l4-1.3M14 13.6l2.4 3.4M10 13.6 7.6 17M8.8 9.8l-4-1.3"/>',
+  bag: '<path d="M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+  send: '<path d="M4 12 20 4l-6 16-3-7z"/>',
+  medal: '<circle cx="12" cy="15" r="5"/><path d="M8.5 11 6 3h4l2 5 2-5h4l-2.5 8"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  check: '<path d="m5 12 5 5 9-10"/>',
+  x: '<path d="M6 6l12 12M18 6 6 18"/>',
   whistle: '<path d="M3 11a5 5 0 1 0 10 0l8-3V5l-9 3.2A5 5 0 0 0 3 11z"/>',
 };
 

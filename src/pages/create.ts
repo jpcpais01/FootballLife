@@ -1,4 +1,5 @@
-import { ACCESSORIES, BEARDS, FACES, HAIR_COLORS, HAIR_STYLES, SKIN_TONES, BOOT_COLORS, DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance.ts';
+import { DEFAULT_APPEARANCE, type Appearance } from '../../shared/appearance.ts';
+import { lookClick, lookEditor } from '../lookEditor.ts';
 import { generateAttributes, KEY_ATTRS, ATTR_LABELS, overall, POSITION_NAMES, POSITIONS, STARTING_LEVEL, type Position } from '../../shared/attributes.ts';
 import { api } from '../api.ts';
 import { avatarSvg, brandMark } from '../art.ts';
@@ -24,8 +25,6 @@ export async function createPage(el: HTMLElement) {
   let name = '';
 
   const kit = { primary: '#1a1f24', secondary: '#c6ff3d' };
-  const stepper = (key: keyof Appearance, label: string, opts: string[]) => html`<div class="field"><label>${label}</label>
-    <div class="stepper"><button type="button" data-step="${key}" data-d="-1">‹</button><span id="v-${key}">${opts[a[key]]}</span><button type="button" data-step="${key}" data-d="1">›</button></div></div>`;
 
   mount(el, html`<div style="max-width:1100px;margin:0 auto;padding:28px 16px 60px">
     <div class="row" style="margin-bottom:26px">${brandMark(34)}<span class="wordmark">FOOTBAL<b>LIFE</b></span></div>
@@ -55,15 +54,7 @@ export async function createPage(el: HTMLElement) {
         </div>
         <div class="card stack" style="gap:16px">
           <div class="h2">Look</div>
-          <div class="field"><label>Skin tone</label><div class="swatches">${SKIN_TONES.map((c, i) => html`<button type="button" class="swatch ${i === a.skin ? 'on' : ''}" data-sw="skin" data-i="${i}" style="background:${c}" aria-label="Skin tone ${i + 1}"></button>`)}</div></div>
-          <div class="field"><label>Hair colour</label><div class="swatches">${HAIR_COLORS.map((c, i) => html`<button type="button" class="swatch ${i === a.hairColor ? 'on' : ''}" data-sw="hairColor" data-i="${i}" style="background:${c}" aria-label="Hair colour ${i + 1}"></button>`)}</div></div>
-          <div class="field"><label>Boots</label><div class="swatches">${BOOT_COLORS.map((c, i) => html`<button type="button" class="swatch ${i === a.boots ? 'on' : ''}" data-sw="boots" data-i="${i}" style="background:${c}" aria-label="Boot colour ${i + 1}"></button>`)}</div></div>
-          <div class="grid cols-2">
-            ${stepper('hair', 'Hairstyle', HAIR_STYLES)}
-            ${stepper('beard', 'Facial hair', BEARDS)}
-            ${stepper('face', 'Expression', FACES)}
-            ${stepper('accessory', 'Accessory', ACCESSORIES)}
-          </div>
+          ${lookEditor(a)}
         </div>
         <div class="small" id="err" style="color:var(--red);min-height:18px"></div>
         <button class="btn primary block" id="go" style="height:52px;font-size:16px">Start my career</button>
@@ -71,7 +62,6 @@ export async function createPage(el: HTMLElement) {
     </div>
   </div>`);
 
-  const opts: Record<string, string[]> = { hair: HAIR_STYLES, beard: BEARDS, face: FACES, accessory: ACCESSORIES };
   const update = () => {
     const attrs = generateAttributes(pos, STARTING_LEVEL, 'preview', 0);
     el.querySelector('#ovr')!.textContent = String(overall(attrs, pos));
@@ -80,7 +70,6 @@ export async function createPage(el: HTMLElement) {
     el.querySelector('#pname')!.textContent = name || 'Your name';
     el.querySelector('#pdesc')!.textContent = POSITION_NAMES[pos];
     el.querySelector('#keys')!.innerHTML = html`<div class="label" style="margin-bottom:8px">Key attributes</div><div class="stack" style="gap:8px">${KEY_ATTRS[pos].map((k) => html`<div class="attr key"><span class="n">${ATTR_LABELS[k]}</span><span class="v">~${attrs[k]}</span><div class="bar"><i style="width:${attrs[k]}%"></i></div></div>`)}</div>`.html;
-    for (const k of Object.keys(opts)) el.querySelector(`#v-${k}`)!.textContent = opts[k][a[k as keyof Appearance]];
   };
   update();
 
@@ -98,20 +87,7 @@ export async function createPage(el: HTMLElement) {
       el.querySelectorAll('.pos-card').forEach((b) => b.classList.toggle('on', b === pc));
       update();
     }
-    const sw = t.closest('[data-sw]') as HTMLElement | null;
-    if (sw) {
-      const k = sw.dataset.sw as keyof Appearance;
-      a[k] = Number(sw.dataset.i);
-      sw.parentElement!.querySelectorAll('.swatch').forEach((b) => b.classList.toggle('on', b === sw));
-      update();
-    }
-    const st = t.closest('[data-step]') as HTMLElement | null;
-    if (st) {
-      const k = st.dataset.step as keyof Appearance;
-      const n = opts[k].length;
-      a[k] = (a[k] + Number(st.dataset.d) + n) % n;
-      update();
-    }
+    if (lookClick(el, t, a)) update();
     if (t.closest('#go')) {
       const btn = el.querySelector<HTMLButtonElement>('#go')!;
       btn.disabled = true;

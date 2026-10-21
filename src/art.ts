@@ -2,6 +2,8 @@
 // club and player has a consistent look.
 import { ACCESSORIES, BOOT_COLORS, HAIR_COLORS, SKIN_TONES, type Appearance } from '../shared/appearance.ts';
 import { esc, raw, type Raw } from './dom.ts';
+import { gear, type Equipped } from '../shared/cosmetics.ts';
+import { outfitBody, portraitGear } from './gearArt.ts';
 
 let uid = 0;
 
@@ -75,8 +77,11 @@ function beardPath(b: number): string {
 }
 
 /** Player portrait in club colours. */
-export function avatarSvg(a: Appearance, kit: { primary: string; secondary: string } = { primary: '#2a313a', secondary: '#c6ff3d' }, size = 48, number?: number): Raw {
+export function avatarSvg(a: Appearance, kit: { primary: string; secondary: string } = { primary: '#2a313a', secondary: '#c6ff3d' }, size = 48, number?: number, opts: { eq?: Equipped; offPitch?: boolean } = {}): Raw {
   const id = `av${uid++}`;
+  const g = gear(opts.eq);
+  const outfit = opts.offPitch ? g.outfit : undefined;
+  const pg = portraitGear(g, id);
   const skin = SKIN_TONES[a.skin] ?? SKIN_TONES[1];
   const skinD = shade(skin, 0.82);
   const hair = HAIR_COLORS[a.hairColor] ?? HAIR_COLORS[0];
@@ -92,13 +97,15 @@ export function avatarSvg(a: Appearance, kit: { primary: string; secondary: stri
     <defs>
       <radialGradient id="${id}bg" cx=".5" cy=".3" r=".8"><stop offset="0" stop-color="${shade(kit.primary, 1.15)}"/><stop offset="1" stop-color="${shade(kit.primary, 0.45)}"/></radialGradient>
       <linearGradient id="${id}sk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${skin}"/><stop offset="1" stop-color="${skinD}"/></linearGradient>
+      ${pg.defs}
     </defs>
     <rect width="100" height="100" fill="url(#${id}bg)"/>
+    ${outfit ? `<rect x="43" y="60" width="14" height="14" rx="4" fill="${skinD}"/>${outfitBody(outfit, id + 'o')}` : `
     <path d="M14 104 C16 80 30 72 50 72 C70 72 84 80 86 104 Z" fill="${p}"/>
     <path d="M40 72 L50 84 L60 72" fill="none" stroke="${s}" stroke-width="4" stroke-linejoin="round"/>
     <path d="M14 104 C16 86 22 80 30 77 L28 104 Z M86 104 C84 86 78 80 70 77 L72 104 Z" fill="${s}" opacity=".85"/>
     ${number !== undefined ? `<text x="50" y="99" text-anchor="middle" font-family="Barlow Condensed, sans-serif" font-weight="800" font-size="14" fill="${s}">${number}</text>` : ''}
-    <rect x="43" y="60" width="14" height="14" rx="4" fill="${skinD}"/>
+    <rect x="43" y="60" width="14" height="14" rx="4" fill="${skinD}"/>`}
     ${a.hair === 6 ? `<path d="${hp}" fill="${hair}"/>` : ''}
     <ellipse cx="50" cy="46" rx="17" ry="20" fill="url(#${id}sk)"/>
     <ellipse cx="33" cy="48" rx="3" ry="4.5" fill="${skinD}"/><ellipse cx="67" cy="48" rx="3" ry="4.5" fill="${skinD}"/>
@@ -113,7 +120,8 @@ export function avatarSvg(a: Appearance, kit: { primary: string; secondary: stri
     ${acc === 'Headband' ? `<path d="M33 36 C40 31 60 31 67 36 L67 40 C60 35 40 35 33 40 Z" fill="${s}"/>` : ''}
     ${acc === 'Earring' ? '<circle cx="32.5" cy="53" r="1.8" fill="#ffd54a"/>' : ''}
     ${acc === 'Gold chain' ? '<path d="M38 74 Q50 84 62 74" stroke="#ffd54a" stroke-width="2" fill="none"/>' : ''}
-    ${acc === 'Sweatband' ? `<rect x="15" y="92" width="10" height="6" rx="2" fill="${s}"/>` : ''}
+    ${acc === 'Sweatband' && !g.wrist ? `<rect x="15" y="92" width="10" height="6" rx="2" fill="${s}"/>` : ''}
+    ${pg.over}
   </svg>`);
 }
 
