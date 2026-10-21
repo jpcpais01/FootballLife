@@ -31,7 +31,12 @@ export interface Frame {
   flightF: number;
   /** Where the ball carrier is about to play it. */
   aim: { x: number; y: number } | null;
+  /** The restart being taken (free kick, corner, penalty…) until the ball is struck. */
+  restart: MatchEvent | null;
 }
+
+/** How far the taker backs off the ball before running up to strike it. */
+const RUN_UP: Record<string, number> = { penalty: 3.4, corner: 2.4, goalkick: 3, kickoff: 0.8, throwin: 0 };
 
 const FLIGHT_SPEED: Record<string, number> = { short: 15, long: 21, through: 19, gk: 24, cross: 21, clear: 24, shot: 30, intercept: 17 };
 const TRAVEL = new Set(['pass', 'cross', 'clear', 'shot', 'intercept']);
@@ -119,12 +124,17 @@ export class Playback {
         kickAt = startFly;
         aim = { x: next.x, y: next.y };
         if (t < startFly) {
-          // Ball at the passer's feet: a couple of touches to set it, then the strike.
           const k = (t - prev.t) / Math.max(0.001, startFly - prev.t);
           holdK = k;
-          const d = this.dir(prev.s, t);
-          const settle = Math.sin(Math.min(1, k * 1.4) * Math.PI) * 0.6;
-          ball = { x: prev.x + d * settle, y: prev.y + Math.sin(k * 2.3) * 0.25, z: 0 };
+          if (RESTART.has(prev.k)) {
+            // A dead ball: it sits on the spot (or in the thrower's hands) until it's struck.
+            ball = { x: prev.x, y: prev.y, z: prev.k === 'throwin' ? 2.15 : 0 };
+          } else {
+            // Ball at the passer's feet: a couple of touches to set it, then the strike.
+            const d = this.dir(prev.s, t);
+            const settle = Math.sin(Math.min(1, k * 1.4) * Math.PI) * 0.6;
+            ball = { x: prev.x + d * settle, y: prev.y + Math.sin(k * 2.3) * 0.25, z: 0 };
+          }
         } else {
           const f = Math.min(1, (t - startFly) / travel);
           // Passes decelerate as they roll; shots stay fast.
@@ -133,6 +143,7 @@ export class Playback {
           let z: number;
           if (next.k === 'shot') z = (next.z ?? 0.4) * f + Math.sin(f * Math.PI) * Math.min(2, dist / 18);
           else z = apex > 0 ? apex * 4 * ef * (1 - ef) : 0.11;
+          if (prev.k === 'throwin') z += 2.15 * (1 - f) * (1 - f);
           ball = { x: prev.x + (next.x - prev.x) * ef, y: prev.y + (next.y - prev.y) * ef, z };
           holder = -1;
           phase = 'flight';
@@ -140,10 +151,14 @@ export class Playback {
         }
       } else if (RESTART.has(next.k)) {
         // Ball goes dead, then appears at the restart spot.
+        // The ball rolls on a few metres, then is placed for the restart while players take up their positions.
         phase = 'dead';
-        if (s < 0.7) ball = { x: prev.x, y: prev.y, z: 0.11 };
-        else ball = { x: next.x, y: next.y, z: 0.11 };
-        holder = s < 0.7 ? -1 : next.p ?? -1;
+        const roll = Math.min(1, s / 0.3);
+        const ex = prev.x + (prev.x - (this.events[i - 1]?.x ?? prev.x)) * 0.12 * (1 - (1 - roll) * (1 - roll));
+        const ey = prev.y + (prev.y - (this.events[i - 1]?.y ?? prev.y)) * 0.12 * (1 - (1 - roll) * (1 - roll));
+        if (s < 0.45) ball = { x: clampX(ex), y: clampY(ey), z: 0.11 };
+        else ball = { x: next.x, y: next.y, z: next.k === 'throwin' ? 2.15 : 0.11 };
+        holder = s < 0.45 ? -1 : next.p ?? -1;
       } else {
         // Carry, dribble, tackle, foul…: the carrier knocks the ball ahead and runs onto it.
         const dx = next.x - prev.x;
@@ -187,10 +202,23 @@ export class Playback {
         targets.push(abs);
       }
     }
+    // A restart stays "on" from the moment it's awarded until the taker strikes the ball.
+    const restart = prev && RESTART.has(prev.k) && phase !== 'flight' && (t < kickAt || (kickAt === Infinity && t - prev.t < 2.2)) ? prev
+      : next && phase === 'dead' && RESTART.has(next.k) ? next
+      : null;
     // Off-ball movement: runs, support, the back line, pressing, marking and set pieces.
-    direct({ t, ball, holder, poss, phase, prev, next, holdK, slots: this.slots, sentOff, dir: (side) => this.dir(side, t) }, targets);
-    // The ball carrier is on the ball; the receiver runs onto the pass.
-    if (holder >= 0) {
+    direct({ t, ball, holder, poss, phase, prev, next, holdK, restart, slots: this.slots, sentOff, dir: (side) => this.dir(side, t) }, targets);
+    const taking = restart && restart === prev && kickAt !== Infinity ? restart : null;
+    if (taking && holder >= 0 && aim) {
+      // The taker stands off the ball, then runs up and strikes it.
+      const ang = Math.atan2(aim.y - ball.y, aim.x - ball.x);
+      const back = taking.k === 'freekick' ? (taking.o === 'direct' ? 3 : taking.o === 'cross' ? 2.4 : 1) : RUN_UP[taking.k] ?? 1;
+      const runUp = Math.min(1.1, back * 0.3 + 0.2);
+      const side = taking.k === 'penalty' || taking.o === 'direct' ? 0.45 : 0;
+      const off = t < kickAt - runUp ? back : 0.55;
+      const a = ang + side * (off > 0.6 ? 1 : 0);
+      targets[holder] = taking.k === 'throwin' ? { x: ball.x, y: ball.y + Math.sign(ball.y || 1) * 0.35 } : { x: ball.x - Math.cos(a) * off, y: ball.y - Math.sin(a) * off };
+    } else if (holder >= 0) {
       const d = this.dir(holder < 11 ? 0 : 1, t);
       const toward = aim ? Math.atan2(aim.y - ball.y, aim.x - ball.x) : d > 0 ? 0 : Math.PI;
       targets[holder] = { x: ball.x - Math.cos(toward) * 0.6, y: ball.y - Math.sin(toward) * 0.6 };
@@ -210,11 +238,13 @@ export class Playback {
         if (idx === celebrating || k % 3 !== 0) targets[idx] = { x: corner.x - this.dir(side, t) * (d + 1), y: corner.y - Math.sign(corner.y) * (Math.abs(Math.sin(a)) * d + 1) };
       }
     }
-    return { ball, holder, poss, targets, sentOff, score: this.scoreBefore(i), index: i, celebrating, phase, kicker, kickAt, flightF, aim };
+    return { ball, holder, poss, targets, sentOff, score: this.scoreBefore(i), index: i, celebrating, phase, kicker, kickAt, flightF, aim, restart };
   }
 }
 
 const frac = (x: number) => x - Math.floor(x);
+const clampX = (x: number) => Math.max(-54.5, Math.min(54.5, x));
+const clampY = (y: number) => Math.max(-35.5, Math.min(35.5, y));
 
 function holderAfter(e: MatchEvent): number {
   switch (e.k) {

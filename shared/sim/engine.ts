@@ -13,7 +13,7 @@ import type { EventKind, MatchEvent, MatchResult, PlayerLine, SimTeam, TeamStats
  * marker) is resolved from the attributes involved, adjusted by role fit,
  * fatigue and tactics. The same inputs and seed always produce the same match.
  */
-export const ENGINE_VERSION = 1;
+export const ENGINE_VERSION = 2;
 const HALF = 2700;
 
 type Side = 0 | 1;
@@ -401,10 +401,12 @@ class Engine {
 
     // Failed pass.
     this.advance(dt * 0.8);
-    const outWide = Math.abs(target.v) > 0.82 && this.rng.chance(0.45);
+    // Balls played down the flanks often run out for a throw-in.
+    const cvT = Math.abs(target.v);
+    const outWide = this.rng.chance(cvT > 0.62 ? 0.24 + (cvT - 0.62) * 1.1 : long ? 0.06 : 0.02);
     const outLong = (long || through) && target.u > 0.9 && this.rng.chance(0.4);
     if (outWide) {
-      const at = { u: target.u, v: Math.sign(target.v) * 1 };
+      const at = { u: clamp(target.u, 0.03, 0.97), v: Math.sign(target.v || (this.rng.chance(0.5) ? 1 : -1)) * 1 };
       this.emit(kind, side, at, side, { p: h, q: to, z, o: o + '-out' });
       this.restartThrow(at);
       return;
@@ -422,10 +424,10 @@ class Engine {
     this.turnover(def.idx, at);
   }
 
-  private restartThrow(at: Pt) {
-    // Ball went out off the attacking side → throw to the other team. `at` in current poss frame.
-    const side = (1 - this.poss) as Side;
-    const inFrame = flip(at);
+  private restartThrow(at: Pt, toSide: Side = (1 - this.poss) as Side) {
+    // Ball went out of play over the touchline: a throw-in to `toSide`. `at` in current poss frame.
+    const side = toSide;
+    const inFrame = side === this.poss ? at : flip(at);
     const roles = inFrame.u < 0.4 ? ['FB', 'CB'] : ['FB', 'WG', 'CM'];
     const taker = this.pickByRole(side, roles, (i) => -Math.abs(this.slots[side][this.local(i)].y * Math.sign(inFrame.v) - 1) * 20);
     this.advance(this.rng.range(8, 15));
@@ -476,6 +478,11 @@ class Engine {
     this.lines[defender].tackles++;
     void opps;
     this.emit('tackle', (1 - side) as Side, this.ball, side, { p: defender, q: h });
+    if (Math.abs(this.ball.v) > 0.6 && this.rng.chance(0.4)) {
+      // Poked out off the attacker: their throw.
+      this.restartThrow({ u: this.ball.u, v: this.ball.v >= 0 ? 1 : -1 }, side);
+      return;
+    }
     this.turnover(defender, this.ball);
   }
 
@@ -556,7 +563,8 @@ class Engine {
     this.holder = taker;
     this.ball = { u: 1 - 11 / 105, v: 0 };
     this.emit('penalty', side, this.ball, side, { p: taker, hl: 1 });
-    this.advance(30);
+    // Ball on the spot, players out of the box, keeper on the line: then the kick.
+    this.advance(12);
     this.shoot(this.positions().opps, false, 'penalty');
   }
 
@@ -584,6 +592,10 @@ class Engine {
       }
       const clearer = this.nearest(opps, target).idx;
       this.emit('cross', side, target, side, { p: h, z, o: 'cleared' });
+      if (this.rng.chance(0.12)) {
+        this.corner();
+        return;
+      }
       this.clearance(clearer, target);
       return;
     }
@@ -611,6 +623,10 @@ class Engine {
       return;
     }
     this.emit('cross', side, target, side, { p: h, q: marker, z, o: 'cleared' });
+    if (this.rng.chance(0.14)) {
+      this.corner();
+      return;
+    }
     this.clearance(marker, target);
   }
 
@@ -619,6 +635,13 @@ class Engine {
     const side = this.poss;
     const dSide = (1 - side) as Side;
     this.advance(this.rng.range(1.5, 3));
+    // Hacked into the stands: a throw-in to the attacking side.
+    if (this.rng.chance(0.2)) {
+      const out: Pt = { u: this.rng.range(0.5, 0.85), v: (at.v >= 0 ? 1 : -1) * (this.rng.chance(0.75) ? 1 : -1) };
+      this.emit('clear', dSide, out, side, { p: clearer, z: r1(this.rng.range(6, 14)) });
+      this.restartThrow(out, side);
+      return;
+    }
     const land: Pt = { u: this.rng.range(0.35, 0.62), v: clamp(at.v * 0.5 + this.rng.range(-0.6, 0.6), -0.9, 0.9) }; // attacking frame
     this.emit('clear', dSide, land, side, { p: clearer, z: r1(this.rng.range(5, 12)) });
     // Second ball.

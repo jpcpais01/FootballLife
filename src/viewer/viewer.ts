@@ -305,14 +305,15 @@ export class MatchViewer {
 
   /** Renders the match at game clock `t` (seconds). `rate` is game s per real s. */
   /** `draw` false updates the simulation without drawing, while something covers the pitch. */
-  render(t: number, rate = 1, draw = true) {
+  /** `snap` puts every player straight onto their spot (while a transition hides the pitch). */
+  render(t: number, rate = 1, draw = true, snap = false) {
     if (this.disposed) return;
     const now = performance.now();
     const realDt = Math.min(0.1, (now - this.lastTime) / 1000);
     this.lastTime = now;
     this.elapsed += realDt;
     let gameDt = this.lastClock < 0 ? 0 : t - this.lastClock;
-    const jumped = gameDt < -0.5 || gameDt > 30 || this.first;
+    const jumped = gameDt < -0.5 || gameDt > 30 || this.first || snap;
     this.first = false;
     if (gameDt < 0 || gameDt > 30) gameDt = 0;
     this.lastClock = t;
@@ -446,6 +447,14 @@ export class MatchViewer {
         }
         f.vel.x += ax;
         f.vel.y += ay;
+        // When fast-forward hands back to normal speed, shed the time-lapse velocity at once
+        // instead of letting players skate across the pitch for seconds.
+        const vl = Math.hypot(f.vel.x, f.vel.y);
+        const vmax = 9.6 * B;
+        if (vl > vmax) {
+          f.vel.x *= vmax / vl;
+          f.vel.y *= vmax / vl;
+        }
         this.accel[i].set(ax / h / (B * B), ay / h / (B * B));
       }
       // Personal space: overlapping players ease apart (the ball carrier holds his line).
@@ -566,8 +575,16 @@ export class MatchViewer {
   }
 
   private updateCamera(fr: ReturnType<Playback['frame']>, dt: number, rate: number) {
-    const bx = fr.ball.x;
-    const by = fr.ball.y;
+    let bx = fr.ball.x;
+    let by = fr.ball.y;
+    // Dangerous set pieces: frame the ball and the goal together.
+    const sp = fr.restart;
+    if (sp && (sp.k === 'penalty' || sp.k === 'corner' || (sp.k === 'freekick' && (sp.o === 'direct' || sp.o === 'cross')))) {
+      const gx = this.playback.dir(sp.s, this.lastClock) * PL / 2;
+      const k = sp.k === 'corner' ? 0.3 : 0.42;
+      bx += (gx - bx) * k;
+      by += (0 - by) * k * 0.6;
+    }
     if (this.mode === 'orbit' && this.controls) {
       this.controls.target.lerp(new THREE.Vector3(bx, 0, by), Math.min(1, dt * 2));
       this.controls.update();
@@ -601,7 +618,7 @@ export class MatchViewer {
       const height = 21.5 * tight;
       const followX = bx * (aspect < 1 ? 0.92 : 0.8);
       pos = new THREE.Vector3(followX, height, by * 0.25 + dist);
-      look = new THREE.Vector3(bx * 0.92, 0, by * 0.7 - 3);
+      look = new THREE.Vector3(bx * 0.92, 0, by * 0.82 - 2);
       fov = aspect < 1 ? 46 + (1 - aspect) * 20 : 26 + (1.78 - Math.min(1.78, aspect)) * 18;
       if (slow && attacking) fov *= 0.92;
     }

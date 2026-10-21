@@ -93,6 +93,9 @@ function playerDto(p: PlayerRow, full = true) {
   };
 }
 
+/** Real seconds of look-ahead in live event feeds. */
+const REVEAL_AHEAD = 6;
+
 function matchStatus(m: { status: string; kickoff_at: Date; ends_at: Date | null }, now = Date.now()) {
   if (m.status === 'scheduled') return new Date(m.kickoff_at).getTime() <= now ? 'live' : 'scheduled';
   if (m.status === 'final') return 'finished';
@@ -570,11 +573,13 @@ route('GET', '/api/matches/:id', async (c) => {
   const kickoff = new Date(m.kickoff_at).getTime();
   const elapsed = (now - kickoff) / 1000;
   const finished = dto.status === 'finished';
-  // Only events that have "happened" in real time are sent while live.
+  // While live, events are sent a few seconds before they are shown, so viewers
+  // always know where the ball goes next and playback never stalls waiting for a poll.
+  // (The client plays behind the server clock and only shows events up to its own clock.)
   let revealed = res.events.length;
   if (!finished) {
     revealed = 0;
-    while (revealed < res.events.length && realAt(res.events[revealed].t, res.timeline) <= elapsed) revealed++;
+    while (revealed < res.events.length && realAt(res.events[revealed].t, res.timeline) <= elapsed + REVEAL_AHEAD) revealed++;
   }
   const since = Math.max(0, Math.min(revealed, Number(c.query.get('since')) || 0));
   return {

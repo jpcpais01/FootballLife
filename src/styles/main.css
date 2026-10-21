@@ -970,3 +970,18 @@ a.bk-tie:hover { border-color: var(--line-2); }
   .ffb-pitch { justify-content: center; }
   .ffb-pitch svg { flex: 0 1 auto; }
 }
+
+/* Short skips: a broadcast wipe hides the time-lapse. */
+.ffw { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; container-type: inline-size; }
+.ffw-band { position: absolute; top: -20%; bottom: -20%; left: -30%; width: 160%; transform: translateX(-110%) skewX(-14deg);
+  background: radial-gradient(60% 80% at 50% 50%, rgba(198,255,61,0.08), transparent 70%), linear-gradient(100deg, #0a0d11 0%, #121820 55%, #0a0d11 100%); }
+.ffw-band::before, .ffw-band::after { content: ''; position: absolute; top: 0; bottom: 0; width: 8px; background: var(--lime); box-shadow: 0 0 28px var(--lime); }
+.ffw-band::before { left: 0; }
+.ffw-band::after { right: 0; }
+.ffw.on .ffw-band { transform: translateX(0) skewX(-14deg); transition: transform .3s cubic-bezier(.7,0,.3,1); }
+.ffw.out .ffw-band { transform: translateX(110%) skewX(-14deg); transition: transform .32s cubic-bezier(.7,0,.3,1); }
+.ffw-txt { position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%) scale(.92); display: flex; align-items: center; gap: 10px; opacity: 0;
+  font-family: var(--display); font-weight: 800; font-style: italic; font-size: 40px; letter-spacing: .5px; color: var(--text); transition: opacity .12s, transform .3s var(--spring); }
+.ffw-txt i { color: var(--lime); display: grid; animation: ffbChev .9s ease-in-out infinite; }
+.ffw.on .ffw-txt { opacity: 1; transform: translate(-50%, -50%); transition-delay: .16s; }
+@container (max-width: 620px) { .ffw-txt { font-size: 24px; } }

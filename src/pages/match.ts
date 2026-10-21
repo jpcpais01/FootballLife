@@ -168,6 +168,13 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
     lines: () => lines,
   });
   let boardSince = 0;
+  const wipe = document.createElement('div');
+  wipe.className = 'ffw';
+  wipe.setAttribute('aria-hidden', 'true');
+  wipe.innerHTML = html`<div class="ffw-band"></div><div class="ffw-txt"><i>${icon('fast', 18)}</i><span class="ffw-range"></span></div>`.html;
+  stage.appendChild(wipe);
+  let wipeOn = false;
+  let wipeSince = 0;
 
   // ---------- clock ----------
   const liveReal = () => (Date.now() + serverOffset - kickoff) / 1000 - LIVE_DELAY;
@@ -333,14 +340,28 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
     const seg = timeline.find((s) => rNow >= s[2] && rNow < s[3]);
     const lastEvT = events.length ? events[events.length - 1].t : 0;
     const isBreak = !!seg && seg[0] === seg[1];
-    const longSkip = !!seg && !isBreak && rate >= 6 && (seg[3] - seg[2]) / eff >= 2.5 && (seg[3] - rNow) / eff > 0.8 && (finished || t < lastEvT - 1);
+    // Short skips get a broadcast-style wipe instead: the time-lapse is never shown.
+    const fastSeg = !!seg && !isBreak && rate >= 6 && (finished || t < lastEvT - 1) && !(finished && !catchup && !playing);
+    const segReal = seg ? (seg[3] - seg[2]) / eff : 0;
+    const left = seg ? (seg[3] - rNow) / eff : 0;
+    const longSkip = fastSeg && segReal >= 4.5 && left > 0.8;
     const onBoard = !!board && boardPref && !!viewer && (isBreak || longSkip) && !(finished && !catchup && !playing && replayReal >= total);
+    const onWipe = !!viewer && fastSeg && !onBoard && segReal >= 0.9 && left > 0.32;
     if (board) {
       if (onBoard !== board.visible) { board.show(onBoard); boardSince = now; }
       if (onBoard) board.update({ t, from: seg![0], to: seg![1], rate: rate * eff, breakLeft: isBreak ? (seg![3] - rNow) / eff : null, idx: indexAt(t) });
     }
-    // Once the board fully covers the pitch, skip drawing the 3D scene.
-    viewer?.render(t, rate * eff, !(onBoard && now - boardSince > 400));
+    if (onWipe !== wipeOn) {
+      wipeOn = onWipe;
+      wipeSince = now;
+      wipe.classList.toggle('on', onWipe);
+      wipe.classList.toggle('out', !onWipe);
+      if (!onWipe) setTimeout(() => { if (!wipeOn) wipe.classList.remove('out'); }, 360);
+      if (onWipe) wipe.querySelector('.ffw-range')!.textContent = `${minuteLabel(seg![0], halftimeAt)} → ${minuteLabel(seg![1], halftimeAt)}`;
+    }
+    // While the pitch is covered, skip drawing the 3D scene and keep players on their spots.
+    const covered = (onBoard && now - boardSince > 400) || (onWipe && now - wipeSince > 280);
+    viewer?.render(t, rate * eff, !covered, covered);
 
     // HUD.
     const sc = scoreAt(t);
