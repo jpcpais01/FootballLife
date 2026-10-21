@@ -188,7 +188,17 @@ route('GET', '/api/me', async (c) => {
   const p = (await c.db.query<PlayerRow>('SELECT * FROM players WHERE user_id = $1', [c.user.id]))[0];
   const club = p?.club_id ? (await c.db.query<ClubRow>('SELECT * FROM clubs WHERE id = $1', [p.club_id]))[0] : null;
   const unread = p ? +((await c.db.query<{ n: string }>('SELECT count(*) n FROM notifications WHERE player_id = $1 AND NOT read', [p.id]))[0].n) : 0;
-  return { user: c.user, club: club ? clubBrief(club) : null, unread, player: p ? { ...playerDto(p), coins: p.coins } : null, invites: p && !p.club_id ? (await myInvites(c.db, p.id)).filter((i) => i.kind === 'invite').length : 0 };
+  // The club's live or next match, for the menu's match tile.
+  let match: { id: string; live: boolean; kickoffAt: string } | null = null;
+  if (club) {
+    const ms = await c.db.query<{ id: string; status: string; kickoff_at: Date; ends_at: Date | null }>(
+      "SELECT id, status, kickoff_at, ends_at FROM matches WHERE (home_id = $1 OR away_id = $1) AND status <> 'final' ORDER BY kickoff_at LIMIT 3",
+      [club.id],
+    );
+    const m = ms.find((x) => matchStatus(x) !== 'finished');
+    if (m) match = { id: m.id, live: matchStatus(m) === 'live', kickoffAt: new Date(m.kickoff_at).toISOString() };
+  }
+  return { user: c.user, club: club ? clubBrief(club) : null, unread, match, trainReady: p ? trainingInfo(p).ready : false, player: p ? { ...playerDto(p), coins: p.coins } : null, invites: p && !p.club_id ? (await myInvites(c.db, p.id)).filter((i) => i.kind === 'invite').length : 0 };
 });
 
 route('POST', '/api/player', async (c) => {

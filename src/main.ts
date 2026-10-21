@@ -106,6 +106,22 @@ const DOCK = [
   { href: '/me', label: 'Profile', icon: 'user', accent: '#c6ff3d' },
 ];
 
+function dockHtml(path: string) {
+  const items = [...DOCK];
+  // Your live or next match leads the dock.
+  const m = state.match;
+  if (m) items.splice(1, 0, { href: `/match/${m.id}`, label: m.live ? 'Live' : 'Match', icon: 'ball', accent: m.live ? '#ff3d5a' : '#e3e8ee' });
+  return items.map((n, i) => {
+    const badge = n.href === '/club' && state.invites ? html`<b class="nav-dot">${state.invites}</b>`
+      : n.icon === 'ball' && m?.live ? html`<b class="dk-live">LIVE</b>`
+      : n.href === '/training' && state.trainReady ? html`<b class="dk-dot"></b>`
+      : '';
+    const accent = n.href === '/club' && state.club ? state.club.colors.primary : n.accent;
+    const active = n.href.startsWith('/match/') ? path === n.href : isActive(n.href, path);
+    return html`<a href="${navHref(n.href)}" class="dk ${active ? 'active' : ''}" style="--accent:${accent};--i:${i}" aria-label="${n.label}"><i class="dk-face">${icon(n.icon)}${badge}</i><span>${n.label}</span></a>`;
+  });
+}
+
 function navHref(href: string) {
   if (href === '/club') return state.player?.clubId ? `/club/${state.player.clubId}` : '/clubs';
   if (href === '/me') return state.player ? `/player/${state.player.id}` : '/';
@@ -175,8 +191,8 @@ function renderShell(path: string) {
       </div>
       ${menu()}
     </header>
-    <nav class="dock" aria-label="Main menu">${DOCK.map((n, i) => html`<a href="${navHref(n.href)}" class="dk ${isActive(n.href, path) ? 'active' : ''}" style="--accent:${n.href === '/club' && state.club ? state.club.colors.primary : n.accent};--i:${i}"><i class="dk-face">${icon(n.icon)}</i><span>${n.label}</span>${n.href === '/club' && state.invites ? html`<b class="nav-dot">${state.invites}</b>` : ''}</a>`)}</nav>
     <main id="page"></main>
+    <nav class="dock" aria-label="Main menu"><div class="dock-in" id="dock">${dockHtml(path)}</div></nav>
   </div>`);
   dockState(path, true);
   applyTint();
@@ -194,29 +210,32 @@ function updateNav(path: string) {
       if (state.invites) a.insertAdjacentHTML('beforeend', `<i class="nav-dot">${state.invites}</i>`);
     }
   });
-  root.querySelectorAll<HTMLAnchorElement>('.dock a').forEach((a, i) => {
-    const n = DOCK[i];
-    a.href = navHref(n.href);
-    a.classList.toggle('active', isActive(n.href, path));
-    if (n.href === '/club') {
-      a.querySelector('.nav-dot')?.remove();
-      if (state.invites) a.insertAdjacentHTML('beforeend', `<b class="nav-dot">${state.invites}</b>`);
-    }
-  });
+  const dock = document.getElementById('dock');
+  if (dock) dock.innerHTML = dockHtml(path).map((r) => r.html).join('');
   dockState(path);
   closeMenu();
 }
 
-/** The home screen has its own big rail, so the dock hides there; elsewhere it keeps the current page in view. */
+/** Keeps the current page's tile in view, and tucks the dock away while scrolling down a page. */
 function dockState(path: string, first = false) {
-  const app = root.querySelector('.app');
-  app?.classList.toggle('at-home', path === '/');
-  const dock = root.querySelector<HTMLElement>('.dock');
+  root.querySelector('.app')?.classList.toggle('at-home', path === '/');
+  root.querySelector('.dock')?.classList.remove('tucked');
+  const dock = document.getElementById('dock');
   const on = dock?.querySelector<HTMLElement>('.active');
-  if (!dock || !on || path === '/') return;
+  if (!dock || !on) return;
   const x = on.offsetLeft - (dock.clientWidth - on.offsetWidth) / 2;
   dock.scrollTo({ left: Math.max(0, x), behavior: first ? 'auto' : 'smooth' });
 }
+let lastY = 0;
+window.addEventListener('scroll', () => {
+  const y = window.scrollY;
+  const dock = root.querySelector('.dock');
+  if (dock && Math.abs(y - lastY) > 6) {
+    const atEnd = y + innerHeight >= document.documentElement.scrollHeight - 4;
+    dock.classList.toggle('tucked', y > lastY && y > 120 && !atEnd);
+    lastY = y;
+  }
+}, { passive: true });
 
 function closeMenu() {
   const m = document.getElementById('user-menu');
