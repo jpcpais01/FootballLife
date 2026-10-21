@@ -56,7 +56,8 @@ await call('ana', 'POST', `/api/clubs/${created.id}/role`, { playerId: club2.mem
 await call('bo', 'POST', `/api/clubs/${created.id}/lineup`, { formation: '4-4-2', tactics: { mentality: 'attacking' } });
 check('coach changed formation', (await call('bo', 'GET', `/api/clubs/${created.id}`)).club.formation === '4-4-2');
 
-const train = await call('ana', 'POST', '/api/train', { focus: 'finishing' });
+const train = await call('ana', 'POST', '/api/train', { focus: 'finishing', score: 100 });
+check('perfect drill gives the top multiplier', train.perf === 1.3, train.perf);
 check('training grants xp', (train.xp.finishing ?? 0) > 0 || train.levelUps.length > 0, train.xp.finishing);
 check('training cooldown enforced', await call('ana', 'POST', '/api/train', { focus: 'finishing' }).then(() => false, () => true));
 

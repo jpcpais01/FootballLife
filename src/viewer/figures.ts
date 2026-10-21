@@ -68,6 +68,10 @@ export class Figure {
   /** True for the goalscorer, who does their own celebration. */
   star = false;
   private celT = 0;
+  /** One-shot training pose layered over the run cycle; `poseK` is its 0..1 progress. */
+  pose: '' | 'kick' | 'juggle' | 'slide' | 'dive' = '';
+  poseK = 0;
+  poseSide = 1;
 
   constructor(kit: Kit, app: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped) {
     const g = gear(eq);
@@ -254,6 +258,7 @@ export class Figure {
       this.celT = 0;
       // Idle breathing.
       b.rotation.z = Math.sin(time * 1.7 + this.phase) * 0.015;
+      this.applyPose();
       return;
     }
     this.celT += dt;
@@ -312,6 +317,52 @@ export class Figure {
         this.armL.rotation.x = -2.6 + Math.sin(time * 9) * 0.25;
         this.armR.rotation.x = -2.6 + Math.cos(time * 9) * 0.25;
         b.position.y = 0.12 + Math.abs(Math.sin(time * 7 + this.phase)) * 0.25;
+      }
+    }
+  }
+
+  private applyPose() {
+    const k = this.poseK;
+    const b = this.body;
+    switch (this.pose) {
+      case 'kick': {
+        // Wind up, strike through the ball, follow through.
+        const th = k < 0.35 ? 0.9 * (k / 0.35) : k < 0.55 ? 0.9 - 2.3 * ((k - 0.35) / 0.2) : -1.4 * (1 - (k - 0.55) / 0.45);
+        this.legR.rotation.x = th;
+        this.legL.rotation.x = 0.1;
+        this.armL.rotation.z = -0.75;
+        this.armR.rotation.z = 0.5;
+        b.rotation.x = k > 0.35 && k < 0.75 ? -0.12 : 0.04;
+        break;
+      }
+      case 'juggle': {
+        // Foot up as the ball drops to it on each whole beat, alternating feet.
+        const s = Math.pow(Math.max(0, Math.cos(k * Math.PI * 2)), 2);
+        const right = Math.floor(k + 0.5) % 2 === 0;
+        this.legR.rotation.x = right ? -0.85 * s : 0;
+        this.legL.rotation.x = right ? 0 : -0.85 * s;
+        this.armL.rotation.z = -0.45;
+        this.armR.rotation.z = 0.45;
+        break;
+      }
+      case 'slide': {
+        const d = Math.min(1, k * 3) * (k > 0.8 ? (1 - k) / 0.2 : 1);
+        b.position.y = 0.12 - 0.45 * d;
+        b.rotation.x = -0.75 * d;
+        this.legR.rotation.x = -1.45 * d;
+        this.legL.rotation.x = -0.9 * d;
+        this.armL.rotation.set(0.6 * d, 0, -1.2 * d);
+        this.armR.rotation.set(0.6 * d, 0, 1.0 * d);
+        break;
+      }
+      case 'dive': {
+        const d = Math.sin((Math.min(1, k * 1.4) * Math.PI) / 2) * (k > 0.85 ? (1 - k) / 0.15 : 1);
+        const s = this.poseSide;
+        b.rotation.z = -s * 1.35 * d;
+        b.position.set(s * 1.1 * d, 0.12 + 0.45 * Math.sin(Math.min(1, k * 1.6) * Math.PI), 0);
+        this.armL.rotation.set(0, 0, -2.8 * d);
+        this.armR.rotation.set(0, 0, 2.8 * d);
+        break;
       }
     }
   }
