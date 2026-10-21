@@ -53,6 +53,7 @@ export async function playerPage(el: HTMLElement, [id]: string[]) {
           <div class="pname" style="margin-top:12px">${p.name}</div>
           ${g.title ? html`<div class="title-tag" style="--rc:${RARITY_COLORS[g.title.rarity]}">${g.title.name}</div>` : ''}
           <div class="muted small" style="margin-top:2px">${POSITION_NAMES[p.position as keyof typeof POSITION_NAMES]}${p.isBot ? ' · AI player' : ''}${mine ? ' · You' : ''}</div>
+          ${p.transferOpen ? html`<div class="chip lime" style="margin-top:8px">${icon('swap', 12)} Open to offers</div>` : ''}
           ${p.motto ? html`<div class="motto">“${p.motto}”</div>` : ''}
           ${d.club ? html`<a href="/club/${d.club.id}" class="row" style="margin-top:12px;gap:8px">${badge(d.club, 26)}<span style="font-weight:600">${d.club.name}</span>${!p.isBot ? html`<span class="chip">${roleLabel(p.role)}</span>` : ''}</a>` : html`<div class="small muted" style="margin-top:12px">Free agent</div>`}
           <div class="divider"></div>
@@ -62,6 +63,7 @@ export async function playerPage(el: HTMLElement, [id]: string[]) {
           <p class="tiny dim" style="margin:14px 0 0">League career stats${p.isBot ? '' : ` · Joined ${relTime(p.createdAt)}`}${!p.isBot ? ` · ${d.achievements.length}/${ACHIEVEMENTS.length} achievements` : ''}</p>
         </div>
         ${mine ? html`<div class="row"><a class="btn primary grow" href="/shop/locker">${icon('bag', 16)} Customise</a><a class="btn grow" href="/shop/look">Edit look</a></div>` : ''}
+        ${!p.isBot ? html`<div class="row"><a class="btn grow" href="/house/${p.id}">${icon('home', 16)} ${mine ? 'My home' : 'Visit home'}</a>${mine ? html`<a class="btn grow" href="/transfers">${icon('swap', 16)} Transfers</a>` : ''}</div>` : ''}
       </div>
       <div class="card span-7"><div class="card-head"><div class="h2">Attributes</div><span class="tiny muted"><span class="lime">●</span> key for position</span></div>${attrBars(p.attrs, p.position)}</div>
       <div class="card span-12"><div class="card-head"><div class="h2">Trophy cabinet</div><span class="tiny muted">${d.trophies.length} total</span></div>${trophyCabinet()}</div>

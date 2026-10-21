@@ -24,6 +24,9 @@ export interface PlayerRow {
   equipped: Record<string, string>;
   motto: string;
   train_count: number;
+  home: Record<string, unknown>;
+  transfer_status: string;
+  transfer_note: string;
 }
 
 export interface ClubRow {

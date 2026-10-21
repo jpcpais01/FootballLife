@@ -23,6 +23,9 @@ addRoute('/player/:id', () => import('./pages/player.ts').then((m) => m.playerPa
 addRoute('/training', () => import('./pages/training.ts').then((m) => m.trainingPage));
 addRoute('/shop', () => import('./pages/shop.ts').then((m) => m.shopPage));
 addRoute('/shop/:tab', () => import('./pages/shop.ts').then((m) => m.shopPage));
+addRoute('/house', () => import('./pages/house.ts').then((m) => m.housePage));
+addRoute('/house/:id', () => import('./pages/house.ts').then((m) => m.housePage));
+addRoute('/transfers', () => import('./pages/transfers.ts').then((m) => m.transfersPage));
 addRoute('/join/:code', () => import('./pages/join.ts').then((m) => m.joinPage));
 addRoute('/patch-notes', () => import('./pages/patchnotes.ts').then((m) => m.patchNotesPage));
 
@@ -34,6 +37,8 @@ const NAV = [
   { href: '/league', label: 'League', icon: 'trophy' },
   { href: '/training', label: 'Training', icon: 'dumbbell' },
   { href: '/shop', label: 'Shop', icon: 'bag' },
+  { href: '/house', label: 'My home', icon: 'sofa', desktopOnly: true },
+  { href: '/transfers', label: 'Transfers', icon: 'swap', desktopOnly: true },
   { href: '/clubs', label: 'Clubs', icon: 'users', desktopOnly: true },
 ];
 

@@ -4,6 +4,8 @@ import { totalReal } from '../shared/timeline.ts';
 import { getFormation, sanitizeTactics, type Tactics } from '../shared/formations.ts';
 import { hashSeed, Rng } from '../shared/rng.ts';
 import { simulateMatch } from '../shared/sim/engine.ts';
+import { shootout } from '../shared/sim/penalties.ts';
+import { SHIRT_SWAP_CHANCE } from '../shared/life.ts';
 import type { MatchResult, SimTeam } from '../shared/sim/types.ts';
 import type { Db } from './db.ts';
 import { newId } from './http.ts';
@@ -122,7 +124,109 @@ export async function createSeason(db: Db, number: number, clubIds: string[], af
       );
     }
   }
+  await createCup(db, id, clubIds, slots[0]);
   return id;
+}
+
+// ---------- cup ----------
+
+const CUP_HOUR_UTC = 15;
+
+/** Cup ties are on alternate days at 15:00 UTC, between the league kickoffs. */
+function cupSlot(start: Date, stage: number): Date {
+  const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate(), CUP_HOUR_UTC));
+  d.setUTCDate(d.getUTCDate() + 1 + (stage - 1) * 2);
+  return d;
+}
+
+export function cupStageName(stage: number, total: number): string {
+  const fromEnd = total - stage;
+  return fromEnd === 0 ? 'Final' : fromEnd === 1 ? 'Semi-final' : fromEnd === 2 ? 'Quarter-final' : `Round of ${2 ** (fromEnd + 1)}`;
+}
+
+async function createTie(db: Db, seasonId: string, stage: number, total: number, tie: number, home: string, away: string, kickoff: Date) {
+  const id = newId('m_');
+  await db.query(
+    "INSERT INTO matches (id, season_id, kind, round, home_id, away_id, kickoff_at, seed, meta) VALUES ($1, $2, 'cup', $3, $4, $5, $6, $7, $8)",
+    [id, seasonId, stage, home, away, kickoff.toISOString(), hashSeed(`${id}:cup`) & 0x7fffffff, JSON.stringify({ stage, total, tie, name: cupStageName(stage, total) })],
+  );
+}
+
+/** Knockout cup for every club in the season. Clubs beyond a power of two play a preliminary round. */
+export async function createCup(db: Db, seasonId: string, clubIds: string[], start: Date) {
+  const rng = new Rng(hashSeed(`cup:${seasonId}`));
+  const ids = [...clubIds];
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = Math.floor(rng.next() * (i + 1));
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+  }
+  let size = 1;
+  while (size < ids.length) size *= 2;
+  if (ids.length < 2) return;
+  const total = Math.log2(size);
+  const ties = ids.length - size / 2;
+  const byes = ids.slice(ties * 2);
+  await db.query('INSERT INTO meta (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING', [`cup-byes:${seasonId}`, JSON.stringify({ byes, start: start.toISOString() })]);
+  const kickoff = new Date(Math.max(cupSlot(start, 1).getTime(), Date.now() + 15 * 60_000));
+  for (let t = 0; t < ties; t++) await createTie(db, seasonId, 1, total, t, ids[t * 2], ids[t * 2 + 1], kickoff);
+}
+
+/** Seasons created before the cup existed get one starting tomorrow. */
+async function ensureCup(db: Db) {
+  const season = await currentSeason(db);
+  if (!season) return;
+  const has = await db.query("SELECT 1 FROM matches WHERE season_id = $1 AND kind = 'cup' LIMIT 1", [season.id]);
+  if (has.length || !(await claim(db, `cup-create:${season.id}`))) return;
+  const clubs = await db.query<{ club_id: string }>('SELECT club_id FROM season_clubs WHERE season_id = $1', [season.id]);
+  await createCup(db, season.id, clubs.map((c) => c.club_id), new Date());
+}
+
+interface CupRow { id: string; round: number; home_id: string; away_id: string; home_goals: number; away_goals: number; pens: [number, number] | null; status: string; meta: { stage: number; total: number; tie: number } }
+
+const tieWinner = (m: CupRow) =>
+  m.home_goals > m.away_goals ? m.home_id : m.away_goals > m.home_goals ? m.away_id : (m.pens?.[0] ?? 0) > (m.pens?.[1] ?? 0) ? m.home_id : m.away_id;
+
+async function advanceCup(db: Db, seasonId: string) {
+  const ms = await db.query<CupRow>("SELECT id, round, home_id, away_id, home_goals, away_goals, pens, status, meta FROM matches WHERE season_id = $1 AND kind = 'cup'", [seasonId]);
+  if (!ms.length) return;
+  const stage = Math.max(...ms.map((m) => m.round));
+  const current = ms.filter((m) => m.round === stage).sort((a, b) => a.meta.tie - b.meta.tie);
+  if (!current.every((m) => m.status === 'final')) return;
+  const total = current[0].meta.total;
+  const winners = current.map(tieWinner);
+  if (stage === total) return cupChampion(db, seasonId, winners[0], current[0]);
+  if (!(await claim(db, `cup-adv:${seasonId}:${stage}`))) return;
+  let field = winners;
+  const metaRow = (await db.query<{ value: { byes: string[]; start: string } }>('SELECT value FROM meta WHERE key = $1', [`cup-byes:${seasonId}`]))[0];
+  if (stage === 1 && metaRow?.value.byes.length) {
+    // Mix the preliminary winners in among the clubs that had a bye.
+    const byes = metaRow.value.byes;
+    field = [];
+    for (let i = 0; i < Math.max(byes.length, winners.length); i++) {
+      if (byes[i]) field.push(byes[i]);
+      if (winners[i]) field.push(winners[i]);
+    }
+  }
+  const start = metaRow ? new Date(metaRow.value.start) : new Date();
+  const kickoff = new Date(Math.max(cupSlot(start, stage + 1).getTime(), Date.now() + 15 * 60_000));
+  for (let t = 0; t * 2 + 1 < field.length; t++) await createTie(db, seasonId, stage + 1, total, t, field[t * 2], field[t * 2 + 1], kickoff);
+}
+
+async function cupChampion(db: Db, seasonId: string, clubId: string, final: CupRow) {
+  if (!(await claim(db, `cup-champ:${seasonId}`))) return;
+  const season = (await db.query<{ number: number }>('SELECT number FROM seasons WHERE id = $1', [seasonId]))[0];
+  const club = await loadClub(db, clubId);
+  await db.query("INSERT INTO trophies (id, season_id, season_number, kind, club_id, player_id) VALUES ($1, $2, $3, 'cup', $4, NULL)", [newId('t_'), seasonId, season.number, clubId]);
+  const humans = await db.query<{ id: string }>('SELECT id FROM players WHERE club_id = $1 AND NOT is_bot', [clubId]);
+  const score = `${final.home_goals}–${final.away_goals}${final.pens ? ` (${final.pens[0]}–${final.pens[1]} pens)` : ''}`;
+  for (const h of humans) {
+    await db.query("INSERT INTO trophies (id, season_id, season_number, kind, club_id, player_id) VALUES ($1, $2, $3, 'cup', $4, $5)", [newId('t_'), seasonId, season.number, clubId, h.id]);
+    await db.query('UPDATE players SET coins = coins + 500 WHERE id = $1', [h.id]);
+    await db.query("INSERT INTO collectibles (id, player_id, kind, label, data) VALUES ($1, $2, 'ball', $3, $4)", [newId('co_'), h.id, `Cup final ball, season ${season.number}`, JSON.stringify({ matchId: final.id, score, season: season.number, club: club.short })]);
+    await notify(db, h.id, 'season', `${club.name} won the FootbalLife Cup! +500 coins and the final's match ball.`, { matchId: final.id });
+    await checkAchievements(db, h.id);
+  }
+  if (humans.length) await clubMessage(db, clubId, `Cup winners! ${club.name} lift the FootbalLife Cup`, { matchId: final.id });
 }
 
 /**
@@ -142,6 +246,12 @@ export async function placeNewClub(db: Db, clubId: string): Promise<'joined' | '
   const botId = bots[0].id;
   await db.query("UPDATE matches SET home_id = $1 WHERE season_id = $2 AND home_id = $3 AND status = 'scheduled'", [clubId, season.id, botId]);
   await db.query("UPDATE matches SET away_id = $1 WHERE season_id = $2 AND away_id = $3 AND status = 'scheduled'", [clubId, season.id, botId]);
+  // A cup bye belongs to the club that took the place too.
+  const byes = (await db.query<{ value: { byes: string[]; start: string } }>('SELECT value FROM meta WHERE key = $1', [`cup-byes:${season.id}`]))[0];
+  if (byes?.value.byes.includes(botId)) {
+    const value = { ...byes.value, byes: byes.value.byes.map((b) => (b === botId ? clubId : b)) };
+    await db.query('UPDATE meta SET value = $2 WHERE key = $1', [`cup-byes:${season.id}`, JSON.stringify(value)]);
+  }
   await db.query('DELETE FROM season_clubs WHERE season_id = $1 AND club_id = $2', [season.id, botId]);
   await db.query('INSERT INTO season_clubs (season_id, club_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [season.id, clubId]);
   await db.query('UPDATE clubs SET active = false WHERE id = $1', [botId]);
@@ -212,7 +322,7 @@ export function buildTeam(club: ClubRow, players: PlayerRow[]): { team: SimTeam;
 interface MatchRow {
   id: string;
   season_id: string | null;
-  kind: 'league' | 'friendly';
+  kind: 'league' | 'friendly' | 'cup';
   round: number | null;
   home_id: string;
   away_id: string;
@@ -237,12 +347,14 @@ async function playMatch(db: Db, m: MatchRow) {
   const [hp, ap] = await Promise.all([clubPlayers(db, home.id), clubPlayers(db, away.id)]);
   const h = buildTeam(home, hp);
   const a = buildTeam(away, ap);
-  const result = simulateMatch(h.team, a.team, m.seed, { homeAdvantage: m.kind === 'friendly' ? 0 : undefined });
+  const result = simulateMatch(h.team, a.team, m.seed, { homeAdvantage: m.kind === 'league' ? undefined : 0 });
+  const pens = m.kind === 'cup' && result.score[0] === result.score[1] ? shootout(h.team, a.team, m.seed) : null;
+  if (pens) result.pens = pens;
   const endsAt = new Date(new Date(m.kickoff_at).getTime() + totalReal(result.timeline) * 1000);
   const r = await db.query(
-    `UPDATE matches SET status = 'played', home_goals = $2, away_goals = $3, ends_at = $4, lineups = $5, result = $6
+    `UPDATE matches SET status = 'played', home_goals = $2, away_goals = $3, ends_at = $4, lineups = $5, result = $6, pens = $7
      WHERE id = $1 AND status = 'scheduled' RETURNING id`,
-    [m.id, result.score[0], result.score[1], endsAt.toISOString(), JSON.stringify([h.snap, a.snap]), JSON.stringify(result)],
+    [m.id, result.score[0], result.score[1], endsAt.toISOString(), JSON.stringify([h.snap, a.snap]), JSON.stringify(result), pens ? JSON.stringify(pens.score) : null],
   );
   return r.length > 0;
 }
@@ -251,13 +363,16 @@ async function finalizeMatch(db: Db, m: MatchRow) {
   const claimed = await db.query("UPDATE matches SET status = 'final' WHERE id = $1 AND status = 'played' RETURNING id", [m.id]);
   if (!claimed.length || !m.result || !m.lineups) return;
   const res = m.result;
-  const official = m.kind === 'league';
+  const official = m.kind !== 'friendly';
+  const cupName = m.kind === 'cup' ? (m as unknown as { meta?: { name?: string } }).meta?.name ?? 'Cup' : '';
+  const rng = new Rng(hashSeed(`swap:${m.id}`));
   const humans: string[] = [];
   for (let side = 0; side < 2; side++) {
     const snap = m.lineups[side];
     const gf = res.score[side];
     const ga = res.score[1 - side];
-    const outcome = gf > ga ? 'win' : gf === ga ? 'draw' : 'loss';
+    const pens = res.pens?.score;
+    const outcome = gf > ga ? 'win' : gf < ga ? 'loss' : pens ? (pens[side] > pens[1 - side] ? 'win' : 'loss') : 'draw';
     for (let i = 0; i < snap.players.length; i++) {
       const sp = snap.players[i];
       const line = res.players[side * 11 + i];
@@ -272,13 +387,14 @@ async function finalizeMatch(db: Db, m: MatchRow) {
       const p = rows[0];
       if (!p) continue;
       const opp = m.lineups[1 - side].name;
-      const score = `${gf}–${ga}`;
+      const score = `${gf}–${ga}${pens ? `, ${pens[side]}–${pens[1 - side]} on pens` : ''}`;
       if (official) {
         const coins = MATCH_COINS[outcome] + line.goals * MATCH_COINS.goal + line.assists * MATCH_COINS.assist;
         const xpRes = matchXp(p.position, p.attrs, p.xp as Partial<Record<Attr, number>>, line.rating, (m.seed + i) >>> 0);
         await db.query('UPDATE players SET coins = coins + $2, attrs = $3, xp = $4 WHERE id = $1', [p.id, coins, JSON.stringify(xpRes.attrs), JSON.stringify(xpRes.xp)]);
         const ups = xpRes.levelUps.length ? ` Level up: ${[...new Set(xpRes.levelUps.map((u) => u.attr))].join(', ')}.` : '';
-        await notify(db, p.id, 'result', `${outcome === 'win' ? 'Win' : outcome === 'draw' ? 'Draw' : 'Defeat'} vs ${opp} (${score}). Rating ${line.rating.toFixed(1)}, +${coins} coins.${ups}`, { matchId: m.id });
+        await collect(db, p.id, m, side, line.goals, rng);
+        await notify(db, p.id, 'result', `${cupName ? `${cupName}: ` : ''}${outcome === 'win' ? 'Win' : outcome === 'draw' ? 'Draw' : 'Defeat'} vs ${opp} (${score}). Rating ${line.rating.toFixed(1)}, +${coins} coins.${ups}`, { matchId: m.id });
       } else {
         await notify(db, p.id, 'result', `Friendly vs ${opp} finished ${score}. Rating ${line.rating.toFixed(1)}.`, { matchId: m.id });
       }
@@ -287,9 +403,29 @@ async function finalizeMatch(db: Db, m: MatchRow) {
   // Full-time line in the chat of any human club that played.
   const [h, a] = m.lineups;
   for (const snap of m.lineups) {
-    if (snap.players.some((p) => !p.bot)) await clubMessage(db, snap.clubId, `Full time${official ? '' : ' (friendly)'}: ${h.short} ${res.score[0]}–${res.score[1]} ${a.short}`, { matchId: m.id });
+    if (snap.players.some((p) => !p.bot)) await clubMessage(db, snap.clubId, `Full time${m.kind === 'friendly' ? ' (friendly)' : cupName ? ` (${cupName})` : ''}: ${h.short} ${res.score[0]}–${res.score[1]} ${a.short}${res.pens ? `, ${res.pens.score[0]}–${res.pens.score[1]} on pens` : ''}`, { matchId: m.id });
   }
   for (const id of humans) await checkAchievements(db, id);
+  if (m.kind === 'cup' && m.season_id) await advanceCup(db, m.season_id);
+}
+
+/** Memorabilia: sometimes you swap shirts with an opponent; hat-tricks earn the match ball. */
+async function collect(db: Db, playerId: string, m: MatchRow, side: number, goals: number, rng: Rng) {
+  const lineups = m.lineups!;
+  const season = m.season_id ? (await db.query<{ number: number }>('SELECT number FROM seasons WHERE id = $1', [m.season_id]))[0]?.number : undefined;
+  if (rng.chance(SHIRT_SWAP_CHANCE)) {
+    const opp = lineups[1 - side];
+    const o = opp.players[Math.floor(rng.next() * opp.players.length)];
+    await db.query("INSERT INTO collectibles (id, player_id, kind, label, data) VALUES ($1, $2, 'shirt', $3, $4)", [
+      newId('co_'), playerId, `${o.name}'s #${o.number} shirt`,
+      JSON.stringify({ primary: opp.colors.primary, secondary: opp.colors.secondary, number: o.number, name: o.name, club: opp.short, season, matchId: m.id }),
+    ]);
+    await notify(db, playerId, 'collect', `You swapped shirts with ${o.name} of ${opp.name}. It's framed in your home.`, { matchId: m.id });
+  }
+  if (goals >= 3) {
+    const score = `${lineups[0].short} ${m.result!.score[0]}–${m.result!.score[1]} ${lineups[1].short}`;
+    await db.query("INSERT INTO collectibles (id, player_id, kind, label, data) VALUES ($1, $2, 'ball', $3, $4)", [newId('co_'), playerId, `Hat-trick ball, ${score}`, JSON.stringify({ matchId: m.id, score, season })]);
+  }
 }
 
 async function maybeRollSeason(db: Db) {
@@ -404,6 +540,7 @@ export async function tick(db: Db, force = false) {
   if (!force && now - lastTick < 4000) return;
   lastTick = now;
   await ensureWorld(db);
+  await ensureCup(db);
   const due = await db.query<MatchRow>("SELECT * FROM matches WHERE status = 'scheduled' AND kickoff_at <= now() ORDER BY kickoff_at LIMIT 12");
   for (const m of due) await playMatch(db, m);
   const done = await db.query<MatchRow>("SELECT * FROM matches WHERE status = 'played' AND ends_at <= now() ORDER BY ends_at LIMIT 20");

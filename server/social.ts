@@ -31,11 +31,47 @@ export async function joinClub(db: Db, p: PlayerRow, club: ClubRow) {
     while (shirts.has(free)) free++;
     await db.query('UPDATE players SET shirt = $2 WHERE id = $1', [botWithShirt.id, free]);
   }
-  await db.query("UPDATE players SET club_id = $2, club_role = 'player', shirt = $3 WHERE id = $1", [p.id, club.id, shirt]);
+  await db.query("UPDATE players SET club_id = $2, club_role = 'player', shirt = $3, transfer_status = '' WHERE id = $1", [p.id, club.id, shirt]);
   // Any other pending invites or requests for this player are settled.
   await db.query("UPDATE club_invites SET status = 'cancelled', resolved_at = now() WHERE player_id = $1 AND status = 'pending'", [p.id]);
   await syncSquad(db, club);
   await clubMessage(db, club.id, `${p.name} joined the club`);
+}
+
+/** Takes a player out of their club, handing over the founder role if needed. Run inside a transaction. */
+export async function leaveClub(db: Db, p: PlayerRow, text = `${p.name} left the club`) {
+  if (!p.club_id) return;
+  const club = (await db.query<ClubRow>('SELECT * FROM clubs WHERE id = $1', [p.club_id]))[0];
+  await db.query("UPDATE players SET club_id = NULL, club_role = 'player', transfer_status = '' WHERE id = $1", [p.id]);
+  if (!club) return;
+  await clubMessage(db, club.id, text);
+  const others = await db.query<PlayerRow>('SELECT * FROM players WHERE club_id = $1 AND NOT is_bot ORDER BY created_at', [club.id]);
+  if (p.club_role === 'founder') {
+    if (others.length) {
+      const heir = others.find((o) => o.club_role === 'president') ?? others[0];
+      await db.query("UPDATE players SET club_role = 'founder' WHERE id = $1", [heir.id]);
+      await db.query('UPDATE clubs SET founder_user_id = $2 WHERE id = $1', [club.id, heir.user_id]);
+    } else {
+      // Nobody left: the club carries on under AI control so the league is unaffected.
+      await db.query('UPDATE clubs SET is_bot = true, founder_user_id = NULL WHERE id = $1', [club.id]);
+      await db.query('UPDATE vacancies SET active = false WHERE club_id = $1', [club.id]);
+    }
+  }
+  await syncSquad(db, (await db.query<ClubRow>('SELECT * FROM clubs WHERE id = $1', [club.id]))[0]);
+}
+
+/**
+ * Moves a player into a club. Free agents just join; players in another club
+ * can only move when they have made themselves open to transfers.
+ */
+export async function moveToClub(db: Db, p: PlayerRow, club: ClubRow) {
+  const fresh = (await db.query<PlayerRow>('SELECT * FROM players WHERE id = $1', [p.id]))[0];
+  if (fresh.club_id === club.id) throw bad(`${fresh.name} is already in ${club.name}`);
+  if (fresh.club_id) {
+    if (fresh.transfer_status !== 'open') throw bad(`${fresh.name} is already in a club`);
+    await leaveClub(db, fresh, `${fresh.name} transferred to ${club.name}`);
+  }
+  await joinClub(db, fresh, club);
 }
 
 /** Players in a club allowed to handle invites and requests. */

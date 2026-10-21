@@ -260,6 +260,38 @@ CREATE TABLE IF NOT EXISTS club_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS club_messages_recent ON club_messages(club_id, created_at DESC);
+ALTER TABLE players ADD COLUMN IF NOT EXISTS home JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE players ADD COLUMN IF NOT EXISTS transfer_status TEXT NOT NULL DEFAULT '';
+ALTER TABLE players ADD COLUMN IF NOT EXISTS transfer_note TEXT NOT NULL DEFAULT '';
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS pens JSONB;
+CREATE TABLE IF NOT EXISTS life_items (
+  player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  item_id TEXT NOT NULL,
+  data JSONB NOT NULL DEFAULT '{}',
+  price INT NOT NULL DEFAULT 0,
+  acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (player_id, item_id)
+);
+CREATE TABLE IF NOT EXISTS collectibles (
+  id TEXT PRIMARY KEY,
+  player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  label TEXT NOT NULL,
+  data JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS collectibles_player ON collectibles(player_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS vacancies (
+  id TEXT PRIMARY KEY,
+  club_id TEXT NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+  position TEXT NOT NULL,
+  min_ovr INT NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT '',
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS vacancies_active ON vacancies(active, created_at DESC);
 `;
 
 async function migrate(db: Db) {

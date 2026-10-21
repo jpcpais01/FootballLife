@@ -7,6 +7,8 @@ const { getDb } = await import('../server/db.ts');
 const { tick } = await import('../server/league.ts');
 
 const server = createServer((req, res) => handleApi(req, res));
+// Long simulated stretches leave sockets idle; keep them open so fetch can reuse them.
+server.keepAliveTimeout = 600_000;
 await new Promise<void>((r) => server.listen(0, r));
 const port = (server.address() as { port: number }).port;
 const jar: Record<string, string> = {};
@@ -146,13 +148,75 @@ await call('ana', 'POST', '/api/clubs/leave');
 const handed = await call('bo', 'GET', `/api/clubs/${created.id}`);
 check('founder role passed on', handed.members.find((m: { name: string }) => m.name === 'Bo Larsen').role === 'founder');
 
-// Play out the whole season to check trophies and the rollover.
-await db.query("UPDATE matches SET kickoff_at = now() - interval '2 hours' WHERE status = 'scheduled' AND kind = 'league'");
-for (let i = 0; i < 12; i++) await tick(db, true);
-await db.query("UPDATE matches SET ends_at = now() - interval '1 second' WHERE status = 'played'");
-for (let i = 0; i < 6; i++) await tick(db, true);
+// ---------- Phase 4: homes, garage, transfers, cup ----------
+await db.query('UPDATE players SET coins = 60000 WHERE id = $1', [anaId]);
+const house0 = await call('bo', 'GET', `/api/house/${anaId}`);
+check('anyone can visit a home', house0.mine === false && house0.home.tier === 'studio' && house0.furniture.includes('sofa-grey'));
+await call('ana', 'POST', '/api/garage/buy', { carId: 'car-hatch', color: '#ff3d5a' });
+check('studio garage holds one car', await call('ana', 'POST', '/api/garage/buy', { carId: 'car-classic', color: '#16181b' }).then(() => false, () => true));
+const coinsBefore = (await call('ana', 'GET', '/api/me')).player.coins;
+const moved = await call('ana', 'POST', '/api/house/buy', { houseId: 'townhouse' });
+check('buying a house moves you in', moved.home.tier === 'townhouse' && moved.coins === coinsBefore - 8000, `${coinsBefore} → ${moved.coins}`);
+check('house + car achievements', moved.achievements.includes('house'));
+await call('ana', 'POST', '/api/garage/buy', { carId: 'car-classic', color: '#16181b' });
+const back = await call('ana', 'POST', '/api/house/buy', { houseId: 'studio' });
+const coinsNow = (await call('ana', 'GET', '/api/me')).player.coins;
+check('moving back to an owned home is free', back.coins === coinsNow && back.home.tier === 'studio');
+await call('ana', 'POST', '/api/house/buy', { houseId: 'townhouse' });
+const sofa = await call('ana', 'POST', '/api/house/furniture', { itemId: 'sofa-lime' });
+check('furniture bought and placed', sofa.home.furniture.sofa === 'sofa-lime');
+check('cannot place unowned furniture', await call('ana', 'POST', '/api/house/arrange', { itemId: 'tv-cinema' }).then(() => false, () => true));
+const arranged = await call('ana', 'POST', '/api/house/arrange', { wall: 3, floor: 2, itemId: 'sofa-grey' });
+check('arrange walls, floor and swap furniture', arranged.home.wall === 3 && arranged.home.floor === 2 && arranged.home.furniture.sofa === 'sofa-grey');
+const rs = await call('ana', 'POST', '/api/garage/respray', { carId: 'car-hatch', color: '#2f6bff' });
+await call('ana', 'POST', '/api/garage/favourite', { carId: 'car-classic' });
+const house1 = await call('ana', 'GET', `/api/house/${anaId}`);
+check('respray costs 300 and sticks', rs.coins === sofa.coins - 300 && house1.cars.find((x: { id: string }) => x.id === 'car-hatch').color === '#2f6bff');
+check('favourite car and garage listed', house1.home.favCar === 'car-classic' && house1.cars.length === 2 && house1.mine);
+
+// Transfers: Ana founds a new club and signs Dan, who is open to offers.
+const owls = await call('ana', 'POST', '/api/clubs', { name: 'Night Owls', short: 'NOW', primary: '#16181b', secondary: '#ffb020', shape: 2, icon: 1, joinMode: 'open' });
+const vac = await call('ana', 'POST', `/api/clubs/${owls.id}/vacancies`, { position: 'CM', minOvr: 40, note: 'Need a midfield engine' });
+await call('ana', 'POST', `/api/clubs/${owls.id}/vacancies`, { position: 'CB' });
+await call('ana', 'POST', `/api/clubs/${owls.id}/vacancies`, { position: 'GK' });
+check('at most 3 open vacancies', await call('ana', 'POST', `/api/clubs/${owls.id}/vacancies`, { position: 'ST' }).then(() => false, () => true));
+await call('ana', 'POST', `/api/vacancies/${vac.id}/close`);
+const danId = (await call('dan', 'GET', '/api/me')).player.id;
+const caraId = (await call('cara', 'GET', '/api/me')).player.id;
+check('players in clubs are off the market by default', await call('ana', 'POST', `/api/clubs/${owls.id}/invite`, { playerId: caraId }).then(() => false, () => true));
+await call('dan', 'POST', '/api/transfers/status', { open: true, note: 'Looking for minutes' });
+const market = await call('ana', 'GET', '/api/transfers');
+check('market lists vacancies and open players', market.vacancies.length === 2 && market.players.some((x: { id: string; club: unknown }) => x.id === danId && x.club) && market.me.canPost);
+await call('ana', 'POST', `/api/clubs/${owls.id}/invite`, { playerId: danId });
+const dInv2 = await call('dan', 'GET', '/api/invites');
+await call('dan', 'POST', `/api/invites/${dInv2.invites[0].id}/respond`, { accept: true });
+const danNow = (await call('dan', 'GET', '/api/me')).player;
+check('transfer moves the player and takes them off the market', danNow.clubId === owls.id && danNow.transferOpen === false);
+const oldChat = await call('bo', 'GET', `/api/clubs/${created.id}/chat`);
+check('old club hears about the transfer', oldChat.messages.some((m: { text: string }) => m.text.includes('transferred to Night Owls')));
+
+// The cup is drawn with the season.
+const cup0 = (await call('bo', 'GET', '/api/league')).cup;
+check('cup drawn with preliminary ties and byes', cup0 && cup0.total === 4 && cup0.ties.length >= 2 && cup0.byes.length === 6, cup0 && `${cup0.ties.length} ties, ${cup0.byes.length} byes`);
+check('league fixtures exclude cup ties', (await call('bo', 'GET', '/api/league')).matches.every((m: { kind: string }) => m.kind === 'league'));
+
+// Play out the whole season (league and cup) to check trophies and the rollover.
+const s1 = (await db.query<{ id: string }>("SELECT id FROM seasons WHERE number = 1"))[0].id;
+for (let k = 0; k < 8 && (await db.query("SELECT 1 FROM seasons WHERE number = 2")).length === 0; k++) {
+  await db.query("UPDATE matches SET kickoff_at = now() - interval '2 hours' WHERE status = 'scheduled' AND kind <> 'friendly'");
+  for (let i = 0; i < 12; i++) await tick(db, true);
+  await db.query("UPDATE matches SET ends_at = now() - interval '1 second' WHERE status = 'played'");
+  for (let i = 0; i < 6; i++) await tick(db, true);
+}
+const cupRows = await db.query<{ round: number; home_goals: number; away_goals: number; pens: [number, number] | null }>("SELECT round, home_goals, away_goals, pens FROM matches WHERE kind = 'cup' AND status = 'final' AND season_id = $1", [s1]);
+check('cup played to a final', cupRows.filter((r) => r.round === 4).length === 1, cupRows.length);
+check('every cup tie has a winner', cupRows.every((r) => r.home_goals !== r.away_goals || (r.pens && r.pens[0] !== r.pens[1])), cupRows.filter((r) => r.pens).length + ' on pens');
+const cupWin = await db.query("SELECT 1 FROM trophies WHERE kind = 'cup' AND player_id IS NULL AND season_id = $1", [s1]);
+check('cup winner gets a trophy', cupWin.length === 1);
+const memo = await db.query<{ n: string }>('SELECT count(*) n FROM collectibles');
+check('memorabilia collected from matches', +memo[0].n > 0, memo[0].n);
 const lg3 = await call('bo', 'GET', '/api/league');
-check('season rolled over with honours', lg3.season.number === 2 && lg3.honours.length === 1 && lg3.honours[0].champion && lg3.honours[0].golden_boot, lg3.honours[0]);
+check('season rolled over with honours', lg3.season.number === 2 && lg3.honours.length === 1 && lg3.honours[0].champion && lg3.honours[0].cup && lg3.honours[0].golden_boot, lg3.honours[0]);
 const tr = await db.query<{ n: string }>("SELECT count(*) n FROM trophies WHERE player_id IS NOT NULL");
 check('player trophies recorded', +tr[0].n >= 3, tr[0].n);
 

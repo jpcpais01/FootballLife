@@ -148,7 +148,7 @@ export function itemArt(it: Item, size = 96): Raw {
     <circle cx="50" cy="52" r="46" fill="url(#${id}g)"/>${body}</svg>`);
 }
 
-const TROPHY_COLORS: Record<string, string> = { champion: '#ffcf3d', runner_up: '#d6dde5', third: '#d08a4e', golden_boot: '#ffcf3d', playmaker: '#3dd6ff', golden_glove: '#ffcf3d', pots: '#c6ff3d' };
+const TROPHY_COLORS: Record<string, string> = { champion: '#ffcf3d', cup: '#e3e8ee', runner_up: '#d6dde5', third: '#d08a4e', golden_boot: '#ffcf3d', playmaker: '#3dd6ff', golden_glove: '#ffcf3d', pots: '#c6ff3d' };
 
 /** Trophy cabinet piece for a season trophy kind. */
 export function trophyArt(kind: string, size = 64): Raw {
