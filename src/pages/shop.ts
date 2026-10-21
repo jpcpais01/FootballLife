@@ -86,7 +86,7 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
       <div class="row" style="gap:8px">
         ${has ? (equipped ? html`<button class="btn" data-unequip="${it.slot}">Unequip</button>` : html`<button class="btn primary" data-equip="${it.id}">Equip</button>`)
           : pr ? html`<button class="btn primary" data-buy="${it.id}" ${pr > d.coins ? 'disabled' : ''}>${icon('coin', 16)} Buy ${pr.toLocaleString()}</button>` : ''}
-        <button class="btn ghost" data-untry aria-label="Stop trying on">✕</button>
+        <button class="btn ghost" data-untry aria-label="Stop trying on">${icon('x', 16)}</button>
       </div>
     </div>`;
   };
@@ -224,7 +224,7 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
     const tb = t.closest('[data-tab]') as HTMLElement | null;
     if (tb) {
       tab = tb.dataset.tab as Tab;
-      history.replaceState(null, '', tab === 'shop' ? '/shop' : `/shop/${tab}`);
+      history.replaceState(history.state, '', tab === 'shop' ? '/shop' : `/shop/${tab}`);
       return render();
     }
     const f = t.closest('[data-filter]') as HTMLElement | null;

@@ -5,6 +5,7 @@ import { DEFAULT_TACTICS, getFormation, type Tactics } from '../shared/formation
 import { simulateMatch } from '../shared/sim/engine.ts';
 import type { SimTeam } from '../shared/sim/types.ts';
 import { shootout } from '../shared/sim/penalties.ts';
+import { liveRating } from '../shared/sim/rating.ts';
 import { drillMultiplier, trainingSession } from '../server/progression.ts';
 
 function team(name: string, level: number, formation = '4-3-3', tactics: Tactics = DEFAULT_TACTICS): SimTeam {
@@ -62,6 +63,22 @@ const r1 = simulateMatch(A, B, 42);
 const r2 = simulateMatch(A, B, 42);
 check('same seed → identical match', JSON.stringify(r1) === JSON.stringify(r2));
 check('different seed → different match', JSON.stringify(r1) !== JSON.stringify(simulateMatch(A, B, 43)));
+
+// Live rating rebuilt from events lands close to the official full-time rating.
+{
+  let n = 0, off = 0, worst = 0;
+  for (let sd = 1; sd <= 40; sd++) {
+    const r = simulateMatch(A, B, 900 + sd);
+    for (const l of r.players) {
+      const role = (l.idx < 11 ? A : B).players[l.idx % 11].role;
+      const d = Math.abs(liveRating(r.events, r.events.length - 1, l.idx, role) - l.rating);
+      n++;
+      off += d;
+      worst = Math.max(worst, d);
+    }
+  }
+  check('live rating matches full-time rating', off / n < 0.05 && worst <= 0.31, { avg: (off / n).toFixed(3), worst: worst.toFixed(1) });
+}
 
 const N = 400;
 const even = series(A, B, N);

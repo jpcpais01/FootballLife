@@ -9,6 +9,9 @@ export const PATCH_NOTES: PatchGroup[] = [
   {
     hour: '2026-10-21T23:00:00Z',
     entries: [
+      { title: 'Your live rating', body: 'When you play in a match, your own rating now sits at the end of the scorebug and updates live as you pass, tackle, shoot and score. It glows red, amber, green or lime as your game goes, flashes the change each time it moves, and shows a star if you finish as player of the match.' },
+      { title: 'More breathing room', body: 'In landscape, pages are a little smaller with more space around them so everything reads at a glance. The game now uses the whole screen, including the status bar area, with an even margin on both sides. Pages you open from another page, such as another club or player, get a small back button in the top bar, and the match screen has one in the corner.' },
+      { title: 'New match icons', body: 'The commentary, the live ticker and the match data screen now use a custom set of match icons (goals, saves, cards, corners, offsides, free kicks and more) instead of emoji, so they look the same on every phone.' },
       { title: 'Made for landscape', body: 'FootbalLife is now built to be played sideways. Your first tap goes fullscreen and turns the screen to landscape, and if you hold your phone upright you get a reminder to turn it (or stay in portrait if you prefer). There is now one menu instead of two: the icon dock, which runs down the left edge in landscape. The home screen is a swipeable spotlight with a card for your match, club, training and more. Matches and training fill the whole screen, with the commentary beside the pitch.' },
       { title: 'Feels like an app', body: 'The inbox bell now opens your notifications on phones too, with links straight to your matches. The page no longer zooms when you pinch or double-tap, scrollbars are gone, the screen does not bounce or pull to refresh, and long-presses no longer select text or pop up menus.' },
     ],

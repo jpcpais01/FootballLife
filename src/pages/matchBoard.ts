@@ -5,6 +5,7 @@ import type { CommentaryLine } from '../../shared/commentary.ts';
 import { minuteLabel } from '../../shared/config.ts';
 import type { MatchEvent } from '../../shared/sim/types.ts';
 import { html } from '../dom.ts';
+import { evIcon } from '../eventIcons.ts';
 import { icon } from '../icons.ts';
 
 interface BoardTeam {
@@ -307,7 +308,7 @@ export function createBoard(stage: HTMLElement, ctx: BoardContext) {
     for (let k = idx; k >= 0 && items.length < 4; k--) {
       const l = ls[k];
       if (!l || !(l.big || ['save', 'chance', 'card', 'post'].includes(l.kind))) continue;
-      items.push(html`<div class="ffb-ev"><span class="m">${minuteLabel(evs[k].t, ctx.halftimeAt)}</span><span>${l.icon}</span><span class="tx">${l.text}</span></div>`.html);
+      items.push(html`<div class="ffb-ev"><span class="m">${minuteLabel(evs[k].t, ctx.halftimeAt)}</span><span>${evIcon(l.icon, 16)}</span><span class="tx">${l.text}</span></div>`.html);
     }
     $('ffb-feed').innerHTML = items.length ? items.join('') : html`<div class="ffb-ev dim"><span class="tx">Quiet spell. Both sides probing.</span></div>`.html;
   };
