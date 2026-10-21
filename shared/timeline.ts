@@ -18,7 +18,7 @@ const MAX_FAST = 70;
 
 function isHighlight(e: MatchEvent): [number, number] | null {
   if (e.k === 'goal') return [e.t - 16, e.t + 9];
-  if (e.k === 'penalty') return [e.t - 6, e.t + 34];
+  if (e.k === 'penalty') return [e.t - 6, e.t + 14];
   if (e.k === 'shot') return [e.t - 12, e.t + 3];
   if (e.k === 'card' && e.o !== 'yellow') return [e.t - 6, e.t + 4];
   if (e.k === 'freekick' && e.o === 'direct') return [e.t - 3, e.t + 4];

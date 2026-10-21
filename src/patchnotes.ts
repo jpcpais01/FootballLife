@@ -9,6 +9,7 @@ export const PATCH_NOTES: PatchGroup[] = [
   {
     hour: '2026-10-21T22:30:00Z',
     entries: [
+      { title: 'Matches, reworked', body: 'Penalties now play out properly: everyone waits outside the box, the keeper sets on the line and the taker steps back and runs up, with no more drifting back into open play first. Free kicks, corners and throw-ins hold their shape until the ball is struck, the wall and markers set up in the box, throw-ins come from the hands, and the camera frames the ball and the goal. Balls now go out for throw-ins and corners as often as in real football. Players no longer skate around after a fast-forward, short skips cut away with a quick broadcast wipe instead of a jittery time-lapse, and live matches load a few seconds ahead so they never stall.' },
       { title: 'A new app icon', body: 'FootbalLife has a new icon: a bold italic FL in lime on black, with speed lines. It shows on your home screen, in the app switcher and in your browser tab. If you installed the game before, the new icon may take a day to appear, or reinstall it to see it straight away.' },
     ],
   },

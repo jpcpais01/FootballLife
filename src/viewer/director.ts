@@ -22,6 +22,8 @@ export interface DirectorInput {
   next: MatchEvent | null;
   /** 0..1 while the holder shapes to pass, null otherwise. */
   holdK: number | null;
+  /** The restart being set up or taken, if any. */
+  restart: MatchEvent | null;
   slots: [Slot[], Slot[]];
   sentOff: boolean[];
   dir: (side: 0 | 1) => 1 | -1;
@@ -51,10 +53,7 @@ export function direct(inp: DirectorInput, targets: V2[]) {
   const ownGoal = (side: 0 | 1) => toAbs({ u: 0, v: 0 }, inp.dir(side));
 
   // ---- Restarts ----
-  const sp =
-    inp.next && inp.phase === 'dead' && RESTARTS.has(inp.next.k) ? inp.next
-    : inp.prev && RESTARTS.has(inp.prev.k) && t - inp.prev.t < 2.2 ? inp.prev
-    : null;
+  const sp = inp.restart && RESTARTS.has(inp.restart.k) ? inp.restart : null;
   if (sp) {
     setPiece(sp);
     return;
@@ -212,14 +211,28 @@ export function direct(inp: DirectorInput, targets: V2[]) {
       return;
     }
     if (e.k === 'penalty') {
-      const arc = [...outfield(S), ...outfield(O)].filter((i) => i !== taker);
-      arc.forEach((i, k) => {
-        const v = -0.5 + (k / Math.max(1, arc.length - 1)) * 1.0;
-        targets[i] = toPitch({ u: 0.79 - Math.abs(v) * 0.04, v }, S);
+      // Everyone else waits outside the box and the D, ready to follow up the rebound;
+      // defenders stand goal-side of their man, and a couple stay back on each side.
+      const edge: Pt[] = [
+        { u: 0.818, v: -0.34 }, { u: 0.818, v: 0.35 }, { u: 0.8, v: -0.5 }, { u: 0.8, v: 0.52 },
+        { u: 0.772, v: -0.13 }, { u: 0.776, v: 0.15 }, { u: 0.79, v: -0.68 }, { u: 0.79, v: 0.7 },
+      ];
+      const atk = outfield(S).filter((i) => i !== taker).sort((a, b) => (BOX_PRIORITY[role(b)] ?? 0) - (BOX_PRIORITY[role(a)] ?? 0));
+      const up = atk.slice(0, 6);
+      up.forEach((i, k) => { targets[i] = toPitch(edge[k], S); });
+      atk.slice(6).forEach((i, k) => { targets[i] = toPitch({ u: 0.52 + (k % 2) * 0.05, v: (k % 2 ? 0.28 : -0.28) * (1 + k * 0.2) }, S); });
+      const def = outfield(O).sort((a, b) => (BOX_PRIORITY[role(a)] ?? 0) - (BOX_PRIORITY[role(b)] ?? 0));
+      const outlet = def.pop();
+      if (outlet !== undefined) targets[outlet] = toPitch({ u: 0.44, v: 0.08 }, S);
+      def.forEach((i, k) => {
+        if (k < up.length) {
+          const a = inFrame(targets[up[k]], S);
+          targets[i] = toPitch({ u: a.u + 0.012, v: a.v - Math.sign(a.v || 1) * 0.035 }, S);
+        } else targets[i] = toPitch(edge[Math.min(edge.length - 1, 6 + (k - up.length))] ?? { u: 0.8, v: 0 }, S);
       });
-      if (taker >= 0) targets[taker] = toPitch({ u: 1 - 11 / 105 - 0.012, v: 0 }, S);
+      if (taker >= 0) targets[taker] = toPitch({ u: 1 - 11 / 105 - 0.03, v: 0 }, S);
       if (gkO >= 0) targets[gkO] = toPitch({ u: 0.004, v: 0 }, O);
-      if (gkS >= 0) targets[gkS] = toPitch({ u: 0.06, v: 0 }, S);
+      if (gkS >= 0) targets[gkS] = toPitch({ u: 0.07, v: 0 }, S);
       return;
     }
     if (e.k === 'freekick' && e.o === 'direct') {
@@ -232,11 +245,26 @@ export function direct(inp: DirectorInput, targets: V2[]) {
         const o = (k - 1.5) * 0.75;
         targets[i] = { x: spot.x + u.x * 9.15 + perp.x * o, y: spot.y + u.y * 9.15 + perp.y * o };
       });
+      const runners: number[] = [];
       for (const i of outfield(S)) {
         if (i === taker) continue;
         const p = inFrame(targets[i], S);
-        if (role(i) !== 'CB' && role(i) !== 'FB') targets[i] = toPitch({ u: Math.max(p.u, 0.84), v: p.v * 0.6 }, S);
+        if (role(i) !== 'CB' && role(i) !== 'FB') {
+          targets[i] = toPitch({ u: Math.max(p.u, 0.86), v: p.v * 0.5 }, S);
+          runners.push(i);
+        }
       }
+      // The rest of the defence drops into the box and picks up the runners.
+      const inWall = new Set(wall);
+      const rest = outfield(O).filter((i) => !inWall.has(i));
+      rest.forEach((i, k) => {
+        const r = runners[k];
+        if (r !== undefined) {
+          const a = targets[r];
+          const uu = unit(a, g);
+          targets[i] = { x: a.x + uu.x * 1.2, y: a.y + uu.y * 1.2 };
+        } else targets[i] = toPitch({ u: 0.1 + (k % 2) * 0.05, v: ((k % 3) - 1) * 0.22 }, O);
+      });
       if (gkO >= 0) targets[gkO] = { x: g.x + inp.dir(O) * 0.8, y: clamp(spot.y * 0.15, -2, 2) };
       return;
     }
