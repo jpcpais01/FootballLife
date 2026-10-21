@@ -112,7 +112,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
 
   const kitBar = (c: { primary: string }) => html`<span class="kit" style="background:${c.primary}"></span>`;
   mount(el, html`
-    <div class="row between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div class="row between match-head" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
       <div class="row" style="gap:10px"><button class="btn sm ghost" onclick="history.back()" aria-label="Back">${icon('back', 16)}</button>
         <div><div class="eyebrow">${m.kind === 'friendly' ? 'Friendly' : m.cup ? `FootbalLife Cup · ${m.cup.name}` : `League · Round ${m.round}`}</div><div class="h3">${m.home.name} vs ${m.away.name}</div></div></div>
       <span class="chip" id="status"></span>

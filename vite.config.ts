@@ -29,7 +29,7 @@ export default defineConfig({
         background_color: '#0a0c0e',
         display: 'fullscreen',
         display_override: ['fullscreen', 'standalone'],
-        orientation: 'any',
+        orientation: 'landscape',
         start_url: '/',
         icons: [
           { src: '/pwa-192.png', sizes: '192x192', type: 'image/png' },

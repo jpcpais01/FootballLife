@@ -7,6 +7,13 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-21T23:00:00Z',
+    entries: [
+      { title: 'Made for landscape', body: 'FootbalLife is now built to be played sideways. Your first tap goes fullscreen and turns the screen to landscape, and if you hold your phone upright you get a reminder to turn it (or stay in portrait if you prefer). There is now one menu instead of two: the icon dock, which runs down the left edge in landscape. The home screen is a swipeable spotlight with a card for your match, club, training and more. Matches and training fill the whole screen, with the commentary beside the pitch.' },
+      { title: 'Feels like an app', body: 'The inbox bell now opens your notifications on phones too, with links straight to your matches. The page no longer zooms when you pinch or double-tap, scrollbars are gone, the screen does not bounce or pull to refresh, and long-presses no longer select text or pop up menus.' },
+    ],
+  },
+  {
     hour: '2026-10-21T22:30:00Z',
     entries: [
       { title: 'Matches, reworked', body: 'Penalties now play out properly: everyone waits outside the box, the keeper sets on the line and the taker steps back and runs up, with no more drifting back into open play first. Free kicks, corners and throw-ins hold their shape until the ball is struck, the wall and markers set up in the box, throw-ins come from the hands, and the camera frames the ball and the goal. Balls now go out for throw-ins and corners as often as in real football. Players no longer skate around after a fast-forward, short skips cut away with a quick broadcast wipe instead of a jittery time-lapse, and live matches load a few seconds ahead so they never stall.' },
