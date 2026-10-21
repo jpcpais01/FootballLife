@@ -9,6 +9,7 @@ export const PATCH_NOTES: PatchGroup[] = [
   {
     hour: '2026-10-21T23:30:00Z',
     entries: [
+      { title: 'Refresh button', body: 'A new refresh button in the top bar reloads the whole game and picks up the latest update straight away, without waiting for the app to update itself in the background.' },
       { title: 'Colour themes', body: 'Pick a look from the menu under your avatar. Floodlight is the classic dark-and-lime look. Aero is a glossy tropical lagoon of sky blue and fresh green, with floating bubbles. Ballon d\'Or is black lacquer and warm gold, like an awards night. Your choice is remembered on this device.' },
     ],
   },
