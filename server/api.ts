@@ -301,6 +301,11 @@ route('GET', '/api/home', async (c) => {
   };
 });
 
+route('GET', '/api/notifications', async (c) => {
+  const p = await myPlayer(c);
+  return { notifications: await notifications(c.db, p.id) };
+});
+
 route('POST', '/api/notifications/read', async (c) => {
   const p = await myPlayer(c);
   await c.db.query('UPDATE notifications SET read = true WHERE player_id = $1', [p.id]);

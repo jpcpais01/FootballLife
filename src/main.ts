@@ -6,7 +6,7 @@ import { html, mount } from './dom.ts';
 import { icon } from './icons.ts';
 import { addRoute, match, navigate, runPage, startRouter } from './router.ts';
 import { refreshMe, state } from './state.ts';
-import { errorBox } from './ui.ts';
+import { errorBox, relTime } from './ui.ts';
 import { fullscreenOnFirstTap } from './fullscreen.ts';
 
 registerSW({ immediate: true });
@@ -154,7 +154,7 @@ function meTop() {
   const p = state.player;
   if (!p) return html``;
   return html`<a href="/shop" class="coin-chip" aria-label="Coins">${icon('coin', 15)}<b>${p.coins.toLocaleString()}</b></a>
-    <a href="/" class="top-icon ${state.unread ? 'has-dot' : ''}" aria-label="Inbox" data-inbox>${icon('bell', 19)}</a>
+    <button class="top-icon ${state.unread ? 'has-dot' : ''}" aria-label="Inbox" data-inbox>${icon('bell', 19)}</button>
     <button class="top-avatar" data-menu aria-label="Menu">${avatarSvg(p.appearance, state.club?.colors, 36, undefined, { eq: p.equipped })}</button>`;
 }
 
@@ -193,13 +193,15 @@ function renderShell(path: string) {
     </header>
     <main id="page"></main>
     <nav class="dock" aria-label="Main menu"><div class="dock-in" id="dock">${dockHtml(path)}</div></nav>
+    <div class="rotate-hint" role="dialog" aria-label="Turn your phone sideways"><div><div class="rh-phone"></div><h2>Turn your phone sideways</h2><p>FootbalLife is made to be played in landscape.</p><button class="btn ghost" data-portrait>Stay in portrait</button></div></div>
   </div>`);
   dockState(path, true);
   applyTint();
+  try { if (sessionStorage.getItem('fl-portrait') === '1') root.querySelector('.app')?.classList.add('portrait-ok'); } catch { /* storage unavailable */ }
   shellMounted = true;
 }
 
-function updateNav(path: string) {
+function updateNav(path: string, close = true) {
   root.querySelectorAll<HTMLAnchorElement>('.topnav-links a').forEach((a, i) => {
     const n = NAV[i];
     if (!n) return;
@@ -213,12 +215,13 @@ function updateNav(path: string) {
   const dock = document.getElementById('dock');
   if (dock) dock.innerHTML = dockHtml(path).map((r) => r.html).join('');
   dockState(path);
-  closeMenu();
+  if (close) closeMenu();
 }
 
 /** Keeps the current page's tile in view. */
 function dockState(path: string, first = false) {
   root.querySelector('.app')?.classList.toggle('at-home', path === '/');
+  root.querySelector('.app')?.classList.toggle('at-match', path.startsWith('/match/'));
   const dock = document.getElementById('dock');
   const on = dock?.querySelector<HTMLElement>('.active');
   if (!dock || !on) return;
@@ -229,14 +232,55 @@ function dockState(path: string, first = false) {
 function closeMenu() {
   const m = document.getElementById('user-menu');
   if (m) m.hidden = true;
+  const b = document.getElementById('inbox');
+  if (b) b.hidden = true;
+}
+
+// The inbox: results, rewards and invites, opened from the bell.
+async function openInbox() {
+  let box = document.getElementById('inbox');
+  if (!box) {
+    root.querySelector('.topnav')?.insertAdjacentHTML('beforeend', '<div class="user-menu inbox" id="inbox" hidden></div>');
+    box = document.getElementById('inbox')!;
+  }
+  if (!box.hidden) { box.hidden = true; return; }
+  closeMenu();
+  box.hidden = false;
+  box.innerHTML = html`<div class="ib-head"><span class="h3">Inbox</span></div><div class="ib-empty">Loading…</div>`.html;
+  try {
+    const r = await api.get('/api/notifications');
+    const list = (r.notifications ?? []) as { kind: string; text: string; data?: { matchId?: string }; read: boolean; at: string }[];
+    const kindIcon = (k: string) => (k === 'result' ? 'ball' : k === 'season' ? 'trophy' : k === 'collect' ? 'shirt' : 'bell');
+    box.innerHTML = html`<div class="ib-head"><span class="h3">Inbox</span>${state.unread ? html`<span class="chip lime">${state.unread} new</span>` : ''}</div>
+      ${list.length ? html`<div class="ib-list">${list.map((n) => html`<${n.data?.matchId ? 'a' : 'div'} class="ib-item ${n.read ? '' : 'new'}" ${n.data?.matchId ? html`href="/match/${n.data.matchId}"` : ''}>
+        <i>${icon(kindIcon(n.kind), 16)}</i><div class="grow"><div class="ib-text">${n.text}</div><div class="tiny dim">${relTime(n.at)}</div></div></${n.data?.matchId ? 'a' : 'div'}>`)}</div>`
+        : html`<div class="ib-empty">Results, rewards and invites land here.</div>`}`.html;
+    if (state.unread) {
+      await api.post('/api/notifications/read').catch(() => {});
+      void refreshMe().catch(() => {});
+    }
+  } catch (e) {
+    box.innerHTML = html`<div class="ib-head"><span class="h3">Inbox</span></div><div class="ib-empty">${(e as Error).message}</div>`.html;
+  }
 }
 
 // Shell-level clicks: the user menu and sign out. Bound once on the root.
 root.addEventListener('click', async (e) => {
   const t = e.target as HTMLElement;
+  if (t.closest('[data-portrait]')) {
+    root.querySelector('.app')?.classList.add('portrait-ok');
+    safeSet('fl-portrait', '1');
+    return;
+  }
+  if (t.closest('[data-inbox]')) {
+    void openInbox();
+    return;
+  }
   if (t.closest('[data-menu]')) {
     const m = document.getElementById('user-menu');
-    if (m) m.hidden = !m.hidden;
+    const open = !!m?.hidden;
+    closeMenu();
+    if (m) m.hidden = !open;
     return;
   }
   if (t.closest('[data-logout]')) {
@@ -248,7 +292,8 @@ root.addEventListener('click', async (e) => {
     navigate('/login', true);
     return;
   }
-  if (!t.closest('#user-menu')) closeMenu();
+  if (!t.closest('#user-menu') && !t.closest('#inbox')) closeMenu();
+  else if (t.closest('#inbox a')) closeMenu();
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
 setInterval(() => {
@@ -313,7 +358,7 @@ document.addEventListener('me-changed', () => {
   const m = document.getElementById('user-menu');
   if (m) m.outerHTML = menu().html;
   applyTint();
-  updateNav(location.pathname);
+  updateNav(location.pathname, false);
 });
 
 function safeSet(k: string, v: string) {
@@ -331,3 +376,9 @@ function safeTake(k: string) {
 
 startRouter(render);
 fullscreenOnFirstTap();
+// No pinch-zoom or ctrl-wheel zoom on the page (the 3D views handle their own gestures),
+// and no browser long-press menu outside text fields.
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1 && !(e.target as HTMLElement).closest?.('canvas')) e.preventDefault(); }, { passive: false });
+document.addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+document.addEventListener('contextmenu', (e) => { if (!(e.target as HTMLElement).closest?.('input, textarea, [contenteditable], .selectable')) e.preventDefault(); });

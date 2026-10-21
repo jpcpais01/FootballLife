@@ -1,6 +1,6 @@
-// Home screen, console style: a rail of tiles across the top, and a big hero
-// that changes as you move along the rail (hover, arrow keys or a tap). Below
-// it, a row of activity cards.
+// Home screen: what's happening, not where to go (the dock is the menu).
+// A swipeable spotlight of big cards (next match, club, training, league…)
+// with dots and arrows, and a row of activity cards below.
 import { HOUSE_BY_ID } from '../../shared/life.ts';
 import { ITEM_BY_ID, RARITY_COLORS } from '../../shared/cosmetics.ts';
 import { api } from '../api.ts';
@@ -32,8 +32,6 @@ export async function homePage(el: HTMLElement) {
   let alive = true;
   let focus = lastFocus;
   let tiles: Tile[] = [];
-  let pointer = 'mouse';
-  let downAt = 0;
 
   const load = async (first = false) => {
     try {
@@ -225,13 +223,9 @@ export async function homePage(el: HTMLElement) {
     return t;
   };
 
-  const tileEl = (t: Tile, i: number): Raw => html`<a class="tile ${t.id === focus ? 'focus' : ''}" href="${t.href}" data-tile="${t.id}" style="--accent:${t.accent};--i:${i}" aria-label="${t.label}">
-      <div class="tile-face">${t.art()}</div><div class="tile-label ellipsis">${t.label}</div></a>`;
-
-  const heroEl = (): Raw => {
-    const t = tiles.find((x) => x.id === focus) ?? tiles[0];
-    return html`<div class="hero-bg" style="--accent:${t.accent}"></div><div class="hero-inner" data-hero="${t.id}">${t.hero()}</div>`;
-  };
+  const card = (t: Tile, i: number): Raw => html`<article class="hero spot-card" data-card="${t.id}" style="--i:${i}" aria-label="${t.label}">
+      <div class="hero-bg" style="--accent:${t.accent}"></div><div class="hero-inner" data-hero="${t.id}">${t.hero()}</div></article>`;
+  const dot = (t: Tile): Raw => html`<button class="spot-dot ${t.id === focus ? 'on' : ''}" data-dot="${t.id}" style="--accent:${t.accent}" aria-label="${t.label}"><i>${t.art()}</i><span>${t.label}</span></button>`;
 
   const activity = (): Raw => {
     const d = data;
@@ -260,59 +254,73 @@ export async function homePage(el: HTMLElement) {
         <div><div class="eyebrow">${greet}</div><div class="home-name">${d.player.name.split(' ')[0]}</div></div>
         ${d.season ? html`<div class="chip">${icon('trophy', 13)} Season ${d.season.number}${d.position ? html` · ${ordinal(d.position)}` : ''}</div>` : ''}
       </div>
-      <div class="rail" id="rail" role="toolbar" aria-label="Main menu">${tiles.map(tileEl)}</div>
-      <section class="hero" id="hero">${heroEl()}</section>
+      <section class="spot" id="spot">
+        <div class="spot-track" id="track">${tiles.map(card)}</div>
+        <button class="spot-arrow prev" data-step="-1" aria-label="Previous">${icon('back', 20)}</button>
+        <button class="spot-arrow next" data-step="1" aria-label="Next">${icon('arrow', 20)}</button>
+      </section>
+      <div class="spot-dots" id="dots">${tiles.map(dot)}</div>
       <div class="act-title"><span class="h2">Your activity</span></div>
       <div class="act-row">${activity()}</div>`);
     bind();
   };
 
   const setFocus = (id: string, scroll = false) => {
-    if (id === focus) return;
     focus = id;
     lastFocus = id;
-    el.querySelectorAll<HTMLElement>('[data-tile]').forEach((t) => t.classList.toggle('focus', t.dataset.tile === id));
-    const hero = el.querySelector('#hero');
-    if (hero) hero.innerHTML = heroEl().html;
-    bindHero();
-    if (scroll) el.querySelector<HTMLElement>(`[data-tile="${id}"]`)?.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
-  };
-
-  const bindHero = () => {
-    const ht = el.querySelector('#htbl') as HTMLElement | null;
-    if (ht) linkRows(ht, navigate);
+    el.querySelectorAll<HTMLElement>('[data-dot]').forEach((d) => d.classList.toggle('on', d.dataset.dot === id));
+    el.querySelector<HTMLElement>(`[data-dot="${id}"]`)?.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+    if (scroll) {
+      const track = el.querySelector<HTMLElement>('#track');
+      const c = el.querySelector<HTMLElement>(`[data-card="${id}"]`);
+      if (track && c) track.scrollTo({ left: c.offsetLeft - track.offsetLeft, behavior: 'smooth' });
+    }
   };
 
   const bind = () => {
     const tbl = el.querySelector('#tbl') as HTMLElement | null;
     if (tbl) linkRows(tbl, navigate);
-    bindHero();
-    const rail = el.querySelector<HTMLElement>('#rail')!;
-    rail.querySelectorAll<HTMLElement>('[data-tile]').forEach((t) => {
-      t.addEventListener('pointerenter', (e) => { if ((e as PointerEvent).pointerType === 'mouse') setFocus(t.dataset.tile!); });
-      // Keyboard focus moves the selection; a tap's focus is handled by the click below.
-      t.addEventListener('focus', () => { if (pointer === 'mouse' || Date.now() - downAt > 600) setFocus(t.dataset.tile!); });
-      t.addEventListener('pointerdown', (e) => { pointer = (e as PointerEvent).pointerType; downAt = Date.now(); });
-      // On touch, the first tap selects a tile (like moving onto it with a controller), the second opens it.
-      t.addEventListener('click', (e) => {
-        if (pointer !== 'mouse' && t.dataset.tile !== focus) {
-          e.preventDefault();
-          e.stopPropagation();
-          setFocus(t.dataset.tile!, true);
-        }
-      }, true);
-    });
-    rail.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    const ht = el.querySelector('#htbl') as HTMLElement | null;
+    if (ht) linkRows(ht, navigate);
+    const track = el.querySelector<HTMLElement>('#track')!;
+    // Open on the card you were last looking at.
+    const start = el.querySelector<HTMLElement>(`[data-card="${focus}"]`);
+    if (start) track.scrollLeft = start.offsetLeft - track.offsetLeft;
+    // The card in view becomes the selection as you swipe.
+    let raf = 0;
+    track.addEventListener('scroll', () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const mid = track.scrollLeft + track.clientWidth / 2;
+        let best = focus;
+        let bd = Infinity;
+        track.querySelectorAll<HTMLElement>('[data-card]').forEach((c) => {
+          const d = Math.abs(c.offsetLeft - track.offsetLeft + c.offsetWidth / 2 - mid);
+          if (d < bd) { bd = d; best = c.dataset.card!; }
+        });
+        if (best !== focus) setFocus(best);
+      });
+    }, { passive: true });
+    el.querySelector('#spot')!.addEventListener('keydown', (e) => {
+      const k = (e as KeyboardEvent).key;
+      if (k !== 'ArrowRight' && k !== 'ArrowLeft') return;
       e.preventDefault();
-      const i = tiles.findIndex((x) => x.id === focus);
-      const next = tiles[Math.max(0, Math.min(tiles.length - 1, i + (e.key === 'ArrowRight' ? 1 : -1)))];
-      el.querySelector<HTMLElement>(`[data-tile="${next.id}"]`)?.focus();
+      step(k === 'ArrowRight' ? 1 : -1);
     });
+  };
+
+  const step = (d: number) => {
+    const i = tiles.findIndex((x) => x.id === focus);
+    const next = tiles[(i + d + tiles.length) % tiles.length];
+    setFocus(next.id, true);
   };
 
   el.addEventListener('click', async (e) => {
     const t = e.target as HTMLElement;
+    const dt = t.closest('[data-dot]') as HTMLElement | null;
+    if (dt) { setFocus(dt.dataset.dot!, true); return; }
+    const st = t.closest('[data-step]') as HTMLElement | null;
+    if (st) { step(Number(st.dataset.step)); return; }
     const b = t.closest('[data-respond]') as HTMLElement | null;
     if (b) {
       try {
