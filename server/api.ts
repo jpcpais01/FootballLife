@@ -186,7 +186,9 @@ route('POST', '/api/auth/logout', async (c) => {
 route('GET', '/api/me', async (c) => {
   if (!c.user) return { user: null };
   const p = (await c.db.query<PlayerRow>('SELECT * FROM players WHERE user_id = $1', [c.user.id]))[0];
-  return { user: c.user, player: p ? { ...playerDto(p), coins: p.coins } : null, invites: p && !p.club_id ? (await myInvites(c.db, p.id)).filter((i) => i.kind === 'invite').length : 0 };
+  const club = p?.club_id ? (await c.db.query<ClubRow>('SELECT * FROM clubs WHERE id = $1', [p.club_id]))[0] : null;
+  const unread = p ? +((await c.db.query<{ n: string }>('SELECT count(*) n FROM notifications WHERE player_id = $1 AND NOT read', [p.id]))[0].n) : 0;
+  return { user: c.user, club: club ? clubBrief(club) : null, unread, player: p ? { ...playerDto(p), coins: p.coins } : null, invites: p && !p.club_id ? (await myInvites(c.db, p.id)).filter((i) => i.kind === 'invite').length : 0 };
 });
 
 route('POST', '/api/player', async (c) => {
@@ -240,6 +242,7 @@ route('GET', '/api/home', async (c) => {
   let recent: ReturnType<typeof matchDto>[] = [];
   let table = null;
   let position = null;
+  let cupTie: ReturnType<typeof matchDto> | null = null;
   if (p.club_id) {
     const cl = await getClub(c.db, p.club_id);
     const players = await clubPlayers(c.db, cl.id);
@@ -248,6 +251,7 @@ route('GET', '/api/home', async (c) => {
     live = ms.find((m) => m.status === 'live') ?? null;
     next = ms.find((m) => m.status === 'scheduled') ?? null;
     recent = ms.filter((m) => m.status === 'finished').slice(-5).reverse();
+    cupTie = ms.filter((m) => m.kind === 'cup').pop() ?? null;
     if (season) {
       table = await standings(c.db, season.id);
       const idx = table.findIndex((r) => r.clubId === cl.id);
@@ -270,6 +274,15 @@ route('GET', '/api/home', async (c) => {
     recent,
     notifications: await notifications(c.db, p.id),
     invites: p.club_id ? [] : await myInvites(c.db, p.id),
+    cupTie,
+    life: {
+      tier: homeOf(p).tier,
+      cars: +((await c.db.query<{ n: string }>("SELECT count(*) n FROM life_items WHERE player_id = $1 AND item_id LIKE 'car-%'", [p.id]))[0].n),
+      memorabilia: +((await c.db.query<{ n: string }>('SELECT count(*) n FROM collectibles WHERE player_id = $1', [p.id]))[0].n),
+      trophies: +((await c.db.query<{ n: string }>('SELECT count(*) n FROM trophies WHERE player_id = $1', [p.id]))[0].n),
+    },
+    shop: { ...featured(shopDay()) },
+    market: { vacancies: +((await c.db.query<{ n: string }>('SELECT count(*) n FROM vacancies v JOIN clubs cl ON cl.id = v.club_id WHERE v.active AND cl.active AND NOT cl.is_bot'))[0].n) },
   };
 });
 

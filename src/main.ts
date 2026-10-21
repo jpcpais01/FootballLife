@@ -52,58 +52,68 @@ function isActive(href: string, path: string) {
   if (href === '/') return path === '/';
   if (href === '/club') return !!mine && path === mine;
   if (href === '/clubs') return path.startsWith('/clubs') || (path.startsWith('/club/') && path !== mine);
+  if (href === '/house') return path === '/house' || path === `/house/${state.player?.id}`;
   return path.startsWith(href);
 }
 
 let shellMounted = false;
+let enterSeq = 0;
 
-function meSide() {
-  const p = state.player;
-  return p ? html`<a href="/player/${p.id}" class="me-chip">${avatarSvg(p.appearance, undefined, 38, undefined, { eq: p.equipped })}<div class="grow"><div class="name ellipsis">${p.name}</div><div class="sub">${p.position} · ${p.ovr} OVR · <span class="lime">${p.coins.toLocaleString()} coins</span></div></div></a>` : html``;
-}
+const clockText = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 function meTop() {
   const p = state.player;
-  return html`${p ? html`<a href="/shop" class="chip lime">${icon('coin', 13)} ${p.coins.toLocaleString()}</a>` : ''}
-    <a href="/patch-notes" class="muted" aria-label="Patch notes">${icon('notes')}</a>
-    ${p ? html`<a href="/player/${p.id}" aria-label="My profile">${avatarSvg(p.appearance, undefined, 34, undefined, { eq: p.equipped })}</a>` : ''}`;
+  if (!p) return html``;
+  return html`<a href="/shop" class="coin-chip" aria-label="Coins">${icon('coin', 15)}<b>${p.coins.toLocaleString()}</b></a>
+    <a href="/" class="top-icon ${state.unread ? 'has-dot' : ''}" aria-label="Inbox" data-inbox>${icon('bell', 19)}</a>
+    <button class="top-avatar" data-menu aria-label="Menu">${avatarSvg(p.appearance, state.club?.colors, 36, undefined, { eq: p.equipped })}</button>`;
+}
+
+function menu() {
+  const p = state.player;
+  return html`<div class="user-menu" id="user-menu" hidden>
+    ${p ? html`<a href="/player/${p.id}" class="um-head">${avatarSvg(p.appearance, state.club?.colors, 44, undefined, { eq: p.equipped })}<div class="grow"><div class="name ellipsis">${p.name}</div><div class="sub">${p.position} · ${p.ovr} OVR${state.club ? ` · ${state.club.short}` : ''}</div></div></a>` : ''}
+    <a href="${p ? `/player/${p.id}` : '/'}">${icon('user', 17)} Profile</a>
+    <a href="/house">${icon('sofa', 17)} My home</a>
+    <a href="/transfers">${icon('swap', 17)} Transfers</a>
+    <a href="/clubs">${icon('users', 17)} Clubs</a>
+    <a href="/patch-notes">${icon('notes', 17)} Patch notes</a>
+    <button data-logout>${icon('logout', 17)} Sign out</button>
+  </div>`;
+}
+
+/** Tints the ambient background with your club colours. */
+function applyTint() {
+  const c = state.club?.colors;
+  document.documentElement.style.setProperty('--tint-a', c?.primary ?? '#3d6bff');
+  document.documentElement.style.setProperty('--tint-b', c?.secondary ?? '#c6ff3d');
 }
 
 function renderShell(path: string) {
-  const links = (cls: string, mobile = false) => NAV.filter((n) => !(mobile && n.desktopOnly)).map((n) => html`<a href="${navHref(n.href)}" class="${cls} ${isActive(n.href, path) ? 'active' : ''}">${icon(n.icon)}<span>${n.label}</span>${n.href === '/clubs' || (mobile && n.href === '/club') ? (state.invites ? html`<i class="nav-dot">${state.invites}</i>` : '') : ''}</a>`);
+  const links = (cls: string, mobile = false) => NAV.filter((n) => !(mobile && n.desktopOnly)).map((n) => html`<a href="${navHref(n.href)}" class="${cls} ${isActive(n.href, path) ? 'active' : ''}" title="${n.label}">${icon(n.icon)}<span>${n.label}</span>${n.href === '/clubs' || (mobile && n.href === '/club') ? (state.invites ? html`<i class="nav-dot">${state.invites}</i>` : '') : ''}</a>`);
   mount(root, html`<div class="app">
-    <aside class="sidebar">
-      <a href="/" class="brand">${brandMark()}<span class="wordmark">FOOTBAL<b>LIFE</b></span></a>
-      ${links('nav-link')}
-      <a href="/patch-notes" class="nav-link ${path === '/patch-notes' ? 'active' : ''}">${icon('notes')}<span>Patch notes</span></a>
-      <div class="spacer"></div>
-      <div id="me-side">${meSide()}</div>
-      <button class="nav-link" style="border:0;background:none;cursor:pointer;width:100%" data-logout>${icon('logout')}<span>Sign out</span></button>
-    </aside>
-    <header class="topbar">
-      <a href="/" class="row">${brandMark(28)}<span class="wordmark">FOOTBAL<b>LIFE</b></span></a>
-      <div class="row" style="gap:14px" id="me-top">${meTop()}</div>
+    <div class="ambient" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i><div class="grain"></div></div>
+    <header class="topnav">
+      <a href="/" class="brand" aria-label="FootbalLife home">${brandMark(30)}<span class="wordmark">FOOTBAL<b>LIFE</b></span></a>
+      <nav class="topnav-links">${links('tn-link')}</nav>
+      <div class="topnav-right" >
+        <div class="row" style="gap:10px" id="me-top">${meTop()}</div>
+        <div class="clock" id="clock">${clockText()}</div>
+      </div>
+      ${menu()}
     </header>
     <main id="page"></main>
     <nav class="tabbar">${links('', true)}</nav>
   </div>`);
-  root.querySelector('[data-logout]')?.addEventListener('click', async () => {
-    await api.post('/api/auth/logout').catch(() => {});
-    state.user = null;
-    state.player = null;
-    navigate('/login', true);
-  });
+  applyTint();
   shellMounted = true;
 }
 
 function updateNav(path: string) {
-  for (const group of [root.querySelectorAll<HTMLAnchorElement>('.sidebar .nav-link[href]'), root.querySelectorAll<HTMLAnchorElement>('.tabbar a')]) {
+  for (const group of [root.querySelectorAll<HTMLAnchorElement>('.topnav-links a'), root.querySelectorAll<HTMLAnchorElement>('.tabbar a')]) {
     group.forEach((a, i) => {
       const n = (a.closest('.tabbar') ? NAV.filter((x) => !x.desktopOnly) : NAV)[i];
-      if (!n) {
-        a.classList.toggle('active', path === a.getAttribute('href'));
-        return;
-      }
+      if (!n) return;
       a.href = navHref(n.href);
       a.classList.toggle('active', isActive(n.href, path));
       if (n.href === (a.closest('.tabbar') ? '/club' : '/clubs')) {
@@ -112,7 +122,38 @@ function updateNav(path: string) {
       }
     });
   }
+  closeMenu();
 }
+
+function closeMenu() {
+  const m = document.getElementById('user-menu');
+  if (m) m.hidden = true;
+}
+
+// Shell-level clicks: the user menu and sign out. Bound once on the root.
+root.addEventListener('click', async (e) => {
+  const t = e.target as HTMLElement;
+  if (t.closest('[data-menu]')) {
+    const m = document.getElementById('user-menu');
+    if (m) m.hidden = !m.hidden;
+    return;
+  }
+  if (t.closest('[data-logout]')) {
+    closeMenu();
+    await api.post('/api/auth/logout').catch(() => {});
+    state.user = null;
+    state.player = null;
+    shellMounted = false;
+    navigate('/login', true);
+    return;
+  }
+  if (!t.closest('#user-menu')) closeMenu();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+setInterval(() => {
+  const c = document.getElementById('clock');
+  if (c) c.textContent = clockText();
+}, 10_000);
 
 async function render(path: string) {
   try {
@@ -142,6 +183,11 @@ async function render(path: string) {
     el = root;
   }
   el.innerHTML = '';
+  el.classList.remove('page-enter');
+  void el.offsetWidth;
+  el.classList.add('page-enter');
+  const enter = ++enterSeq;
+  setTimeout(() => { if (enter === enterSeq) el.classList.remove('page-enter'); }, 900);
   try {
     const page = await m.route.page();
     await runPage(el, page, m.params);
@@ -151,15 +197,15 @@ async function render(path: string) {
   }
 }
 
-// Re-render the shell's player chip when coins/ovr/club change.
-// Refresh the player chip, coins and invite dots in place when the player changes.
+// Refresh the coins, avatar, menu and badges in place when the player changes.
 // (The page element must survive: pages keep listeners on it.)
 document.addEventListener('me-changed', () => {
   if (!shellMounted || !state.player) return;
-  const side = document.getElementById('me-side');
   const top = document.getElementById('me-top');
-  if (side) side.innerHTML = meSide().html;
   if (top) top.innerHTML = meTop().html;
+  const m = document.getElementById('user-menu');
+  if (m) m.outerHTML = menu().html;
+  applyTint();
   updateNav(location.pathname);
 });
 

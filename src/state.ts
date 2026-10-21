@@ -18,8 +18,12 @@ export interface MePlayer {
   motto: string;
 }
 
-export const state: { user: { id: string; username: string } | null; player: MePlayer | null; loaded: boolean; invites: number } = {
+export interface MeClub { id: string; name: string; short: string; colors: { primary: string; secondary: string }; badge: { shape: number; icon: number }; isBot: boolean }
+
+export const state: { user: { id: string; username: string } | null; player: MePlayer | null; club: MeClub | null; loaded: boolean; invites: number; unread: number } = {
   invites: 0,
+  unread: 0,
+  club: null,
   user: null,
   player: null,
   loaded: false,
@@ -30,6 +34,8 @@ export async function refreshMe() {
   state.user = r.user;
   state.player = r.player ?? null;
   state.invites = r.invites ?? 0;
+  state.club = r.club ?? null;
+  state.unread = r.unread ?? 0;
   state.loaded = true;
   document.dispatchEvent(new CustomEvent('me-changed'));
 }

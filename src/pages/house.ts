@@ -39,7 +39,8 @@ export async function housePage(el: HTMLElement, params: string[]) {
     mount(el, errorBox((e as Error).message));
     return;
   }
-  let tab: Tab = d.mine ? 'furnish' : 'collection';
+  const want = new URLSearchParams(location.search).get('tab') as Tab | null;
+  let tab: Tab = want && (d.mine || want === 'garage' || want === 'collection') ? want : d.mine ? 'furnish' : 'collection';
   let slot: FurnitureSlot | 'style' = 'sofa';
   let paint: Record<string, string> = {};
   let scene: HomeScene | null = null;

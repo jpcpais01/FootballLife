@@ -16,7 +16,8 @@ type Tab = 'squad' | 'chat' | 'tactics' | 'fixtures' | 'honours' | 'manage';
 export async function clubPage(el: HTMLElement, [id]: string[]) {
   mount(el, html`${skeleton(120, 3)}`);
   let d: any;
-  let tab: Tab = 'squad';
+  const want = new URLSearchParams(location.search).get('tab') as Tab | null;
+  let tab: Tab = want ?? 'squad';
   // Tactics editor draft.
   let draft: { formation: string; tactics: Tactics; lineup: Record<string, string> } | null = null;
   let selSlot: string | null = null;
