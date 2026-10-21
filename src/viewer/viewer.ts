@@ -152,7 +152,7 @@ export class MatchViewer {
     for (let side = 0; side < 2; side++) {
       for (let k = 0; k < 11; k++) {
         const p = teams[side].players[k];
-        const f = new Figure(kits[side], sanitizeAppearance(p?.app), k === 0, GK_KITS[side], p?.eq);
+        const f = new Figure(kits[side], sanitizeAppearance(p?.app), k === 0, GK_KITS[side], p?.eq, { base: false, number: p?.number });
         this.figures.push(f);
         this.scene.add(f.root);
       }
@@ -329,33 +329,56 @@ export class MatchViewer {
     (this.ballShadow.material as THREE.MeshBasicMaterial).opacity = 0.35 * sh;
     this.updateTrail(fr.phase === 'flight' && rate < 6, jumped);
 
-    // Players: chase their targets with a speed limit, face where they're going.
-    const maxSpeed = 8.5;
+    // Players: steered bodies with acceleration limits, arrival, separation and ball-watching.
+    if (jumped) {
+      this.poses.clear();
+      this.fired.clear();
+    }
+    this.steer(fr, Math.max(0, gameDt), jumped, rate);
+    this.triggerPoses(fr, t);
     for (let i = 0; i < 22; i++) {
       const f = this.figures[i];
-      const tgt = fr.targets[i];
       if (fr.sentOff[i]) {
         f.root.visible = false;
         continue;
       }
       f.root.visible = true;
-      const dx = tgt.x - f.pos.x;
-      const dy = tgt.y - f.pos.y;
-      const d = Math.hypot(dx, dy);
-      const step = Math.min(d, (i === fr.holder ? maxSpeed * 1.3 : maxSpeed) * Math.max(gameDt, 0));
-      if (jumped || d > 40) f.pos.set(tgt.x, tgt.y);
-      else if (d > 0.001) f.pos.set(f.pos.x + (dx / d) * step, f.pos.y + (dy / d) * step);
-      const speed = gameDt > 0 ? step / gameDt : 0;
-      f.vel.set(dx, dy);
-      // Facing: movement if running, else the ball.
-      const face = speed > 0.6 ? Math.atan2(dx, dy) : Math.atan2(fr.ball.x - f.pos.x, fr.ball.y - f.pos.y);
-      f.heading = lerpAngle(f.heading, face, Math.min(1, realDt * 8));
+      const speed = gameDt > 0 ? f.vel.length() / Math.max(1, Math.pow(rate, 0.85)) : 0;
+      const toBall = Math.atan2(fr.ball.x - f.pos.x, fr.ball.y - f.pos.y);
+      const velAng = Math.atan2(f.vel.x, f.vel.y);
+      let face: number;
+      if (i === fr.holder && fr.aim && speed < 3) face = Math.atan2(fr.aim.x - f.pos.x, fr.aim.y - f.pos.y);
+      else if (speed > 2.6) {
+        // Running: face the run, unless dropping back while watching the ball (backpedal).
+        const away = Math.cos(velAng - toBall) < -0.25;
+        face = away && speed < 5.5 && i !== fr.holder ? toBall : velAng;
+      } else face = toBall;
+      f.heading = lerpAngle(f.heading, face, Math.min(1, realDt * (speed > 5 ? 6 : 9)));
       f.root.position.set(f.pos.x, 0, f.pos.y);
       f.root.rotation.y = f.heading;
+      // Local velocity and lean for the animation rig.
+      const sh = Math.sin(f.heading);
+      const ch = Math.cos(f.heading);
+      const vs = speed / Math.max(0.001, f.vel.length());
+      f.fwd = gameDt > 0 ? (f.vel.x * sh + f.vel.y * ch) * vs : 0;
+      f.side = gameDt > 0 ? (f.vel.x * ch - f.vel.y * sh) * vs : 0;
+      const acc = this.accel[i];
+      f.leanX += (Math.max(-0.16, Math.min(0.16, (acc.x * sh + acc.y * ch) * 0.025)) - f.leanX) * Math.min(1, realDt * 6);
+      f.leanZ += (Math.max(-0.14, Math.min(0.14, -(acc.x * ch - acc.y * sh) * 0.02)) - f.leanZ) * Math.min(1, realDt * 6);
       f.celebrate = fr.celebrating >= 0 && (i < 11) === (fr.celebrating < 11) ? 1 : 0;
       f.star = fr.celebrating === i;
-      // Visual speed: real-time-feel animation even when fast-forwarding.
-      f.animate(realDt, Math.min(9, speed), this.elapsed);
+      const pose = this.poses.get(i);
+      if (pose && !f.celebrate) {
+        pose.k += realDt / pose.dur;
+        f.pose = pose.kind;
+        f.poseK = Math.min(1, pose.k);
+        f.poseSide = pose.side;
+        if (pose.k >= 1) {
+          this.poses.delete(i);
+          f.pose = '';
+        }
+      } else f.pose = '';
+      f.animate(realDt, Math.min(9.5, speed), this.elapsed);
       const ringMat = f.ring.material as THREE.MeshBasicMaterial;
       ringMat.opacity += ((i === fr.holder ? 0.9 : 0) - ringMat.opacity) * Math.min(1, realDt * 10);
     }
@@ -374,6 +397,111 @@ export class MatchViewer {
     this.updateScoreboard(t);
     this.updateConfetti(realDt);
     this.composer.render(realDt);
+  }
+
+  private accel = Array.from({ length: 22 }, () => new THREE.Vector2());
+  private poses = new Map<number, { kind: Figure['pose']; k: number; dur: number; side: number }>();
+  private fired = new Set<string>();
+
+  /**
+   * Moves every player toward their target like a body, not a cursor: speed
+   * builds and bleeds off with limited acceleration, players ease into
+   * position, sprint when far or involved, and keep a little personal space.
+   * Integrated in game time with small substeps so fast-forward stays stable;
+   * while fast-forwarding, limits scale up so the time-lapse keeps its shape.
+   */
+  private steer(fr: ReturnType<Playback['frame']>, gameDt: number, jumped: boolean, rate: number) {
+    const figs = this.figures;
+    const steps = Math.max(1, Math.ceil(gameDt / 0.04));
+    const h = gameDt / steps;
+    const B = Math.max(1, Math.pow(rate, 0.85));
+    for (const a of this.accel) a.set(0, 0);
+    for (let s = 0; s < steps && h > 0; s++) {
+      for (let i = 0; i < 22; i++) {
+        const f = figs[i];
+        if (fr.sentOff[i]) continue;
+        const tgt = fr.targets[i];
+        const dx = tgt.x - f.pos.x;
+        const dy = tgt.y - f.pos.y;
+        const d = Math.hypot(dx, dy);
+        if (jumped || d > 60) {
+          f.pos.set(tgt.x, tgt.y);
+          f.vel.set(0, 0);
+          continue;
+        }
+        const involved = i === fr.holder || i === fr.kicker;
+        const top = (involved ? 8.8 : d > 14 ? 7.8 : 3.4 + d * 0.3) * B;
+        const want = Math.min(top, d * (involved ? 3 : 1.5) * B);
+        const wx = d > 0.03 ? (dx / d) * want : 0;
+        const wy = d > 0.03 ? (dy / d) * want : 0;
+        let ax = wx - f.vel.x;
+        let ay = wy - f.vel.y;
+        const al = Math.hypot(ax, ay);
+        const speeding = f.vel.x * ax + f.vel.y * ay >= 0;
+        const amax = (speeding ? (involved ? 8 : 6) : 10) * h * B * B;
+        if (al > amax) {
+          ax *= amax / al;
+          ay *= amax / al;
+        }
+        f.vel.x += ax;
+        f.vel.y += ay;
+        this.accel[i].set(ax / h / (B * B), ay / h / (B * B));
+      }
+      // Personal space: overlapping players ease apart (the ball carrier holds his line).
+      for (let i = 0; i < 22; i++) {
+        if (fr.sentOff[i]) continue;
+        for (let j = i + 1; j < 22; j++) {
+          if (fr.sentOff[j]) continue;
+          const a = figs[i].pos;
+          const b = figs[j].pos;
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const d = Math.hypot(dx, dy);
+          if (d > 1.25 || d < 1e-4) continue;
+          const push = ((1.25 - d) / d) * 0.25;
+          const wi = i === fr.holder ? 0.15 : 1;
+          const wj = j === fr.holder ? 0.15 : 1;
+          a.x -= dx * push * wi;
+          a.y -= dy * push * wi;
+          b.x += dx * push * wj;
+          b.y += dy * push * wj;
+        }
+      }
+      for (let i = 0; i < 22; i++) {
+        const f = figs[i];
+        f.pos.x += f.vel.x * h;
+        f.pos.y += f.vel.y * h;
+      }
+    }
+  }
+
+  /** One-shot actions: strikes, headers, slide tackles and keeper dives. */
+  private triggerPoses(fr: ReturnType<Playback['frame']>, t: number) {
+    const fire = (key: string, idx: number, kind: Figure['pose'], dur: number, k0 = 0, side = 1) => {
+      if (idx < 0 || idx > 21 || this.fired.has(key) || fr.sentOff[idx]) return;
+      this.fired.add(key);
+      this.poses.set(idx, { kind, k: k0, dur, side });
+    };
+    const ev = this.playback.events;
+    const next = ev[fr.index + 1];
+    if (fr.kicker >= 0 && t >= fr.kickAt - 0.22 && t < fr.kickAt + 0.4) {
+      const header = next && next.k === 'clear' && (next.z ?? 0) > 0 && fr.ball.z > 1.2;
+      fire(`k${fr.index}`, fr.kicker, header ? 'header' : 'kick', header ? 0.6 : 0.55, header ? 0.3 : 0.12);
+    }
+    if (!next) return;
+    if (next.k === 'cross' && next.q !== undefined && fr.phase === 'flight' && fr.flightF > 0.72 && (next.o === 'won' || next.o === 'cleared')) {
+      fire(`h${fr.index}`, next.q, 'header', 0.65);
+    }
+    if ((next.k === 'tackle' || next.k === 'foul') && next.p !== undefined && next.t - t < 0.55 && next.t >= t) {
+      fire(`t${fr.index}`, next.p, (fr.index * 7) % 5 < 3 ? 'slide' : 'kick', 0.8, 0.1);
+    }
+    if (next.k === 'shot' && next.q !== undefined && fr.phase === 'flight' && fr.flightF > 0.35 && ['saved', 'parried', 'goal'].includes(next.o ?? '')) {
+      const gk = this.figures[next.q];
+      const dx = next.x - gk.pos.x;
+      const dz = next.y - gk.pos.y;
+      const side = dx * Math.cos(gk.heading) - dz * Math.sin(gk.heading) >= 0 ? 1 : -1;
+      if (Math.abs(next.y - gk.pos.y) > 0.6) fire(`d${fr.index}`, next.q, 'dive', 0.95, 0, side);
+    }
   }
 
   private updateTrail(on: boolean, reset: boolean) {
