@@ -1,7 +1,7 @@
 import './styles/main.css';
 import { registerSW } from 'virtual:pwa-register';
 import { api, markTouched, newVisit, onStaleData } from './api.ts';
-import { avatarSvg, brandMark } from './art.ts';
+import { avatarSvg } from './art.ts';
 import { html, mount } from './dom.ts';
 import { icon } from './icons.ts';
 import { addRoute, match, navigate, runPage, startRouter } from './router.ts';
@@ -218,7 +218,6 @@ function renderShell(path: string) {
     <div class="ambient" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i><div class="grain"></div></div>
     <header class="topnav">
       <button class="top-back" data-back aria-label="Go back" title="Go back">${icon('back', 18)}</button>
-      <a href="/" class="brand" aria-label="FootbalLife home">${brandMark(30)}<span class="wordmark">FOOTBAL<b>LIFE</b></span></a>
       <nav class="topnav-links">${links('tn-link')}</nav>
       <div class="topnav-right" >
         <div class="row" style="gap:10px" id="me-top">${meTop()}</div>
