@@ -207,6 +207,59 @@ CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value JSONB NOT NULL
 );
+ALTER TABLE players ADD COLUMN IF NOT EXISTS equipped JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE players ADD COLUMN IF NOT EXISTS motto TEXT NOT NULL DEFAULT '';
+ALTER TABLE players ADD COLUMN IF NOT EXISTS train_count INT NOT NULL DEFAULT 0;
+ALTER TABLE player_match_stats ADD COLUMN IF NOT EXISTS outcome TEXT;
+ALTER TABLE player_match_stats ADD COLUMN IF NOT EXISTS motm BOOLEAN NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS inventory (
+  player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  item_id TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'shop',
+  price INT NOT NULL DEFAULT 0,
+  acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (player_id, item_id)
+);
+CREATE TABLE IF NOT EXISTS player_achievements (
+  player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  ach_id TEXT NOT NULL,
+  earned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (player_id, ach_id)
+);
+CREATE TABLE IF NOT EXISTS trophies (
+  id TEXT PRIMARY KEY,
+  season_id TEXT NOT NULL,
+  season_number INT NOT NULL,
+  kind TEXT NOT NULL,
+  club_id TEXT,
+  player_id TEXT,
+  value REAL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS trophies_player ON trophies(player_id);
+CREATE INDEX IF NOT EXISTS trophies_club ON trophies(club_id);
+CREATE TABLE IF NOT EXISTS club_invites (
+  id TEXT PRIMARY KEY,
+  club_id TEXT NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+  player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  from_player_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS invites_player ON club_invites(player_id, status);
+CREATE INDEX IF NOT EXISTS invites_club ON club_invites(club_id, status);
+CREATE TABLE IF NOT EXISTS club_messages (
+  id TEXT PRIMARY KEY,
+  club_id TEXT NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+  player_id TEXT,
+  kind TEXT NOT NULL DEFAULT 'msg',
+  text TEXT NOT NULL,
+  data JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS club_messages_recent ON club_messages(club_id, created_at DESC);
 `;
 
 async function migrate(db: Db) {

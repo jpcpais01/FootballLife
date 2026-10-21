@@ -9,6 +9,10 @@ import type { Db } from './db.ts';
 import { newId } from './http.ts';
 import { BOT_CLUBS } from './names.ts';
 import { matchXp } from './progression.ts';
+import { checkAchievements, grantItem, notify } from './rewards.ts';
+import { clubMessage } from './social.ts';
+import { sanitizeEquipped, type Equipped } from '../shared/cosmetics.ts';
+import { TROPHY_KINDS, type TrophyKind } from '../shared/achievements.ts';
 import { clubPlayers, resolveLineup, STARTING_LEVEL, syncSquad, type ClubRow, type PlayerRow } from './squads.ts';
 
 // ---------- schedule helpers ----------
@@ -154,7 +158,7 @@ export interface LineupSnapshot {
   badge: { shape: number; icon: number };
   formation: string;
   tactics: Tactics;
-  players: { id: string; name: string; number: number; pos: Position; role: Position; slot: string; ovr: number; bot: boolean; app: Record<string, number> }[];
+  players: { id: string; name: string; number: number; pos: Position; role: Position; slot: string; ovr: number; bot: boolean; app: Record<string, number>; eq?: Equipped }[];
 }
 
 export function buildTeam(club: ClubRow, players: PlayerRow[]): { team: SimTeam; snap: LineupSnapshot } {
@@ -199,6 +203,7 @@ export function buildTeam(club: ClubRow, players: PlayerRow[]): { team: SimTeam;
       ovr: overall(e.player.attrs, e.player.position),
       bot: e.player.is_bot,
       app: e.player.appearance,
+      eq: e.player.is_bot ? undefined : sanitizeEquipped(e.player.equipped),
     })),
   };
   return { team, snap };
@@ -242,15 +247,12 @@ async function playMatch(db: Db, m: MatchRow) {
   return r.length > 0;
 }
 
-async function notify(db: Db, playerId: string, kind: string, text: string, data: Record<string, unknown> = {}) {
-  await db.query('INSERT INTO notifications (id, player_id, kind, text, data) VALUES ($1, $2, $3, $4, $5)', [newId('n_'), playerId, kind, text, JSON.stringify(data)]);
-}
-
 async function finalizeMatch(db: Db, m: MatchRow) {
   const claimed = await db.query("UPDATE matches SET status = 'final' WHERE id = $1 AND status = 'played' RETURNING id", [m.id]);
   if (!claimed.length || !m.result || !m.lineups) return;
   const res = m.result;
   const official = m.kind === 'league';
+  const humans: string[] = [];
   for (let side = 0; side < 2; side++) {
     const snap = m.lineups[side];
     const gf = res.score[side];
@@ -260,11 +262,12 @@ async function finalizeMatch(db: Db, m: MatchRow) {
       const sp = snap.players[i];
       const line = res.players[side * 11 + i];
       await db.query(
-        `INSERT INTO player_match_stats (match_id, player_id, club_id, season_id, kind, goals, assists, shots, saves, tackles, clean_sheet, rating)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT DO NOTHING`,
-        [m.id, sp.id, snap.clubId, m.season_id, m.kind, line.goals, line.assists, line.shots, line.saves, line.tackles, ga === 0, line.rating],
+        `INSERT INTO player_match_stats (match_id, player_id, club_id, season_id, kind, goals, assists, shots, saves, tackles, clean_sheet, rating, outcome, motm)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) ON CONFLICT DO NOTHING`,
+        [m.id, sp.id, snap.clubId, m.season_id, m.kind, line.goals, line.assists, line.shots, line.saves, line.tackles, ga === 0, line.rating, outcome[0].toUpperCase(), res.motm === side * 11 + i],
       );
       if (sp.bot) continue;
+      humans.push(sp.id);
       const rows = await db.query<PlayerRow>('SELECT * FROM players WHERE id = $1', [sp.id]);
       const p = rows[0];
       if (!p) continue;
@@ -281,6 +284,12 @@ async function finalizeMatch(db: Db, m: MatchRow) {
       }
     }
   }
+  // Full-time line in the chat of any human club that played.
+  const [h, a] = m.lineups;
+  for (const snap of m.lineups) {
+    if (snap.players.some((p) => !p.bot)) await clubMessage(db, snap.clubId, `Full time${official ? '' : ' (friendly)'}: ${h.short} ${res.score[0]}–${res.score[1]} ${a.short}`, { matchId: m.id });
+  }
+  for (const id of humans) await checkAchievements(db, id);
 }
 
 async function maybeRollSeason(db: Db) {
@@ -299,6 +308,7 @@ async function maybeRollSeason(db: Db) {
       await notify(db, h.id, 'season', `Season ${season.number} is over: your club finished ${ordinal(i + 1)}. +${reward} coins.${i === 0 ? ' Champions!' : ''}`);
     }
   }
+  await awardTrophies(db, season, table);
   await db.query("UPDATE seasons SET status = 'finished', ended_at = now() WHERE id = $1", [season.id]);
 
   // Next season: every active human club (by last finish), then AI clubs to fill.
@@ -327,6 +337,53 @@ async function maybeRollSeason(db: Db) {
     }
   }
   await createSeason(db, season.number + 1, ids, new Date(Date.now() + 2 * 3600_000));
+}
+
+async function awardTrophies(db: Db, season: { id: string; number: number }, table: StandingRow[]) {
+  const give = async (kind: TrophyKind, clubId: string | null, playerId: string | null, value: number | null) => {
+    await db.query('INSERT INTO trophies (id, season_id, season_number, kind, club_id, player_id, value) VALUES ($1, $2, $3, $4, $5, $6, $7)', [newId('t_'), season.id, season.number, kind, clubId, playerId, value]);
+  };
+  const touched = new Set<string>();
+  // Club placings; every human in the squad gets the medal too.
+  const placings: TrophyKind[] = ['champion', 'runner_up', 'third'];
+  for (let i = 0; i < Math.min(3, table.length); i++) {
+    const clubId = table[i].clubId;
+    await give(placings[i], clubId, null, table[i].points);
+    const members = await db.query<{ id: string }>('SELECT id FROM players WHERE club_id = $1 AND NOT is_bot', [clubId]);
+    for (const m of members) {
+      await give(placings[i], clubId, m.id, table[i].points);
+      touched.add(m.id);
+      if (i === 0) {
+        await grantItem(db, m.id, 'neck-medal', 'trophy');
+        await grantItem(db, m.id, 'title-champion', 'trophy');
+      }
+    }
+  }
+  // Individual awards.
+  const best = async (expr: string, where = '', having = `${expr} > 0`) =>
+    (await db.query<{ player_id: string; club_id: string; is_bot: boolean; v: number }>(
+      `SELECT s.player_id, max(s.club_id) club_id, p.is_bot, ${expr} v FROM player_match_stats s JOIN players p ON p.id = s.player_id
+       WHERE s.season_id = $1 AND s.kind = 'league' ${where} GROUP BY s.player_id, p.is_bot HAVING ${having} ORDER BY v DESC, count(*) ASC LIMIT 1`,
+      [season.id],
+    ))[0];
+  const rounds = (await db.query<{ n: string }>("SELECT count(DISTINCT round) n FROM matches WHERE season_id = $1 AND kind = 'league'", [season.id]))[0];
+  const minApps = Math.max(1, Math.floor(+rounds.n * 0.4));
+  const awards: [TrophyKind, Awaited<ReturnType<typeof best>>, string | null, number][] = [
+    ['golden_boot', await best('sum(s.goals)'), 'boots-gold', 400],
+    ['playmaker', await best('sum(s.assists)'), null, 300],
+    ['golden_glove', await best("sum(CASE WHEN s.clean_sheet THEN 1 ELSE 0 END)", "AND p.position = 'GK'"), null, 300],
+    ['pots', await best('avg(s.rating)', '', `count(*) >= ${minApps}`), 'title-pots', 500],
+  ];
+  for (const [kind, w, item, coins] of awards) {
+    if (!w) continue;
+    await give(kind, w.club_id, w.player_id, Math.round(+w.v * 100) / 100);
+    if (w.is_bot) continue;
+    touched.add(w.player_id);
+    if (item) await grantItem(db, w.player_id, item, 'trophy');
+    await db.query('UPDATE players SET coins = coins + $2 WHERE id = $1', [w.player_id, coins]);
+    await notify(db, w.player_id, 'season', `You won the ${TROPHY_KINDS[kind].label} for season ${season.number}! +${coins} coins.`);
+  }
+  for (const id of touched) await checkAchievements(db, id);
 }
 
 function ordinal(n: number) {

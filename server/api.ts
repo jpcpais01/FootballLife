@@ -12,6 +12,10 @@ import { bad, forbidden, hexColor, HttpError, newId, notFound, oneOf, readJson, 
 import { currentSeason, placeNewClub, standings, tick, type LineupSnapshot } from './league.ts';
 import { trainingSession, TRAINING_FOCI, type TrainingFocus } from './progression.ts';
 import { clubPlayers, clubStrength, resolveLineup, syncSquad, type ClubRow, type PlayerRow } from './squads.ts';
+import { ACHIEVEMENTS, ACH_BY_ID } from '../shared/achievements.ts';
+import { featured, ITEM_BY_ID, ITEMS, priceOf, sanitizeEquipped, shopDay, SLOTS, type Slot } from '../shared/cosmetics.ts';
+import { achStats, checkAchievements, notify } from './rewards.ts';
+import { CHAT_MAX, clubMessage, defaultShirt, joinClub, MAX_HUMANS, notifyStaff } from './social.ts';
 
 // ---------- roles & permissions ----------
 
@@ -80,6 +84,8 @@ function playerDto(p: PlayerRow, full = true) {
     role: p.club_role,
     clubId: p.club_id,
     appearance: sanitizeAppearance(p.appearance),
+    equipped: p.is_bot ? {} : sanitizeEquipped(p.equipped),
+    motto: p.motto ?? '',
     ovr: overall(p.attrs, p.position),
     attrs: full ? p.attrs : undefined,
   };
@@ -176,7 +182,7 @@ route('POST', '/api/auth/logout', async (c) => {
 route('GET', '/api/me', async (c) => {
   if (!c.user) return { user: null };
   const p = (await c.db.query<PlayerRow>('SELECT * FROM players WHERE user_id = $1', [c.user.id]))[0];
-  return { user: c.user, player: p ? { ...playerDto(p), coins: p.coins } : null };
+  return { user: c.user, player: p ? { ...playerDto(p), coins: p.coins } : null, invites: p && !p.club_id ? (await myInvites(c.db, p.id)).filter((i) => i.kind === 'invite').length : 0 };
 });
 
 route('POST', '/api/player', async (c) => {
@@ -213,11 +219,12 @@ route('POST', '/api/train', async (c) => {
   const streak = last && Date.now() - last < 24 * 3600_000 ? 0.15 : 0;
   const res = trainingSession(p.position, p.attrs, p.xp as Partial<Record<Attr, number>>, focus, streak);
   const updated = await c.db.query(
-    'UPDATE players SET attrs = $2, xp = $3, last_train_at = now() WHERE id = $1 AND (last_train_at IS NULL OR last_train_at = $4) RETURNING id',
+    'UPDATE players SET attrs = $2, xp = $3, last_train_at = now(), train_count = train_count + 1 WHERE id = $1 AND (last_train_at IS NULL OR last_train_at = $4) RETURNING id',
     [p.id, JSON.stringify(res.attrs), JSON.stringify(res.xp), p.last_train_at],
   );
   if (!updated.length) throw bad('Training already in progress');
-  return { levelUps: res.levelUps, xp: res.xp, attrs: res.attrs, ovr: overall(res.attrs, p.position), streak: streak > 0 };
+  const achievements = await checkAchievements(c.db, p.id);
+  return { achievements, levelUps: res.levelUps, xp: res.xp, attrs: res.attrs, ovr: overall(res.attrs, p.position), streak: streak > 0 };
 });
 
 route('GET', '/api/home', async (c) => {
@@ -258,6 +265,7 @@ route('GET', '/api/home', async (c) => {
     liveNow: anyLive,
     recent,
     notifications: await notifications(c.db, p.id),
+    invites: p.club_id ? [] : await myInvites(c.db, p.id),
   };
 });
 
@@ -305,8 +313,10 @@ route('POST', '/api/clubs', async (c) => {
     await db.query("UPDATE players SET club_id = $2, club_role = 'founder', shirt = $3 WHERE id = $1", [p.id, id, defaultShirt(p.position)]);
     const club = await getClub(db, id);
     await syncSquad(db, club);
+    await clubMessage(db, id, `${p.name} founded ${name}`);
     return placeNewClub(db, id);
   });
+  await checkAchievements(c.db, p.id);
   return { id, placement };
 });
 
@@ -314,9 +324,6 @@ function inviteCode() {
   return newId().slice(0, 8).toUpperCase().replace(/[^A-Z0-9]/g, 'X');
 }
 
-function defaultShirt(pos: string): number {
-  return ({ GK: 1, CB: 4, FB: 2, DM: 6, CM: 8, AM: 10, WG: 7, ST: 9 } as Record<string, number>)[pos] ?? 14;
-}
 
 route('GET', '/api/clubs/:id', async (c) => {
   const club = await getClub(c.db, c.params[0]);
@@ -330,7 +337,19 @@ route('GET', '/api/clubs/:id', async (c) => {
     [club.id, season?.id ?? ''],
   )).map(matchDto);
   const roleOrder = (r: string) => -(RANK[r as Role] ?? 0);
+  const trophies = await c.db.query<{ kind: string; season_number: number; value: number | null }>(
+    'SELECT kind, season_number, value FROM trophies WHERE club_id = $1 AND player_id IS NULL ORDER BY season_number DESC', [club.id]);
+  const history = await c.db.query<{ number: number; final_pos: number }>(
+    "SELECT s.number, sc.final_pos FROM season_clubs sc JOIN seasons s ON s.id = sc.season_id WHERE sc.club_id = $1 AND sc.final_pos IS NOT NULL ORDER BY s.number DESC", [club.id]);
+  const staffView = can(myRole, 'invite');
+  const pending = staffView ? await inviteDtos(c.db, await c.db.query<InviteRow>("SELECT * FROM club_invites WHERE club_id = $1 AND status = 'pending' ORDER BY created_at DESC", [club.id])) : [];
+  const myPending = me && !me.club_id ? (await c.db.query<{ id: string; kind: string }>("SELECT id, kind FROM club_invites WHERE club_id = $1 AND player_id = $2 AND status = 'pending'", [club.id, me.id]))[0] ?? null : null;
   return {
+    trophies: trophies.map((t) => ({ kind: t.kind, season: t.season_number, value: t.value })),
+    history: history.map((h) => ({ season: h.number, pos: h.final_pos })),
+    requests: pending.filter((x) => x.kind === 'request'),
+    invitesOut: pending.filter((x) => x.kind === 'invite'),
+    myPending,
     club: {
       ...clubBrief(club),
       joinMode: club.join_mode,
@@ -354,23 +373,14 @@ route('POST', '/api/clubs/:id/join', async (c) => {
   if (p.club_id) throw bad('Leave your current club first');
   const club = await getClub(c.db, c.params[0]);
   if (club.is_bot || !club.active) throw bad('AI clubs cannot be joined — create your own club or join a player club');
-  if (club.join_mode === 'invite' && String(c.body.code ?? '').trim().toUpperCase() !== club.invite_code) throw bad('This club is invite-only. Ask a member for the invite code.');
-  const humans = await c.db.query('SELECT 1 FROM players WHERE club_id = $1 AND NOT is_bot', [club.id]);
-  if (humans.length >= 23) throw bad('This club is full');
-  await c.db.tx(async (db) => {
-    const shirts = new Set((await db.query<{ shirt: number }>('SELECT shirt FROM players WHERE club_id = $1', [club.id])).map((r) => r.shirt));
-    let shirt = defaultShirt(p.position);
-    // The bot wearing our preferred number gives it up when it leaves; otherwise pick a free one.
-    const botWithShirt = (await db.query<{ id: string }>('SELECT id FROM players WHERE club_id = $1 AND is_bot AND shirt = $2', [club.id, shirt]))[0];
-    if (shirts.has(shirt) && !botWithShirt) for (shirt = 14; shirts.has(shirt); shirt++);
-    if (botWithShirt) {
-      let free = 30;
-      while (shirts.has(free)) free++;
-      await db.query('UPDATE players SET shirt = $2 WHERE id = $1', [botWithShirt.id, free]);
-    }
-    await db.query("UPDATE players SET club_id = $2, club_role = 'player', shirt = $3 WHERE id = $1", [p.id, club.id, shirt]);
-    await syncSquad(db, club);
-  });
+  const code = String(c.body.code ?? '').trim().toUpperCase();
+  if (club.join_mode === 'invite' && code !== club.invite_code) {
+    // An accepted invite also lets you in.
+    const inv = await c.db.query("SELECT 1 FROM club_invites WHERE club_id = $1 AND player_id = $2 AND kind = 'invite' AND status = 'pending'", [club.id, p.id]);
+    if (!inv.length) throw bad('This club is invite-only. Ask a member for the invite code, or send a join request.');
+  }
+  await c.db.tx((db) => joinClub(db, p, club));
+  await checkAchievements(c.db, p.id);
   return { ok: true };
 });
 
@@ -380,6 +390,7 @@ route('POST', '/api/clubs/leave', async (c) => {
   const club = await getClub(c.db, p.club_id);
   await c.db.tx(async (db) => {
     await db.query("UPDATE players SET club_id = NULL, club_role = 'player' WHERE id = $1", [p.id]);
+    await clubMessage(db, club.id, `${p.name} left the club`);
     const others = await db.query<PlayerRow>('SELECT * FROM players WHERE club_id = $1 AND NOT is_bot ORDER BY created_at', [club.id]);
     if (p.club_role === 'founder') {
       if (others.length) {
@@ -444,6 +455,8 @@ route('POST', '/api/clubs/:id/role', async (c) => {
     await c.db.query("UPDATE players SET club_role = 'player' WHERE club_id = $1 AND club_role = $2", [club.id, role]);
   }
   await c.db.query('UPDATE players SET club_role = $2 WHERE id = $1', [target.id, role]);
+  await clubMessage(c.db, club.id, `${target.name} is now ${role === 'player' ? 'a player' : `the ${role}`}`);
+  await notify(c.db, target.id, 'club', `Your role at ${club.name} is now ${role}.`);
   return { ok: true };
 });
 
@@ -456,7 +469,8 @@ route('POST', '/api/clubs/:id/kick', async (c) => {
   if (RANK[target.club_role as Role] >= RANK[p.club_role as Role]) throw forbidden('You can only remove members below your role');
   await c.db.tx(async (db) => {
     await db.query("UPDATE players SET club_id = NULL, club_role = 'player' WHERE id = $1", [target.id]);
-    await db.query('INSERT INTO notifications (id, player_id, kind, text) VALUES ($1, $2, $3, $4)', [newId('n_'), target.id, 'club', `You were removed from ${club.name}.`]);
+    await notify(db, target.id, 'club', `You were removed from ${club.name}.`);
+    await clubMessage(db, club.id, `${target.name} was removed from the club`);
     await syncSquad(db, club);
   });
   return { ok: true };
@@ -501,7 +515,19 @@ route('GET', '/api/league', async (c) => {
       [season.id],
     );
   const map = (rows: Awaited<ReturnType<typeof leaders>>) => rows.map((r) => ({ playerId: r.player_id, name: r.name, position: r.position, isBot: r.is_bot, clubId: r.club_id, club: r.club, value: Math.round(+r.v * 100) / 100, apps: +r.apps }));
+  const past = await c.db.query<{ season_number: number; kind: string; value: number | null; club: string | null; club_id: string | null; player: string | null; player_id: string | null }>(
+    `SELECT t.season_number, t.kind, t.value, cl.name club, t.club_id, p.name player, t.player_id FROM trophies t
+     LEFT JOIN clubs cl ON cl.id = t.club_id LEFT JOIN players p ON p.id = t.player_id
+     WHERE (t.player_id IS NULL AND t.kind = 'champion') OR t.kind IN ('golden_boot','playmaker','golden_glove','pots')
+     ORDER BY t.season_number DESC LIMIT 50`);
+  const honours = new Map<number, Record<string, unknown>>();
+  for (const t of past) {
+    const h = honours.get(t.season_number) ?? { season: t.season_number };
+    h[t.kind] = { club: t.club, clubId: t.club_id, player: t.player, playerId: t.player_id, value: t.value };
+    honours.set(t.season_number, h);
+  }
   return {
+    honours: [...honours.values()],
     season: { id: season.id, number: season.number },
     table,
     matches,
@@ -561,12 +587,261 @@ route('GET', '/api/players/:id', async (c) => {
      WHERE s.player_id = $1 ORDER BY m.kickoff_at DESC LIMIT 10`,
     [p.id],
   );
+  const trophies = await c.db.query<{ kind: string; season_number: number; value: number | null; club_id: string | null; short: string | null }>(
+    'SELECT t.kind, t.season_number, t.value, t.club_id, cl.short FROM trophies t LEFT JOIN clubs cl ON cl.id = t.club_id WHERE t.player_id = $1 ORDER BY t.season_number DESC', [p.id]);
+  const earned = await c.db.query<{ ach_id: string; earned_at: Date }>('SELECT ach_id, earned_at FROM player_achievements WHERE player_id = $1', [p.id]);
+  const mine = !!c.user && p.user_id === c.user.id;
+  let progress: Record<string, [number, number]> | undefined;
+  if (mine) {
+    const st = await achStats(c.db, p);
+    progress = Object.fromEntries(ACHIEVEMENTS.map((a) => [a.id, a.progress(st)]));
+  }
   return {
+    trophies: trophies.map((t) => ({ kind: t.kind, season: t.season_number, value: t.value, club: t.short })),
+    achievements: earned.filter((e) => ACH_BY_ID[e.ach_id]).map((e) => ({ id: e.ach_id, at: new Date(e.earned_at).toISOString() })),
+    progress,
     player: { ...playerDto(p), createdAt: new Date(p.created_at).toISOString() },
     club: club ? clubBrief(club) : null,
     career: await careerTotals(c.db, p.id),
     recent: recent.map((r) => ({ matchId: r.match_id, goals: r.goals, assists: r.assists, rating: r.rating, at: new Date(r.kickoff_at).toISOString(), label: `${r.home} ${r.hg}–${r.ag} ${r.away}` })),
   };
+});
+
+// ---------- profile ----------
+
+route('POST', '/api/player/profile', async (c) => {
+  const p = await myPlayer(c);
+  const motto = String(c.body.motto ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  await c.db.query('UPDATE players SET motto = $2 WHERE id = $1', [p.id, motto]);
+  return { ok: true, motto };
+});
+
+// ---------- shop & locker ----------
+
+async function ownedIds(db: Db, playerId: string) {
+  return new Set((await db.query<{ item_id: string }>('SELECT item_id FROM inventory WHERE player_id = $1', [playerId])).map((r) => r.item_id));
+}
+
+route('GET', '/api/shop', async (c) => {
+  const p = await myPlayer(c);
+  const day = shopDay();
+  const f = featured(day);
+  const owned = await ownedIds(c.db, p.id);
+  const club = p.club_id ? await getClub(c.db, p.club_id) : null;
+  return {
+    kit: club ? club.colors : { primary: '#1d2329', secondary: '#c6ff3d' },
+    shirt: p.shirt,
+    coins: p.coins,
+    featured: f.ids,
+    deal: f.deal,
+    prices: Object.fromEntries(ITEMS.map((i) => [i.id, priceOf(i, day)])),
+    nextRotation: new Date((day + 1) * 86_400_000).toISOString(),
+    owned: [...owned],
+    equipped: sanitizeEquipped(p.equipped, owned),
+  };
+});
+
+route('POST', '/api/shop/buy', async (c) => {
+  const p = await myPlayer(c);
+  const item = ITEM_BY_ID[String(c.body.itemId ?? '')];
+  if (!item) throw notFound('Item not found');
+  const price = priceOf(item);
+  if (price <= 0) throw bad(`${item.name} cannot be bought. ${item.source ?? ''}`.trim());
+  const coins = await c.db.tx(async (db) => {
+    const have = await db.query('SELECT 1 FROM inventory WHERE player_id = $1 AND item_id = $2', [p.id, item.id]);
+    if (have.length) throw bad('You already own this');
+    const r = await db.query<{ coins: number }>('UPDATE players SET coins = coins - $2 WHERE id = $1 AND coins >= $2 RETURNING coins', [p.id, price]);
+    if (!r.length) throw bad('Not enough coins');
+    await db.query("INSERT INTO inventory (player_id, item_id, source, price) VALUES ($1, $2, 'shop', $3)", [p.id, item.id, price]);
+    return r[0].coins;
+  });
+  const achievements = await checkAchievements(c.db, p.id);
+  return { ok: true, coins, achievements };
+});
+
+route('POST', '/api/locker/equip', async (c) => {
+  const p = await myPlayer(c);
+  const slot = oneOf(c.body.slot, SLOTS, 'slot') as Slot;
+  const itemId = c.body.itemId == null ? null : String(c.body.itemId);
+  const owned = await ownedIds(c.db, p.id);
+  const eq = sanitizeEquipped(p.equipped, owned);
+  if (itemId) {
+    if (ITEM_BY_ID[itemId]?.slot !== slot) throw bad('That item does not go there');
+    if (!owned.has(itemId)) throw bad('You do not own that item');
+    eq[slot] = itemId;
+  } else delete eq[slot];
+  await c.db.query('UPDATE players SET equipped = $2 WHERE id = $1', [p.id, JSON.stringify(eq)]);
+  return { ok: true, equipped: eq };
+});
+
+// ---------- invites & join requests ----------
+
+interface InviteRow { id: string; club_id: string; player_id: string; kind: 'invite' | 'request'; from_player_id: string | null; status: string; created_at: Date }
+
+async function inviteDtos(db: Db, rows: InviteRow[]) {
+  const out = [];
+  for (const r of rows) {
+    const club = (await db.query<ClubRow>('SELECT * FROM clubs WHERE id = $1', [r.club_id]))[0];
+    const player = (await db.query<PlayerRow>('SELECT * FROM players WHERE id = $1', [r.player_id]))[0];
+    const from = r.from_player_id ? (await db.query<{ name: string }>('SELECT name FROM players WHERE id = $1', [r.from_player_id]))[0] : null;
+    if (!club || !player) continue;
+    out.push({ id: r.id, kind: r.kind, at: new Date(r.created_at).toISOString(), club: clubBrief(club), player: playerDto(player, false), from: from?.name ?? null });
+  }
+  return out;
+}
+
+async function myInvites(db: Db, playerId: string) {
+  const rows = await db.query<InviteRow>("SELECT * FROM club_invites WHERE player_id = $1 AND status = 'pending' ORDER BY created_at DESC", [playerId]);
+  return inviteDtos(db, rows);
+}
+
+route('GET', '/api/invites', async (c) => {
+  const p = await myPlayer(c);
+  return { invites: await myInvites(c.db, p.id) };
+});
+
+route('GET', '/api/free-agents', async (c) => {
+  await myPlayer(c);
+  const q = `%${String(c.query.get('q') ?? '').trim().toLowerCase().replace(/[%_]/g, '')}%`;
+  const rows = await c.db.query<PlayerRow>('SELECT * FROM players WHERE NOT is_bot AND club_id IS NULL AND lower(name) LIKE $1 ORDER BY created_at DESC LIMIT 12', [q]);
+  return { players: rows.map((r) => playerDto(r, false)) };
+});
+
+route('POST', '/api/clubs/:id/request', async (c) => {
+  const p = await myPlayer(c);
+  if (p.club_id) throw bad('Leave your current club first');
+  const club = await getClub(c.db, c.params[0]);
+  if (club.is_bot || !club.active) throw bad('AI clubs cannot be joined');
+  const dup = await c.db.query("SELECT 1 FROM club_invites WHERE club_id = $1 AND player_id = $2 AND status = 'pending'", [club.id, p.id]);
+  if (dup.length) throw bad('You already have a pending request or invite for this club');
+  const open = await c.db.query("SELECT count(*) n FROM club_invites WHERE player_id = $1 AND kind = 'request' AND status = 'pending'", [p.id]);
+  if (+(open[0] as { n: string }).n >= 5) throw bad('You can have at most 5 open requests');
+  const id = newId('i_');
+  await c.db.query("INSERT INTO club_invites (id, club_id, player_id, kind) VALUES ($1, $2, $3, 'request')", [id, club.id, p.id]);
+  await notifyStaff(c.db, club.id, CAN.invite, `${p.name} (${p.position}, ${overall(p.attrs, p.position)} OVR) asked to join ${club.name}.`, { clubId: club.id });
+  return { ok: true, id };
+});
+
+route('POST', '/api/clubs/:id/invite', async (c) => {
+  const p = await myPlayer(c);
+  const club = await getClub(c.db, c.params[0]);
+  if (p.club_id !== club.id || !can(p.club_role, 'invite')) throw forbidden('Only the founder, president or captain can invite players');
+  const target = (await c.db.query<PlayerRow>('SELECT * FROM players WHERE id = $1 AND NOT is_bot', [String(c.body.playerId ?? '')]))[0];
+  if (!target) throw notFound('Player not found');
+  if (target.club_id) throw bad(`${target.name} is already in a club`);
+  const pending = (await c.db.query<InviteRow>("SELECT * FROM club_invites WHERE club_id = $1 AND player_id = $2 AND status = 'pending'", [club.id, target.id]))[0];
+  if (pending?.kind === 'request') {
+    // They already asked: inviting them is the same as accepting.
+    await c.db.tx(async (db) => {
+      await db.query("UPDATE club_invites SET status = 'accepted', resolved_at = now() WHERE id = $1", [pending.id]);
+      await joinClub(db, target, club);
+    });
+    await notify(c.db, target.id, 'club', `Welcome to ${club.name}! Your request was accepted.`, { clubId: club.id });
+    await checkAchievements(c.db, target.id);
+    return { ok: true, joined: true };
+  }
+  if (pending) throw bad(`${target.name} already has an invite from your club`);
+  await c.db.query("INSERT INTO club_invites (id, club_id, player_id, kind, from_player_id) VALUES ($1, $2, $3, 'invite', $4)", [newId('i_'), club.id, target.id, p.id]);
+  await notify(c.db, target.id, 'invite', `${p.name} invited you to join ${club.name}.`, { clubId: club.id });
+  return { ok: true };
+});
+
+route('POST', '/api/invites/:id/respond', async (c) => {
+  const p = await myPlayer(c);
+  const inv = (await c.db.query<InviteRow>("SELECT * FROM club_invites WHERE id = $1 AND status = 'pending'", [c.params[0]]))[0];
+  if (!inv) throw notFound('This invite is no longer open');
+  const club = await getClub(c.db, inv.club_id);
+  const accept = c.body.accept === true;
+  if (inv.kind === 'invite') {
+    if (inv.player_id !== p.id) throw forbidden();
+    if (accept) {
+      if (p.club_id) throw bad('Leave your current club first');
+      await c.db.tx(async (db) => {
+        await db.query("UPDATE club_invites SET status = 'accepted', resolved_at = now() WHERE id = $1", [inv.id]);
+        await joinClub(db, p, club);
+      });
+      await checkAchievements(c.db, p.id);
+    } else {
+      await c.db.query("UPDATE club_invites SET status = 'declined', resolved_at = now() WHERE id = $1", [inv.id]);
+    }
+    return { ok: true, clubId: accept ? club.id : null };
+  }
+  // A join request: club staff decide.
+  if (p.club_id !== club.id || !can(p.club_role, 'invite')) throw forbidden('Only the founder, president or captain can answer requests');
+  const target = (await c.db.query<PlayerRow>('SELECT * FROM players WHERE id = $1', [inv.player_id]))[0];
+  if (accept) {
+    await c.db.tx(async (db) => {
+      await db.query("UPDATE club_invites SET status = 'accepted', resolved_at = now() WHERE id = $1", [inv.id]);
+      await joinClub(db, target, club);
+    });
+    await notify(c.db, target.id, 'club', `Welcome to ${club.name}! Your request was accepted.`, { clubId: club.id });
+    await checkAchievements(c.db, target.id);
+  } else {
+    await c.db.query("UPDATE club_invites SET status = 'declined', resolved_at = now() WHERE id = $1", [inv.id]);
+    await notify(c.db, target.id, 'club', `${club.name} turned down your request this time.`, { clubId: club.id });
+  }
+  return { ok: true };
+});
+
+route('POST', '/api/invites/:id/cancel', async (c) => {
+  const p = await myPlayer(c);
+  const inv = (await c.db.query<InviteRow>("SELECT * FROM club_invites WHERE id = $1 AND status = 'pending'", [c.params[0]]))[0];
+  if (!inv) throw notFound('This invite is no longer open');
+  const mine = inv.kind === 'request' && inv.player_id === p.id;
+  const staff = inv.kind === 'invite' && p.club_id === inv.club_id && can(p.club_role, 'invite');
+  if (!mine && !staff) throw forbidden();
+  await c.db.query("UPDATE club_invites SET status = 'cancelled', resolved_at = now() WHERE id = $1", [inv.id]);
+  return { ok: true };
+});
+
+route('GET', '/api/join/:code', async (c) => {
+  const code = c.params[0].trim().toUpperCase();
+  const club = (await c.db.query<ClubRow>('SELECT * FROM clubs WHERE invite_code = $1 AND active AND NOT is_bot', [code]))[0];
+  if (!club) throw notFound('This invite link is not valid any more');
+  const players = await clubPlayers(c.db, club.id);
+  return { club: { ...clubBrief(club), strength: clubStrength(players, club), humans: players.filter((x) => !x.is_bot).length, maxHumans: MAX_HUMANS }, code };
+});
+
+// ---------- club chat ----------
+
+async function chatAccess(c: Ctx) {
+  const p = await myPlayer(c);
+  const club = await getClub(c.db, c.params[0]);
+  if (p.club_id !== club.id) throw forbidden('Only club members can see the chat');
+  return { p, club };
+}
+
+route('GET', '/api/clubs/:id/chat', async (c) => {
+  const { club } = await chatAccess(c);
+  const after = c.query.get('after');
+  const rows = await c.db.query<{ id: string; player_id: string | null; kind: string; text: string; data: Record<string, unknown>; created_at: Date; name: string | null; appearance: never; equipped: never; club_role: string | null }>(
+    `SELECT * FROM (SELECT m.*, p.name, p.appearance, p.equipped, p.club_role FROM club_messages m LEFT JOIN players p ON p.id = m.player_id
+       WHERE m.club_id = $1 ${after ? 'AND m.created_at > $2' : ''} ORDER BY m.created_at DESC LIMIT 60) x ORDER BY created_at`,
+    after ? [club.id, after] : [club.id],
+  );
+  return {
+    messages: rows.map((m) => ({
+      id: m.id, kind: m.kind, text: m.text, data: m.data, at: new Date(m.created_at).toISOString(),
+      author: m.player_id ? { id: m.player_id, name: m.name, role: m.club_role, appearance: sanitizeAppearance(m.appearance), equipped: sanitizeEquipped(m.equipped) } : null,
+    })),
+  };
+});
+
+const lastChat = new Map<string, number>();
+
+route('POST', '/api/clubs/:id/chat', async (c) => {
+  const { p, club } = await chatAccess(c);
+  const text = String(c.body.text ?? '').replace(/[\u0000-\u0008\u000B-\u001F]/g, '').trim();
+  if (!text) throw bad('Write something first');
+  if (text.length > CHAT_MAX) throw bad(`Keep it under ${CHAT_MAX} characters`);
+  const now = Date.now();
+  if (now - (lastChat.get(p.id) ?? 0) < 1200) throw bad('Slow down a little');
+  const recent = await c.db.query("SELECT 1 FROM club_messages WHERE player_id = $1 AND created_at > now() - interval '1 second'", [p.id]);
+  if (recent.length) throw bad('Slow down a little');
+  lastChat.set(p.id, now);
+  const id = newId('cm_');
+  await c.db.query("INSERT INTO club_messages (id, club_id, player_id, kind, text) VALUES ($1, $2, $3, 'msg', $4)", [id, club.id, p.id, text]);
+  return { ok: true, id };
 });
 
 // ---------- entry ----------

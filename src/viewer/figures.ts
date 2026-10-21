@@ -1,6 +1,7 @@
 // Toy footballers: glossy plastic figures standing on Subbuteo-style bases.
 import * as THREE from 'three';
 import { BOOT_COLORS, HAIR_COLORS, SKIN_TONES, type Appearance } from '../../shared/appearance.ts';
+import { gear, type Equipped, type Item } from '../../shared/cosmetics.ts';
 
 export interface Kit {
   primary: string;
@@ -23,6 +24,12 @@ const geo = {
   hairLong: new THREE.SphereGeometry(0.27, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.72),
   afro: new THREE.SphereGeometry(0.34, 20, 14),
   nose: new THREE.SphereGeometry(0.045, 8, 6),
+  band: new THREE.TorusGeometry(0.255, 0.032, 8, 32),
+  alice: new THREE.TorusGeometry(0.262, 0.012, 6, 32),
+  chain: new THREE.TorusGeometry(0.15, 0.016, 6, 28),
+  snood: new THREE.CylinderGeometry(0.15, 0.17, 0.14, 18, 1, true),
+  medal: new THREE.CylinderGeometry(0.07, 0.07, 0.02, 20),
+  wrist: new THREE.CylinderGeometry(0.088, 0.088, 0.08, 14),
   eye: new THREE.SphereGeometry(0.03, 8, 6),
 };
 geo.ring.rotateX(-Math.PI / 2);
@@ -36,6 +43,11 @@ function plastic(color: string | number, opts: Partial<THREE.MeshPhysicalMateria
     matCache.set(key, m);
   }
   return m;
+}
+
+function gearMat(it: Item, fallback?: string) {
+  const color = it.c1 ?? fallback ?? '#ffffff';
+  return it.metal ? plastic(color, { metalness: 1, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.08 }) : plastic(color, { roughness: 0.6, clearcoat: 0.2 });
 }
 
 export class Figure {
@@ -52,14 +64,20 @@ export class Figure {
   heading = 0;
   visible = true;
   celebrate = 0;
+  celStyle = '';
+  /** True for the goalscorer, who does their own celebration. */
+  star = false;
+  private celT = 0;
 
-  constructor(kit: Kit, app: Appearance, isKeeper: boolean, gkKit: Kit) {
+  constructor(kit: Kit, app: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped) {
+    const g = gear(eq);
+    this.celStyle = g.celebration?.style ?? '';
     const k = isKeeper ? gkKit : kit;
     const shirt = plastic(k.primary);
     const trim = plastic(k.secondary);
     const skin = plastic(SKIN_TONES[app.skin] ?? SKIN_TONES[1], { clearcoat: 0.3, roughness: 0.55 });
     const hairM = plastic(HAIR_COLORS[app.hairColor] ?? HAIR_COLORS[0], { roughness: 0.7, clearcoat: 0.1 });
-    const bootM = plastic(BOOT_COLORS[app.boots] ?? BOOT_COLORS[0], { roughness: 0.3, clearcoat: 1 });
+    const bootM = g.boots ? gearMat(g.boots) : plastic(BOOT_COLORS[app.boots] ?? BOOT_COLORS[0], { roughness: 0.3, clearcoat: 1 });
     const dark = plastic(0x14110f, { clearcoat: 1, roughness: 0.2 });
 
     const mesh = (g: THREE.BufferGeometry, m: THREE.Material) => {
@@ -110,6 +128,7 @@ export class Figure {
     collar.position.y = hip + 0.79;
     this.body.add(collar);
 
+    const wrist = g.wrist ? gearMat(g.wrist) : app.accessory === 3 ? trim : null;
     const mkArm = (side: number) => {
       const g = new THREE.Group();
       g.position.set(side * 0.36, hip + 0.68, 0);
@@ -118,6 +137,12 @@ export class Figure {
       const sleeve = mesh(new THREE.CapsuleGeometry(0.09, 0.12, 4, 10), shirt);
       sleeve.position.y = -0.06;
       g.add(arm, sleeve);
+      const band = wrist ? new THREE.Mesh(geo.wrist, wrist) : null;
+      if (band) {
+        band.position.y = -0.47;
+        band.castShadow = true;
+        g.add(band);
+      }
       g.rotation.z = side * 0.12;
       this.body.add(g);
       return g;
@@ -178,7 +203,36 @@ export class Figure {
         }
       }
     }
+    // Headwear: a band around the forehead.
+    const headIt = g.head;
+    if (headIt || app.accessory === 1) {
+      const band = mesh(headIt?.style === 'alice' ? geo.alice : geo.band, headIt ? gearMat(headIt) : trim);
+      band.position.y = 0.09;
+      band.rotation.x = Math.PI / 2 - 0.22;
+      head.add(band);
+    }
     this.body.add(head);
+    // Neckwear.
+    const neckIt = g.neck;
+    if (neckIt?.style === 'snood') {
+      const sn = mesh(geo.snood, gearMat(neckIt));
+      sn.position.y = hip + 0.86;
+      this.body.add(sn);
+    } else if (neckIt?.style === 'medal') {
+      const ribbon = mesh(geo.chain, plastic(neckIt.c2 ?? '#c6ff3d'));
+      ribbon.position.set(0, hip + 0.74, 0.06);
+      ribbon.rotation.x = Math.PI / 2 - 0.5;
+      ribbon.scale.set(1, 1.6, 1);
+      const disc = mesh(geo.medal, gearMat(neckIt));
+      disc.position.set(0, hip + 0.54, 0.235);
+      disc.rotation.x = Math.PI / 2;
+      this.body.add(ribbon, disc);
+    } else if (neckIt || app.accessory === 4) {
+      const ch = mesh(geo.chain, neckIt ? gearMat(neckIt) : plastic('#ffcf3d', { metalness: 1, roughness: 0.25 }));
+      ch.position.set(0, hip + 0.76, 0.05);
+      ch.rotation.x = Math.PI / 2 - 0.45;
+      this.body.add(ch);
+    }
     this.root.scale.setScalar(SCALE);
   }
 
@@ -187,20 +241,78 @@ export class Figure {
     const run = Math.min(1, speed / 7);
     this.phase += dt * (4 + speed * 1.15);
     const sw = Math.sin(this.phase) * (0.15 + run * 0.85);
+    const b = this.body;
     this.legL.rotation.x = sw;
     this.legR.rotation.x = -sw;
     this.armL.rotation.x = -sw * 0.8;
     this.armR.rotation.x = sw * 0.8;
-    this.body.position.y = 0.12 + Math.abs(Math.cos(this.phase)) * 0.07 * run;
-    this.body.rotation.x = run * 0.16;
-    if (this.celebrate > 0) {
-      // Arms up, little hops.
-      this.armL.rotation.x = -2.6 + Math.sin(time * 9) * 0.25;
-      this.armR.rotation.x = -2.6 + Math.cos(time * 9) * 0.25;
-      this.body.position.y = 0.12 + Math.abs(Math.sin(time * 7 + this.phase)) * 0.25;
-    } else {
+    this.armL.rotation.z = -0.12;
+    this.armR.rotation.z = 0.12;
+    b.position.set(0, 0.12 + Math.abs(Math.cos(this.phase)) * 0.07 * run, 0);
+    b.rotation.set(run * 0.16, 0, 0);
+    if (this.celebrate <= 0) {
+      this.celT = 0;
       // Idle breathing.
-      this.body.rotation.z = Math.sin(time * 1.7 + this.phase) * 0.015;
+      b.rotation.z = Math.sin(time * 1.7 + this.phase) * 0.015;
+      return;
+    }
+    this.celT += dt;
+    const t = this.celT;
+    switch (this.star ? this.celStyle : '') {
+      case 'plane': {
+        // Arms out, banking left and right.
+        this.armL.rotation.set(0, 0, -1.5);
+        this.armR.rotation.set(0, 0, 1.5);
+        b.rotation.z = Math.sin(t * 2.2) * 0.38;
+        b.rotation.x = 0.22;
+        break;
+      }
+      case 'slide': {
+        // Drop to the knees, lean back, arms wide.
+        const k = Math.min(1, t / 0.35);
+        b.position.y = 0.12 - 0.42 * k;
+        b.rotation.x = -0.32 * k;
+        this.legL.rotation.x = 1.45 * k;
+        this.legR.rotation.x = 1.45 * k;
+        this.armL.rotation.set(-0.6, 0, -2.3 * k);
+        this.armR.rotation.set(-0.6, 0, 2.3 * k);
+        break;
+      }
+      case 'spin': {
+        const u = (t % 1.3) / 1.3;
+        const hop = Math.sin(Math.min(1, u / 0.7) * Math.PI);
+        b.position.y = 0.12 + hop * 0.65;
+        b.rotation.y = u < 0.7 ? (u / 0.7) * Math.PI * 2 : 0;
+        this.armL.rotation.set(0, 0, -1.2 - hop);
+        this.armR.rotation.set(0, 0, 1.2 + hop);
+        break;
+      }
+      case 'flip': {
+        // A backflip every 1.8s, rotating around the hips.
+        const u = (t % 1.8) / 1.8;
+        const air = Math.min(1, Math.max(0, (u - 0.1) / 0.5));
+        const th = -air * Math.PI * 2;
+        const h = Math.sin(air * Math.PI) * 1.1;
+        const c = 0.95;
+        b.rotation.set(th, 0, 0);
+        b.position.set(0, 0.12 + h + c - c * Math.cos(th), -c * Math.sin(th));
+        const tuck = Math.sin(air * Math.PI);
+        this.legL.rotation.x = -1.2 * tuck;
+        this.legR.rotation.x = -1.2 * tuck;
+        this.armL.rotation.set(-2.6 + tuck * 1.4, 0, -0.3);
+        this.armR.rotation.set(-2.6 + tuck * 1.4, 0, 0.3);
+        if (u > 0.6) {
+          this.armL.rotation.set(-2.8, 0, -0.4);
+          this.armR.rotation.set(-2.8, 0, 0.4);
+        }
+        break;
+      }
+      default: {
+        // Arms up, little hops.
+        this.armL.rotation.x = -2.6 + Math.sin(time * 9) * 0.25;
+        this.armR.rotation.x = -2.6 + Math.cos(time * 9) * 0.25;
+        b.position.y = 0.12 + Math.abs(Math.sin(time * 7 + this.phase)) * 0.25;
+      }
     }
   }
 }

@@ -1,3 +1,4 @@
+import type { Equipped } from '../../shared/cosmetics.ts';
 import { commentary, type CommentaryLine } from '../../shared/commentary.ts';
 import { minuteLabel } from '../../shared/config.ts';
 import type { MatchEvent, PlayerLine, TeamStats } from '../../shared/sim/types.ts';
@@ -18,7 +19,7 @@ interface Snap {
   badge: { shape: number; icon: number };
   formation: string;
   tactics: any;
-  players: { id: string; name: string; number: number; pos: string; role: string; ovr: number; bot: boolean; app: Record<string, number> }[];
+  players: { id: string; name: string; number: number; pos: string; role: string; ovr: number; bot: boolean; app: Record<string, number>; eq?: Equipped }[];
 }
 
 const LIVE_DELAY = 3.5; // seconds behind the server clock so the next event is known
@@ -142,7 +143,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   const stage = el.querySelector('#stage') as HTMLElement;
   const { MatchViewer: MV } = await import('../viewer/viewer.ts');
   if (!alive) return;
-  const toTeam = (s: Snap) => ({ name: s.name, short: s.short, colors: s.colors, formation: s.formation, tactics: s.tactics, players: s.players.map((p) => ({ name: p.name, number: p.number, app: p.app })) });
+  const toTeam = (s: Snap) => ({ name: s.name, short: s.short, colors: s.colors, formation: s.formation, tactics: s.tactics, players: s.players.map((p) => ({ name: p.name, number: p.number, app: p.app, eq: p.eq })) });
   try {
     viewer = new MV(stage, [toTeam(lineups[0]), toTeam(lineups[1])], halftimeAt, { night, quality: prefQ });
   } catch (e) {
@@ -238,7 +239,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
           const line = done ? players![side * 11 + k] : null;
           return html`<a href="/player/${p.id}" class="row" style="gap:7px;padding:6px 2px;border-top:1px solid var(--line)">
             <span class="dim tiny" style="width:18px;text-align:right;font-weight:800">${p.number}</span>
-            ${avatarSvg(p.app as any, s.colors, 24)}
+            ${avatarSvg(p.app as any, s.colors, 24, undefined, { eq: p.eq })}
             <span class="grow small ellipsis" style="font-weight:600">${p.name.split(' ').slice(-1)[0]}${p.bot ? '' : html` <span class="lime">●</span>`}</span>
             ${line?.goals ? html`<span class="tiny lime">${'⚽'.repeat(Math.min(3, line.goals))}</span>` : ''}
             ${line ? html`<span class="tiny" style="font-weight:800;color:${line.rating >= 7.5 ? 'var(--lime)' : 'var(--muted)'}">${line.rating.toFixed(1)}${motm === side * 11 + k ? '★' : ''}</span>` : html`<span class="tiny dim">${p.role}</span>`}

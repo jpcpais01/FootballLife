@@ -108,3 +108,31 @@ export function errorBox(msg: string): Raw {
 }
 
 export { esc };
+
+/** Celebratory banner for newly unlocked achievements. */
+export function achievementToasts(ids: string[] | undefined) {
+  if (!ids?.length) return;
+  import('../shared/achievements.ts').then(({ ACH_BY_ID, TIER_COLORS }) => {
+    ids.forEach((id, i) => {
+      const a = ACH_BY_ID[id];
+      if (!a) return;
+      setTimeout(() => {
+        let wrap = document.querySelector('.ach-wrap');
+        if (!wrap) {
+          wrap = document.createElement('div');
+          wrap.className = 'ach-wrap';
+          document.body.appendChild(wrap);
+        }
+        const t = document.createElement('div');
+        t.className = 'ach-toast';
+        t.style.setProperty('--tier', TIER_COLORS[a.tier]);
+        t.innerHTML = html`<div class="ach-medal">★</div><div><div class="tiny" style="color:var(--tier);font-weight:800;letter-spacing:.12em">ACHIEVEMENT UNLOCKED</div><div style="font-weight:800">${a.name}</div><div class="tiny muted">${a.coins ? `+${a.coins} coins` : a.desc}</div></div>`.html;
+        wrap.appendChild(t);
+        setTimeout(() => {
+          t.classList.add('out');
+          setTimeout(() => t.remove(), 500);
+        }, 4200);
+      }, i * 700);
+    });
+  });
+}

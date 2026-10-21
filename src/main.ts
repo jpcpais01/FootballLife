@@ -21,6 +21,9 @@ addRoute('/league', () => import('./pages/league.ts').then((m) => m.leaguePage))
 addRoute('/match/:id', () => import('./pages/match.ts').then((m) => m.matchPage));
 addRoute('/player/:id', () => import('./pages/player.ts').then((m) => m.playerPage));
 addRoute('/training', () => import('./pages/training.ts').then((m) => m.trainingPage));
+addRoute('/shop', () => import('./pages/shop.ts').then((m) => m.shopPage));
+addRoute('/shop/:tab', () => import('./pages/shop.ts').then((m) => m.shopPage));
+addRoute('/join/:code', () => import('./pages/join.ts').then((m) => m.joinPage));
 addRoute('/patch-notes', () => import('./pages/patchnotes.ts').then((m) => m.patchNotesPage));
 
 const root = document.getElementById('app')!;
@@ -30,7 +33,8 @@ const NAV = [
   { href: '/club', label: 'My club', icon: 'shield' },
   { href: '/league', label: 'League', icon: 'trophy' },
   { href: '/training', label: 'Training', icon: 'dumbbell' },
-  { href: '/clubs', label: 'Clubs', icon: 'users' },
+  { href: '/shop', label: 'Shop', icon: 'bag' },
+  { href: '/clubs', label: 'Clubs', icon: 'users', desktopOnly: true },
 ];
 
 function navHref(href: string) {
@@ -48,28 +52,35 @@ function isActive(href: string, path: string) {
 
 let shellMounted = false;
 
-function renderShell(path: string) {
+function meSide() {
   const p = state.player;
-  const links = (cls: string) => NAV.map((n) => html`<a href="${navHref(n.href)}" class="${cls} ${isActive(n.href, path) ? 'active' : ''}">${icon(n.icon)}<span>${n.label}</span></a>`);
+  return p ? html`<a href="/player/${p.id}" class="me-chip">${avatarSvg(p.appearance, undefined, 38, undefined, { eq: p.equipped })}<div class="grow"><div class="name ellipsis">${p.name}</div><div class="sub">${p.position} · ${p.ovr} OVR · <span class="lime">${p.coins.toLocaleString()} coins</span></div></div></a>` : html``;
+}
+
+function meTop() {
+  const p = state.player;
+  return html`${p ? html`<a href="/shop" class="chip lime">${icon('coin', 13)} ${p.coins.toLocaleString()}</a>` : ''}
+    <a href="/patch-notes" class="muted" aria-label="Patch notes">${icon('notes')}</a>
+    ${p ? html`<a href="/player/${p.id}" aria-label="My profile">${avatarSvg(p.appearance, undefined, 34, undefined, { eq: p.equipped })}</a>` : ''}`;
+}
+
+function renderShell(path: string) {
+  const links = (cls: string, mobile = false) => NAV.filter((n) => !(mobile && n.desktopOnly)).map((n) => html`<a href="${navHref(n.href)}" class="${cls} ${isActive(n.href, path) ? 'active' : ''}">${icon(n.icon)}<span>${n.label}</span>${n.href === '/clubs' || (mobile && n.href === '/club') ? (state.invites ? html`<i class="nav-dot">${state.invites}</i>` : '') : ''}</a>`);
   mount(root, html`<div class="app">
     <aside class="sidebar">
       <a href="/" class="brand">${brandMark()}<span class="wordmark">FOOTBAL<b>LIFE</b></span></a>
       ${links('nav-link')}
       <a href="/patch-notes" class="nav-link ${path === '/patch-notes' ? 'active' : ''}">${icon('notes')}<span>Patch notes</span></a>
       <div class="spacer"></div>
-      ${p ? html`<a href="/player/${p.id}" class="me-chip">${avatarSvg(p.appearance, undefined, 38)}<div class="grow"><div class="name ellipsis">${p.name}</div><div class="sub">${p.position} · ${p.ovr} OVR · <span class="lime">${p.coins.toLocaleString()} coins</span></div></div></a>` : ''}
+      <div id="me-side">${meSide()}</div>
       <button class="nav-link" style="border:0;background:none;cursor:pointer;width:100%" data-logout>${icon('logout')}<span>Sign out</span></button>
     </aside>
     <header class="topbar">
       <a href="/" class="row">${brandMark(28)}<span class="wordmark">FOOTBAL<b>LIFE</b></span></a>
-      <div class="row" style="gap:14px">
-        ${p ? html`<span class="chip lime">${icon('coin', 13)} ${p.coins.toLocaleString()}</span>` : ''}
-        <a href="/patch-notes" class="muted" aria-label="Patch notes">${icon('notes')}</a>
-        ${p ? html`<a href="/player/${p.id}" aria-label="My profile">${avatarSvg(p.appearance, undefined, 34)}</a>` : ''}
-      </div>
+      <div class="row" style="gap:14px" id="me-top">${meTop()}</div>
     </header>
     <main id="page"></main>
-    <nav class="tabbar">${links('')}</nav>
+    <nav class="tabbar">${links('', true)}</nav>
   </div>`);
   root.querySelector('[data-logout]')?.addEventListener('click', async () => {
     await api.post('/api/auth/logout').catch(() => {});
@@ -83,13 +94,17 @@ function renderShell(path: string) {
 function updateNav(path: string) {
   for (const group of [root.querySelectorAll<HTMLAnchorElement>('.sidebar .nav-link[href]'), root.querySelectorAll<HTMLAnchorElement>('.tabbar a')]) {
     group.forEach((a, i) => {
-      const n = NAV[i];
+      const n = (a.closest('.tabbar') ? NAV.filter((x) => !x.desktopOnly) : NAV)[i];
       if (!n) {
         a.classList.toggle('active', path === a.getAttribute('href'));
         return;
       }
       a.href = navHref(n.href);
       a.classList.toggle('active', isActive(n.href, path));
+      if (n.href === (a.closest('.tabbar') ? '/club' : '/clubs')) {
+        a.querySelector('.nav-dot')?.remove();
+        if (state.invites) a.insertAdjacentHTML('beforeend', `<i class="nav-dot">${state.invites}</i>`);
+      }
     });
   }
 }
@@ -100,8 +115,13 @@ async function render(path: string) {
   } catch {
     state.loaded = false;
   }
-  // Auth gates.
+  // Auth gates. Invite links survive signing up.
+  if (!state.user && path.startsWith('/join/')) safeSet('fl-next', path);
   if (!state.user && path !== '/login' && path !== '/patch-notes') return navigate('/login', true);
+  if (state.user && state.player) {
+    const next = safeTake('fl-next');
+    if (next && next !== path) return navigate(next, true);
+  }
   if (state.user && !state.player && path !== '/create' && path !== '/patch-notes') return navigate('/create', true);
   if (state.user && state.player && (path === '/login' || path === '/create')) return navigate('/', true);
 
@@ -127,15 +147,29 @@ async function render(path: string) {
 }
 
 // Re-render the shell's player chip when coins/ovr/club change.
+// Refresh the player chip, coins and invite dots in place when the player changes.
+// (The page element must survive: pages keep listeners on it.)
 document.addEventListener('me-changed', () => {
-  if (shellMounted && state.player) {
-    const page = document.getElementById('page');
-    const keep = page ? [...page.childNodes] : [];
-    renderShell(location.pathname);
-    const np = document.getElementById('page')!;
-    keep.forEach((n) => np.appendChild(n));
-  }
+  if (!shellMounted || !state.player) return;
+  const side = document.getElementById('me-side');
+  const top = document.getElementById('me-top');
+  if (side) side.innerHTML = meSide().html;
+  if (top) top.innerHTML = meTop().html;
+  updateNav(location.pathname);
 });
+
+function safeSet(k: string, v: string) {
+  try { sessionStorage.setItem(k, v); } catch { /* storage unavailable */ }
+}
+function safeTake(k: string) {
+  try {
+    const v = sessionStorage.getItem(k);
+    if (v) sessionStorage.removeItem(k);
+    return v;
+  } catch {
+    return null;
+  }
+}
 
 startRouter(render);
 fullscreenOnFirstTap();
