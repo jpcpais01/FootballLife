@@ -26,8 +26,10 @@ export function match(path: string) {
 }
 
 export function navigate(path: string, replace = false) {
-  if (replace) history.replaceState(null, '', path);
-  else history.pushState(null, '', path);
+  // `idx` counts in-app steps, so a back button knows whether there is a page to go back to.
+  const idx: number = history.state?.idx ?? 0;
+  if (replace) history.replaceState({ idx }, '', path);
+  else history.pushState({ idx: idx + 1 }, '', path);
   void renderFn(location.pathname);
   window.scrollTo({ top: 0 });
 }

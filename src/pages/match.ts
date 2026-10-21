@@ -6,11 +6,15 @@ import { clockAt, rateAt, realAt, totalReal, type Segment } from '../../shared/t
 import { api } from '../api.ts';
 import { avatarSvg } from '../art.ts';
 import { badge, posChip, type MatchBrief } from '../components.ts';
-import { html, mount, raw, type Raw } from '../dom.ts';
+import { html, mount, type Raw } from '../dom.ts';
 import { icon } from '../icons.ts';
 import { countdown, errorBox, kickoffLabel, skeleton } from '../ui.ts';
 import type { CameraMode, MatchViewer, Quality } from '../viewer/viewer.ts';
 import { createBoard, type Board } from './matchBoard.ts';
+import { evIcon } from '../eventIcons.ts';
+import { liveRating } from '../../shared/sim/rating.ts';
+import type { Position } from '../../shared/attributes.ts';
+import { state } from '../state.ts';
 
 interface Snap {
   clubId: string;
@@ -110,21 +114,27 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   const prefQ = (localStorage.getItem('fl-quality') as Quality | null) ?? undefined;
   let mode: CameraMode = 'broadcast';
 
+  // The signed-in player's live match rating sits at the end of the scorebug.
+  const meSide = lineups.findIndex((s) => s.players.some((p) => p.id === state.player?.id));
+  const meK = meSide < 0 ? -1 : lineups[meSide].players.findIndex((p) => p.id === state.player?.id);
+  const meIdx = meSide < 0 ? -1 : meSide * 11 + meK;
   const kitBar = (c: { primary: string }) => html`<span class="kit" style="background:${c.primary}"></span>`;
   mount(el, html`
     <div class="row between match-head" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
-      <div class="row" style="gap:10px"><button class="btn sm ghost" onclick="history.back()" aria-label="Back">${icon('back', 16)}</button>
+      <div class="row" style="gap:10px"><button class="btn sm ghost" data-back aria-label="Back">${icon('back', 16)}</button>
         <div><div class="eyebrow">${m.kind === 'friendly' ? 'Friendly' : m.cup ? `FootbalLife Cup · ${m.cup.name}` : `League · Round ${m.round}`}</div><div class="h3">${m.home.name} vs ${m.away.name}</div></div></div>
       <span class="chip" id="status"></span>
     </div>
     <div class="match-wrap">
       <div>
         <div class="stage" id="stage">
+          <button class="stage-back" data-back aria-label="Go back" title="Go back">${icon('back', 16)}</button>
           <div class="scorebug">
             <div>${kitBar(lineups[0].colors)}<span>${lineups[0].short}</span></div>
             <div class="sb-score" id="score">0–0</div>
             <div><span>${lineups[1].short}</span>${kitBar(lineups[1].colors)}</div>
             <div class="sb-clock" id="clock">0'</div>
+            ${meIdx >= 0 ? html`<div class="sb-me" id="myrate"></div>` : ''}
           </div>
           <div id="pens"></div>
           <div class="stage-ticker" id="ticker"></div>
@@ -193,6 +203,41 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   // ---------- rendering helpers ----------
   let lastIndex = -1;
   let lastGoals = 0;
+  let shownRating = -1;
+  let rateEnded = false;
+  const rateTone = (r: number) => (r >= 8 ? 'top' : r >= 7 ? 'good' : r >= 6 ? 'ok' : 'low');
+  const updateRating = (idx: number, ended: boolean) => {
+    if (meIdx < 0) return;
+    rateEnded = ended;
+    const me = lineups[meSide].players[meK];
+    const r = ended && players ? players[meIdx].rating : idx < 0 ? 6 : liveRating(events, idx, meIdx, me.role as Position);
+    if (r === shownRating) return;
+    const box = el.querySelector('#myrate');
+    if (!box) return;
+    if (shownRating < 0) {
+      box.innerHTML = html`<div class="myrate">
+        <span class="mr-av">${avatarSvg(me.app as any, lineups[meSide].colors, 30, undefined, { eq: me.eq })}</span>
+        <span class="mr-name"><b>${me.name.split(' ').slice(-1)[0]}</b><i>Rating</i></span>
+        <span class="mr-val"></span><span class="mr-delta"></span>
+      </div>`.html;
+    }
+    const pod = box.firstElementChild as HTMLElement;
+    pod.dataset.tone = rateTone(r);
+    pod.classList.toggle('motm', !!(ended && motm === meIdx));
+    pod.querySelector('.mr-val')!.textContent = r.toFixed(1);
+    const d = Math.round((r - shownRating) * 10) / 10;
+    if (shownRating >= 0 && d !== 0 && Math.abs(d) < 2) {
+      const dl = pod.querySelector('.mr-delta') as HTMLElement;
+      dl.textContent = `${d > 0 ? '+' : ''}${d.toFixed(1)}`;
+      dl.className = `mr-delta ${d > 0 ? 'up' : 'down'}`;
+      void dl.offsetWidth;
+      dl.classList.add('show');
+      pod.classList.remove('bump');
+      void pod.offsetWidth;
+      pod.classList.add('bump');
+    }
+    shownRating = r;
+  };
   const scoreAt = (t: number): [number, number] => {
     let sc: [number, number] = [0, 0];
     for (const e of events) {
@@ -239,7 +284,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
       for (let k = i; k >= 0 && items.length < 80; k--) {
         const l = lines[k];
         if (!l) continue;
-        items.push(html`<div class="ev ${l.big ? 'big' : ''}"><span class="m">${minuteLabel(events[k].t, halftimeAt)}</span><span class="ic">${l.icon}</span><span>${l.text}</span></div>`);
+        items.push(html`<div class="ev ${l.big ? 'big' : ''}"><span class="m">${minuteLabel(events[k].t, halftimeAt)}</span><span class="ic">${evIcon(l.icon, 18)}</span><span>${l.text}</span></div>`);
       }
       panel.innerHTML = html`<div class="feed">${items.length ? items : html`<div class="empty small">Kick-off is moments away…</div>`}</div>`.html;
     } else if (tab === 'stats') {
@@ -272,12 +317,12 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
             <span class="dim tiny" style="width:18px;text-align:right;font-weight:800">${p.number}</span>
             ${avatarSvg(p.app as any, s.colors, 24, undefined, { eq: p.eq })}
             <span class="grow small ellipsis" style="font-weight:600">${p.name.split(' ').slice(-1)[0]}${p.bot ? '' : html` <span class="lime">●</span>`}</span>
-            ${line?.goals ? html`<span class="tiny lime">${'⚽'.repeat(Math.min(3, line.goals))}</span>` : ''}
-            ${line ? html`<span class="tiny" style="font-weight:800;color:${line.rating >= 7.5 ? 'var(--lime)' : 'var(--muted)'}">${line.rating.toFixed(1)}${motm === side * 11 + k ? '★' : ''}</span>` : html`<span class="tiny dim">${p.role}</span>`}
+            ${line?.goals ? html`<span class="row" style="gap:1px">${Array.from({ length: Math.min(3, line.goals) }, () => evIcon('kickoff', 13))}</span>` : ''}
+            ${line ? html`<span class="tiny" style="font-weight:800;color:${line.rating >= 7.5 ? 'var(--lime)' : 'var(--muted)'}">${line.rating.toFixed(1)}</span>${motm === side * 11 + k ? evIcon('star', 13) : ''}` : html`<span class="tiny dim">${p.role}</span>`}
           </a>`;
         })}</div>`;
       panel.innerHTML = html`<div class="grid cols-2" style="gap:14px">${col(lineups[0], 0)}${col(lineups[1], 1)}</div>
-        ${done && motm !== undefined ? html`<div class="chip lime" style="margin-top:12px">★ Player of the match: ${lineups[motm < 11 ? 0 : 1].players[motm % 11].name}</div>` : ''}`.html;
+        ${done && motm !== undefined ? html`<div class="chip lime" style="margin-top:12px">${evIcon('star', 14)} Player of the match: ${lineups[motm < 11 ? 0 : 1].players[motm % 11].name}</div>` : ''}`.html;
     }
   };
 
@@ -379,6 +424,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
     if (ff) ff.textContent = rate > 6 ? '» Fast-forwarding build-up play' : '';
     // Goal flash + ticker on new events.
     const idx = indexAt(t);
+    if (idx !== lastIndex || !!ended !== rateEnded) updateRating(idx, !!ended);
     if (idx !== lastIndex) {
       const from = lastIndex;
       lastIndex = idx;
@@ -398,7 +444,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
           if (!l || (!l.big && l.kind !== 'save' && l.kind !== 'chance' && l.kind !== 'card' && l.kind !== 'post')) continue;
           const d = document.createElement('div');
           d.className = 'line';
-          d.innerHTML = raw(`${l.icon} `).html + html`${l.text}`.html;
+          d.innerHTML = evIcon(l.icon, 16).html + html`<span>${l.text}</span>`.html;
           ticker.appendChild(d);
           while (ticker.children.length > 2) ticker.firstElementChild!.remove();
           setTimeout(() => d.remove(), 6000);

@@ -1,4 +1,5 @@
 import { esc, html, raw, type Raw } from './dom.ts';
+import { icon } from './icons.ts';
 
 export function toast(msg: string, kind: 'ok' | 'err' | '' = '') {
   let wrap = document.querySelector('.toast-wrap');
@@ -126,7 +127,7 @@ export function achievementToasts(ids: string[] | undefined) {
         const t = document.createElement('div');
         t.className = 'ach-toast';
         t.style.setProperty('--tier', TIER_COLORS[a.tier]);
-        t.innerHTML = html`<div class="ach-medal">★</div><div><div class="tiny" style="color:var(--tier);font-weight:800;letter-spacing:.12em">ACHIEVEMENT UNLOCKED</div><div style="font-weight:800">${a.name}</div><div class="tiny muted">${a.coins ? `+${a.coins} coins` : a.desc}</div></div>`.html;
+        t.innerHTML = html`<div class="ach-medal">${icon('medal', 22)}</div><div><div class="tiny" style="color:var(--tier);font-weight:800;letter-spacing:.12em">ACHIEVEMENT UNLOCKED</div><div style="font-weight:800">${a.name}</div><div class="tiny muted">${a.coins ? `+${a.coins} coins` : a.desc}</div></div>`.html;
         wrap.appendChild(t);
         setTimeout(() => {
           t.classList.add('out');

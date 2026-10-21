@@ -1,6 +1,7 @@
 import type { Attr } from '../attributes.ts';
 import { getFormation, roleFit, type Slot } from '../formations.ts';
 import { Rng } from '../rng.ts';
+import { rateLine } from './rating.ts';
 import { distM, flip, slotPosition, toAbs, type Pt } from '../shape.ts';
 import { buildTimeline } from '../timeline.ts';
 import type { EventKind, MatchEvent, MatchResult, PlayerLine, SimTeam, TeamStats } from './types.ts';
@@ -775,20 +776,7 @@ class Engine {
   private rate() {
     for (const l of this.lines) {
       const side = this.sideOf(l.idx);
-      const role = this.slots[side][this.local(l.idx)].role;
-      let r = 6.0;
-      r += l.goals * 0.95 + l.assists * 0.55 + Math.min(0.6, l.keyPasses * 0.1);
-      r += l.onTarget * 0.05 + Math.min(0.7, l.tackles * 0.05 + l.interceptions * 0.035);
-      r += l.passes ? ((l.passesDone / l.passes) - 0.8) * 1.5 : 0;
-      r -= l.yellow * 0.3 + l.red * 1.4;
-      if (role === 'GK') {
-        r += l.saves * 0.28 - this.score[1 - side] * 0.35;
-        if (this.score[1 - side] === 0) r += 0.6;
-      }
-      if (role === 'CB' || role === 'FB') r += this.score[1 - side] === 0 ? 0.4 : -this.score[1 - side] * 0.12;
-      const diff = this.score[side] - this.score[1 - side];
-      r += clamp(diff, -3, 3) * 0.12;
-      l.rating = Math.round(clamp(r, 3, 10) * 10) / 10;
+      l.rating = rateLine(l, this.slots[side][this.local(l.idx)].role, this.score[side], this.score[1 - side]);
     }
   }
 }

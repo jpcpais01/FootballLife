@@ -183,6 +183,7 @@ function renderShell(path: string) {
   mount(root, html`<div class="app">
     <div class="ambient" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i><div class="grain"></div></div>
     <header class="topnav">
+      <button class="top-back" data-back aria-label="Go back" title="Go back">${icon('back', 18)}</button>
       <a href="/" class="brand" aria-label="FootbalLife home">${brandMark(30)}<span class="wordmark">FOOTBAL<b>LIFE</b></span></a>
       <nav class="topnav-links">${links('tn-link')}</nav>
       <div class="topnav-right" >
@@ -224,10 +225,21 @@ function dockState(path: string, first = false) {
   root.querySelector('.app')?.classList.toggle('at-match', path.startsWith('/match/'));
   const dock = document.getElementById('dock');
   const on = dock?.querySelector<HTMLElement>('.active');
+  // Pages that aren't a dock destination are sub-pages: they get a back button.
+  root.querySelector('.app')?.classList.toggle('is-sub', path !== '/' && !on);
   if (!dock || !on) return;
   const x = on.offsetLeft - (dock.clientWidth - on.offsetWidth) / 2;
   dock.scrollTo({ left: Math.max(0, x), behavior: first ? 'auto' : 'smooth' });
 }
+
+/** Back to the previous page, or home when the page was opened directly. */
+export function goBack() {
+  if ((history.state?.idx ?? 0) > 0) history.back();
+  else navigate('/');
+}
+document.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement).closest('[data-back]')) goBack();
+});
 
 function closeMenu() {
   const m = document.getElementById('user-menu');
