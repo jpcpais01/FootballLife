@@ -27,7 +27,7 @@ export function startDemo(container: HTMLElement): () => void {
   const b = team('Real Marea', 'MAR', '#f5f5f5', '#7a1fd1', 9);
   const res = simulateMatch(a.sim, b.sim, 20261021);
   const night = new Date().getHours() >= 18 || new Date().getHours() < 7;
-  const viewer = new MatchViewer(container, [a.view, b.view], res.halftimeAt, { night, quality: 'low', crowd: 2600 });
+  const viewer = new MatchViewer(container, [a.view, b.view], res.halftimeAt, { night, quality: 'low', crowd: 4000 });
   viewer.setEvents(res.events);
   viewer.setMode('broadcast');
   const total = totalReal(res.timeline);
