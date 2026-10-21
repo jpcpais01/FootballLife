@@ -88,13 +88,27 @@ const NAV = [
   { href: '/league', label: 'League', icon: 'trophy' },
   { href: '/training', label: 'Training', icon: 'dumbbell' },
   { href: '/shop', label: 'Shop', icon: 'bag' },
-  { href: '/house', label: 'My home', icon: 'sofa', desktopOnly: true },
-  { href: '/transfers', label: 'Transfers', icon: 'swap', desktopOnly: true },
-  { href: '/clubs', label: 'Clubs', icon: 'users', desktopOnly: true },
+  { href: '/house', label: 'My home', icon: 'sofa' },
+  { href: '/transfers', label: 'Transfers', icon: 'swap' },
+  { href: '/clubs', label: 'Clubs', icon: 'users' },
+];
+
+// The phone menu: a scrolling row of mini tiles, the same ones as the home screen rail.
+const DOCK = [
+  { href: '/', label: 'Home', icon: 'home', accent: '#c6ff3d' },
+  { href: '/club', label: 'My club', icon: 'shield', accent: '#3d6bff' },
+  { href: '/training', label: 'Training', icon: 'dumbbell', accent: '#3dd6ff' },
+  { href: '/league', label: 'League', icon: 'trophy', accent: '#ffcf3d' },
+  { href: '/shop', label: 'Shop', icon: 'bag', accent: '#ff4d9d' },
+  { href: '/house', label: 'My home', icon: 'sofa', accent: '#ff9a3d' },
+  { href: '/transfers', label: 'Transfers', icon: 'swap', accent: '#8a6bff' },
+  { href: '/clubs', label: 'Clubs', icon: 'users', accent: '#e3e8ee' },
+  { href: '/me', label: 'Profile', icon: 'user', accent: '#c6ff3d' },
 ];
 
 function navHref(href: string) {
   if (href === '/club') return state.player?.clubId ? `/club/${state.player.clubId}` : '/clubs';
+  if (href === '/me') return state.player ? `/player/${state.player.id}` : '/';
   return href;
 }
 
@@ -104,6 +118,7 @@ function isActive(href: string, path: string) {
   if (href === '/club') return !!mine && path === mine;
   if (href === '/clubs') return path.startsWith('/clubs') || (path.startsWith('/club/') && path !== mine);
   if (href === '/house') return path === '/house' || path === `/house/${state.player?.id}`;
+  if (href === '/me') return !!state.player && path === `/player/${state.player.id}`;
   return path.startsWith(href);
 }
 
@@ -148,7 +163,7 @@ function applyTint() {
 }
 
 function renderShell(path: string) {
-  const links = (cls: string, mobile = false) => NAV.filter((n) => !(mobile && n.desktopOnly)).map((n) => html`<a href="${navHref(n.href)}" class="${cls} ${isActive(n.href, path) ? 'active' : ''}" title="${n.label}">${icon(n.icon)}<span>${n.label}</span>${n.href === '/clubs' || (mobile && n.href === '/club') ? (state.invites ? html`<i class="nav-dot">${state.invites}</i>` : '') : ''}</a>`);
+  const links = (cls: string) => NAV.map((n) => html`<a href="${navHref(n.href)}" class="${cls} ${isActive(n.href, path) ? 'active' : ''}" title="${n.label}">${icon(n.icon)}<span>${n.label}</span>${n.href === '/clubs' && state.invites ? html`<i class="nav-dot">${state.invites}</i>` : ''}</a>`);
   mount(root, html`<div class="app">
     <div class="ambient" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i><div class="grain"></div></div>
     <header class="topnav">
@@ -160,27 +175,47 @@ function renderShell(path: string) {
       </div>
       ${menu()}
     </header>
+    <nav class="dock" aria-label="Main menu">${DOCK.map((n, i) => html`<a href="${navHref(n.href)}" class="dk ${isActive(n.href, path) ? 'active' : ''}" style="--accent:${n.href === '/club' && state.club ? state.club.colors.primary : n.accent};--i:${i}"><i class="dk-face">${icon(n.icon)}</i><span>${n.label}</span>${n.href === '/club' && state.invites ? html`<b class="nav-dot">${state.invites}</b>` : ''}</a>`)}</nav>
     <main id="page"></main>
-    <nav class="tabbar">${links('', true)}</nav>
   </div>`);
+  dockState(path, true);
   applyTint();
   shellMounted = true;
 }
 
 function updateNav(path: string) {
-  for (const group of [root.querySelectorAll<HTMLAnchorElement>('.topnav-links a'), root.querySelectorAll<HTMLAnchorElement>('.tabbar a')]) {
-    group.forEach((a, i) => {
-      const n = (a.closest('.tabbar') ? NAV.filter((x) => !x.desktopOnly) : NAV)[i];
-      if (!n) return;
-      a.href = navHref(n.href);
-      a.classList.toggle('active', isActive(n.href, path));
-      if (n.href === (a.closest('.tabbar') ? '/club' : '/clubs')) {
-        a.querySelector('.nav-dot')?.remove();
-        if (state.invites) a.insertAdjacentHTML('beforeend', `<i class="nav-dot">${state.invites}</i>`);
-      }
-    });
-  }
+  root.querySelectorAll<HTMLAnchorElement>('.topnav-links a').forEach((a, i) => {
+    const n = NAV[i];
+    if (!n) return;
+    a.href = navHref(n.href);
+    a.classList.toggle('active', isActive(n.href, path));
+    if (n.href === '/clubs') {
+      a.querySelector('.nav-dot')?.remove();
+      if (state.invites) a.insertAdjacentHTML('beforeend', `<i class="nav-dot">${state.invites}</i>`);
+    }
+  });
+  root.querySelectorAll<HTMLAnchorElement>('.dock a').forEach((a, i) => {
+    const n = DOCK[i];
+    a.href = navHref(n.href);
+    a.classList.toggle('active', isActive(n.href, path));
+    if (n.href === '/club') {
+      a.querySelector('.nav-dot')?.remove();
+      if (state.invites) a.insertAdjacentHTML('beforeend', `<b class="nav-dot">${state.invites}</b>`);
+    }
+  });
+  dockState(path);
   closeMenu();
+}
+
+/** The home screen has its own big rail, so the dock hides there; elsewhere it keeps the current page in view. */
+function dockState(path: string, first = false) {
+  const app = root.querySelector('.app');
+  app?.classList.toggle('at-home', path === '/');
+  const dock = root.querySelector<HTMLElement>('.dock');
+  const on = dock?.querySelector<HTMLElement>('.active');
+  if (!dock || !on || path === '/') return;
+  const x = on.offsetLeft - (dock.clientWidth - on.offsetWidth) / 2;
+  dock.scrollTo({ left: Math.max(0, x), behavior: first ? 'auto' : 'smooth' });
 }
 
 function closeMenu() {
