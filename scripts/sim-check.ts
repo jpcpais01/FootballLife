@@ -4,6 +4,7 @@ import { generateAttributes, type Position } from '../shared/attributes.ts';
 import { DEFAULT_TACTICS, getFormation, type Tactics } from '../shared/formations.ts';
 import { simulateMatch } from '../shared/sim/engine.ts';
 import type { SimTeam } from '../shared/sim/types.ts';
+import { shootout } from '../shared/sim/penalties.ts';
 
 function team(name: string, level: number, formation = '4-3-3', tactics: Tactics = DEFAULT_TACTICS): SimTeam {
   const f = getFormation(formation);
@@ -81,5 +82,22 @@ check('small edge = modest advantage', slight.W > slight.L && slight.W / N < 0.6
 const att = series(team('Att', 50, '4-3-3', { mentality: 'attacking', tempo: 'direct', pressing: 'high', width: 'wide' }), team('Def', 50, '5-3-2', { mentality: 'defensive', tempo: 'patient', pressing: 'low', width: 'narrow' }), N);
 console.log('attacking v defensive', att);
 check('tactics change the game', att.goals !== even.goals);
+
+// Penalty shootouts always produce a winner and stop once it is decided.
+const so = Array.from({ length: 400 }, (_, i) => shootout(team('P1', 50, '4-3-3'), team('P2', 50, '4-3-3'), i + 1));
+check('shootouts always have a winner', so.every((x) => x.score[0] !== x.score[1]));
+const valid = so.every((x) => {
+  const counts = [0, 0];
+  const goals = [0, 0];
+  for (const k of x.kicks) {
+    counts[k.s]++;
+    if (k.in) goals[k.s]++;
+  }
+  // Either both sides took the same number of kicks, or home took one more inside the first five.
+  return goals[0] === x.score[0] && goals[1] === x.score[1] && (counts[0] === counts[1] || (counts[0] === counts[1] + 1 && counts[0] <= 5));
+});
+check('shootout kicks add up and stop when decided', valid);
+const rate = so.reduce((s2, x) => s2 + x.kicks.filter((k) => k.in).length, 0) / so.reduce((s2, x) => s2 + x.kicks.length, 0);
+check('penalty conversion is realistic', rate > 0.65 && rate < 0.88, rate.toFixed(2));
 
 process.exit(failed ? 1 : 0);

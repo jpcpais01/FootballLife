@@ -18,7 +18,11 @@ export interface AchStats {
   founded: boolean;
   owned: number;
   titles: number;
+  cups: number;
   awards: number;
+  houses: number;
+  cars: number;
+  memorabilia: number;
 }
 
 export type Tier = 'bronze' | 'silver' | 'gold';
@@ -66,7 +70,13 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'ovr70', name: 'Elite', desc: 'Reach 70 overall.', tier: 'gold', icon: 'user', coins: 800, progress: count('ovr', 70) },
   { id: 'shop1', name: 'Fresh fit', desc: 'Buy your first item in the shop.', tier: 'bronze', icon: 'coin', coins: 40, progress: count('owned', 1) },
   { id: 'shop10', name: 'Collector', desc: 'Own 10 items.', tier: 'silver', icon: 'coin', coins: 300, progress: count('owned', 10) },
+  { id: 'house', name: 'Moving up', desc: 'Buy a new home.', tier: 'silver', icon: 'home', coins: 150, progress: count('houses', 1) },
+  { id: 'car1', name: 'First wheels', desc: 'Buy your first car.', tier: 'bronze', icon: 'car', coins: 80, progress: count('cars', 1) },
+  { id: 'car3', name: 'Petrolhead', desc: 'Own three cars.', tier: 'gold', icon: 'car', coins: 400, progress: count('cars', 3) },
+  { id: 'swap1', name: 'Keepsake', desc: 'Collect your first piece of memorabilia.', tier: 'bronze', icon: 'shirt', coins: 50, progress: count('memorabilia', 1) },
+  { id: 'memo10', name: 'Museum', desc: 'Collect 10 pieces of memorabilia.', tier: 'silver', icon: 'shirt', coins: 250, progress: count('memorabilia', 10) },
   { id: 'title', name: 'Champions', desc: 'Win the league.', tier: 'gold', icon: 'trophy', coins: 0, progress: count('titles', 1) },
+  { id: 'cup', name: 'Cup glory', desc: 'Win the FootbalLife Cup.', tier: 'gold', icon: 'trophy', coins: 0, progress: count('cups', 1) },
   { id: 'award', name: 'Decorated', desc: 'Win an individual season award.', tier: 'gold', icon: 'trophy', coins: 0, progress: count('awards', 1) },
 ];
 
@@ -85,6 +95,7 @@ export const TROPHY_KINDS = {
   champion: { label: 'League champions', short: 'Champions' },
   runner_up: { label: 'Runners-up', short: '2nd' },
   third: { label: 'Third place', short: '3rd' },
+  cup: { label: 'FootbalLife Cup', short: 'Cup winners' },
   golden_boot: { label: 'Golden Boot', short: 'Top scorer' },
   playmaker: { label: 'Playmaker award', short: 'Most assists' },
   golden_glove: { label: 'Golden Glove', short: 'Most clean sheets' },

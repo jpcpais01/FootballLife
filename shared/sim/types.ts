@@ -115,4 +115,6 @@ export interface MatchResult {
   halftimeAt: number;
   /** Broadcast timeline: game clock ↔ real seconds after kickoff. */
   timeline: Segment[];
+  /** Penalty shootout after a drawn cup tie. */
+  pens?: { score: [number, number]; kicks: { s: 0 | 1; p: number; in: boolean }[] };
 }

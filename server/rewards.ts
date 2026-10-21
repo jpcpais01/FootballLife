@@ -2,6 +2,7 @@
 import { ACH_BY_ID, earnedNow, type AchStats } from '../shared/achievements.ts';
 import { overall } from '../shared/attributes.ts';
 import { ITEM_BY_ID } from '../shared/cosmetics.ts';
+import { HOUSES } from '../shared/life.ts';
 import type { Db } from './db.ts';
 import { newId } from './http.ts';
 import type { PlayerRow } from './squads.ts';
@@ -28,8 +29,14 @@ export async function achStats(db: Db, p: PlayerRow): Promise<AchStats> {
     [p.id],
   );
   const [inv] = await db.query<{ n: string }>('SELECT count(*) n FROM inventory WHERE player_id = $1', [p.id]);
-  const [tr] = await db.query<{ titles: string; awards: string }>(
-    "SELECT coalesce(sum(CASE WHEN kind = 'champion' THEN 1 ELSE 0 END),0) titles, coalesce(sum(CASE WHEN kind IN ('golden_boot','playmaker','golden_glove','pots') THEN 1 ELSE 0 END),0) awards FROM trophies WHERE player_id = $1",
+  const [tr] = await db.query<{ titles: string; awards: string; cups: string }>(
+    "SELECT coalesce(sum(CASE WHEN kind = 'champion' THEN 1 ELSE 0 END),0) titles, coalesce(sum(CASE WHEN kind = 'cup' THEN 1 ELSE 0 END),0) cups, coalesce(sum(CASE WHEN kind IN ('golden_boot','playmaker','golden_glove','pots') THEN 1 ELSE 0 END),0) awards FROM trophies WHERE player_id = $1",
+    [p.id],
+  );
+  const [life] = await db.query<{ houses: string; cars: string; memo: string }>(
+    `SELECT (SELECT count(*) FROM life_items WHERE player_id = $1 AND item_id IN (${HOUSES.filter((h) => h.price > 0).map((h) => `'${h.id}'`).join(',')})) houses,
+       (SELECT count(*) FROM life_items WHERE player_id = $1 AND item_id LIKE 'car-%') cars,
+       (SELECT count(*) FROM collectibles WHERE player_id = $1) memo`,
     [p.id],
   );
   const founded = p.user_id ? (await db.query('SELECT 1 FROM clubs WHERE founder_user_id = $1 LIMIT 1', [p.user_id])).length > 0 || p.club_role === 'founder' : false;
@@ -37,7 +44,8 @@ export async function achStats(db: Db, p: PlayerRow): Promise<AchStats> {
     apps: +s.apps!, goals: +s.goals!, assists: +s.assists!, cleanSheets: +s.cs!, saves: +s.saves!, wins: +s.wins!, motm: +s.motm!,
     bestMatchGoals: +s.best_goals!, bestRating: Math.round(+s.best_rating! * 10) / 10,
     trainCount: p.train_count ?? 0, ovr: overall(p.attrs, p.position), inClub: !!p.club_id, founded,
-    owned: +inv.n, titles: +tr.titles, awards: +tr.awards,
+    owned: +inv.n, titles: +tr.titles, cups: +tr.cups, awards: +tr.awards,
+    houses: +life.houses, cars: +life.cars, memorabilia: +life.memo,
   };
 }
 

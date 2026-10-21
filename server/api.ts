@@ -15,7 +15,8 @@ import { clubPlayers, clubStrength, resolveLineup, syncSquad, type ClubRow, type
 import { ACHIEVEMENTS, ACH_BY_ID } from '../shared/achievements.ts';
 import { featured, ITEM_BY_ID, ITEMS, priceOf, sanitizeEquipped, shopDay, SLOTS, type Slot } from '../shared/cosmetics.ts';
 import { achStats, checkAchievements, notify } from './rewards.ts';
-import { CHAT_MAX, clubMessage, defaultShirt, joinClub, MAX_HUMANS, notifyStaff } from './social.ts';
+import { CHAT_MAX, clubMessage, defaultShirt, leaveClub, MAX_HUMANS, moveToClub, notifyStaff } from './social.ts';
+import { CAR_BY_ID, CAR_COLORS, DEFAULT_HOME, FLOOR_STYLES, FURNITURE, FURNITURE_BY_ID, FURNITURE_SLOTS, HOUSE_BY_ID, HOUSES, RESPRAY_COST, sanitizeHome, WALL_COLORS, type FurnitureSlot } from '../shared/life.ts';
 
 // ---------- roles & permissions ----------
 
@@ -86,6 +87,7 @@ function playerDto(p: PlayerRow, full = true) {
     appearance: sanitizeAppearance(p.appearance),
     equipped: p.is_bot ? {} : sanitizeEquipped(p.equipped),
     motto: p.motto ?? '',
+    transferOpen: p.transfer_status === 'open',
     ovr: overall(p.attrs, p.position),
     attrs: full ? p.attrs : undefined,
   };
@@ -99,13 +101,13 @@ function matchStatus(m: { status: string; kickoff_at: Date; ends_at: Date | null
 
 interface MatchListRow {
   id: string; kind: string; round: number | null; kickoff_at: Date; ends_at: Date | null; status: string;
-  home_goals: number | null; away_goals: number | null;
+  home_goals: number | null; away_goals: number | null; pens: [number, number] | null; meta: { stage?: number; total?: number; tie?: number; name?: string } | null;
   h_id: string; h_name: string; h_short: string; h_colors: never; h_badge: never; h_bot: boolean;
   a_id: string; a_name: string; a_short: string; a_colors: never; a_badge: never; a_bot: boolean;
 }
 
 const MATCH_SELECT = `
-  SELECT m.id, m.kind, m.round, m.kickoff_at, m.ends_at, m.status, m.home_goals, m.away_goals,
+  SELECT m.id, m.kind, m.round, m.kickoff_at, m.ends_at, m.status, m.home_goals, m.away_goals, m.pens, m.meta,
     h.id h_id, h.name h_name, h.short h_short, h.colors h_colors, h.badge h_badge, h.is_bot h_bot,
     a.id a_id, a.name a_name, a.short a_short, a.colors a_colors, a.badge a_badge, a.is_bot a_bot
   FROM matches m JOIN clubs h ON h.id = m.home_id JOIN clubs a ON a.id = m.away_id`;
@@ -123,6 +125,8 @@ function matchDto(m: MatchListRow) {
     away: { id: m.a_id, name: m.a_name, short: m.a_short, colors: m.a_colors, badge: m.a_badge, isBot: m.a_bot },
     // Scores are only revealed once the match has played out.
     score: status === 'finished' ? [m.home_goals, m.away_goals] : null,
+    pens: status === 'finished' ? m.pens : null,
+    cup: m.kind === 'cup' && m.meta?.name ? { stage: m.meta.stage, total: m.meta.total, tie: m.meta.tie, name: m.meta.name } : undefined,
   };
 }
 
@@ -370,7 +374,7 @@ route('GET', '/api/clubs/:id', async (c) => {
 
 route('POST', '/api/clubs/:id/join', async (c) => {
   const p = await myPlayer(c);
-  if (p.club_id) throw bad('Leave your current club first');
+  if (p.club_id && p.transfer_status !== 'open') throw bad('Leave your current club first, or make yourself open to transfers');
   const club = await getClub(c.db, c.params[0]);
   if (club.is_bot || !club.active) throw bad('AI clubs cannot be joined — create your own club or join a player club');
   const code = String(c.body.code ?? '').trim().toUpperCase();
@@ -379,7 +383,7 @@ route('POST', '/api/clubs/:id/join', async (c) => {
     const inv = await c.db.query("SELECT 1 FROM club_invites WHERE club_id = $1 AND player_id = $2 AND kind = 'invite' AND status = 'pending'", [club.id, p.id]);
     if (!inv.length) throw bad('This club is invite-only. Ask a member for the invite code, or send a join request.');
   }
-  await c.db.tx((db) => joinClub(db, p, club));
+  await c.db.tx((db) => moveToClub(db, p, club));
   await checkAchievements(c.db, p.id);
   return { ok: true };
 });
@@ -387,23 +391,7 @@ route('POST', '/api/clubs/:id/join', async (c) => {
 route('POST', '/api/clubs/leave', async (c) => {
   const p = await myPlayer(c);
   if (!p.club_id) throw bad('You are not in a club');
-  const club = await getClub(c.db, p.club_id);
-  await c.db.tx(async (db) => {
-    await db.query("UPDATE players SET club_id = NULL, club_role = 'player' WHERE id = $1", [p.id]);
-    await clubMessage(db, club.id, `${p.name} left the club`);
-    const others = await db.query<PlayerRow>('SELECT * FROM players WHERE club_id = $1 AND NOT is_bot ORDER BY created_at', [club.id]);
-    if (p.club_role === 'founder') {
-      if (others.length) {
-        const heir = others.find((o) => o.club_role === 'president') ?? others[0];
-        await db.query("UPDATE players SET club_role = 'founder' WHERE id = $1", [heir.id]);
-        await db.query('UPDATE clubs SET founder_user_id = $2 WHERE id = $1', [club.id, heir.user_id]);
-      } else {
-        // Nobody left: the club carries on under AI control so the league is unaffected.
-        await db.query('UPDATE clubs SET is_bot = true, founder_user_id = NULL WHERE id = $1', [club.id]);
-      }
-    }
-    await syncSquad(db, await getClub(db, club.id));
-  });
+  await c.db.tx((db) => leaveClub(db, p));
   return { ok: true };
 });
 
@@ -504,7 +492,12 @@ route('GET', '/api/league', async (c) => {
   const season = await currentSeason(c.db);
   if (!season) return { season: null };
   const table = await standings(c.db, season.id);
-  const matches = (await c.db.query<MatchListRow>(`${MATCH_SELECT} WHERE m.season_id = $1 ORDER BY m.round, m.kickoff_at`, [season.id])).map(matchDto);
+  const all = (await c.db.query<MatchListRow>(`${MATCH_SELECT} WHERE m.season_id = $1 ORDER BY m.round, m.kickoff_at`, [season.id])).map(matchDto);
+  const matches = all.filter((m) => m.kind === 'league');
+  const cupTies = all.filter((m) => m.kind === 'cup').sort((a, b) => a.cup!.stage! - b.cup!.stage! || a.cup!.tie! - b.cup!.tie!);
+  const byes = (await c.db.query<{ value: { byes: string[] } }>('SELECT value FROM meta WHERE key = $1', [`cup-byes:${season.id}`]))[0]?.value.byes ?? [];
+  const byeClubs = byes.length ? await c.db.query<ClubRow>('SELECT * FROM clubs WHERE id = ANY($1::text[])', [byes]) : [];
+  const cupTotal = cupTies[0]?.cup?.total ?? 0;
   const leaders = async (order: string, where = '') =>
     c.db.query<{ player_id: string; name: string; position: string; is_bot: boolean; club_id: string; club: string; v: string; apps: string }>(
       `SELECT s.player_id, p.name, p.position, p.is_bot, s.club_id, cl.short club, ${order} v, count(*) apps
@@ -518,7 +511,7 @@ route('GET', '/api/league', async (c) => {
   const past = await c.db.query<{ season_number: number; kind: string; value: number | null; club: string | null; club_id: string | null; player: string | null; player_id: string | null }>(
     `SELECT t.season_number, t.kind, t.value, cl.name club, t.club_id, p.name player, t.player_id FROM trophies t
      LEFT JOIN clubs cl ON cl.id = t.club_id LEFT JOIN players p ON p.id = t.player_id
-     WHERE (t.player_id IS NULL AND t.kind = 'champion') OR t.kind IN ('golden_boot','playmaker','golden_glove','pots')
+     WHERE (t.player_id IS NULL AND t.kind IN ('champion','cup')) OR t.kind IN ('golden_boot','playmaker','golden_glove','pots')
      ORDER BY t.season_number DESC LIMIT 50`);
   const honours = new Map<number, Record<string, unknown>>();
   for (const t of past) {
@@ -531,6 +524,7 @@ route('GET', '/api/league', async (c) => {
     season: { id: season.id, number: season.number },
     table,
     matches,
+    cup: cupTies.length ? { total: cupTotal, ties: cupTies, byes: byes.map((id) => byeClubs.find((b) => b.id === id)).filter(Boolean).map((b) => clubBrief(b!)) } : null,
     scorers: map(await leaders('sum(s.goals)')),
     assists: map(await leaders('sum(s.assists)')),
     keepers: map(await leaders("sum(CASE WHEN s.clean_sheet THEN 1 ELSE 0 END)", "AND p.position = 'GK'")),
@@ -574,6 +568,7 @@ route('GET', '/api/matches/:id', async (c) => {
     stats: finished ? res.stats : undefined,
     players: finished ? res.players : undefined,
     motm: finished ? res.motm : undefined,
+    pens: finished ? res.pens : undefined,
   };
 });
 
@@ -709,8 +704,9 @@ route('GET', '/api/free-agents', async (c) => {
 
 route('POST', '/api/clubs/:id/request', async (c) => {
   const p = await myPlayer(c);
-  if (p.club_id) throw bad('Leave your current club first');
   const club = await getClub(c.db, c.params[0]);
+  if (p.club_id === club.id) throw bad('You are already in this club');
+  if (p.club_id && p.transfer_status !== 'open') throw bad('Make yourself open to transfers first, or leave your current club');
   if (club.is_bot || !club.active) throw bad('AI clubs cannot be joined');
   const dup = await c.db.query("SELECT 1 FROM club_invites WHERE club_id = $1 AND player_id = $2 AND status = 'pending'", [club.id, p.id]);
   if (dup.length) throw bad('You already have a pending request or invite for this club');
@@ -728,13 +724,14 @@ route('POST', '/api/clubs/:id/invite', async (c) => {
   if (p.club_id !== club.id || !can(p.club_role, 'invite')) throw forbidden('Only the founder, president or captain can invite players');
   const target = (await c.db.query<PlayerRow>('SELECT * FROM players WHERE id = $1 AND NOT is_bot', [String(c.body.playerId ?? '')]))[0];
   if (!target) throw notFound('Player not found');
-  if (target.club_id) throw bad(`${target.name} is already in a club`);
+  if (target.club_id === club.id) throw bad(`${target.name} is already in your club`);
+  if (target.club_id && target.transfer_status !== 'open') throw bad(`${target.name} is already in a club and not open to transfers`);
   const pending = (await c.db.query<InviteRow>("SELECT * FROM club_invites WHERE club_id = $1 AND player_id = $2 AND status = 'pending'", [club.id, target.id]))[0];
   if (pending?.kind === 'request') {
     // They already asked: inviting them is the same as accepting.
     await c.db.tx(async (db) => {
       await db.query("UPDATE club_invites SET status = 'accepted', resolved_at = now() WHERE id = $1", [pending.id]);
-      await joinClub(db, target, club);
+      await moveToClub(db, target, club);
     });
     await notify(c.db, target.id, 'club', `Welcome to ${club.name}! Your request was accepted.`, { clubId: club.id });
     await checkAchievements(c.db, target.id);
@@ -755,10 +752,10 @@ route('POST', '/api/invites/:id/respond', async (c) => {
   if (inv.kind === 'invite') {
     if (inv.player_id !== p.id) throw forbidden();
     if (accept) {
-      if (p.club_id) throw bad('Leave your current club first');
+      if (p.club_id && p.transfer_status !== 'open') throw bad('Leave your current club first, or make yourself open to transfers');
       await c.db.tx(async (db) => {
         await db.query("UPDATE club_invites SET status = 'accepted', resolved_at = now() WHERE id = $1", [inv.id]);
-        await joinClub(db, p, club);
+        await moveToClub(db, p, club);
       });
       await checkAchievements(c.db, p.id);
     } else {
@@ -772,7 +769,7 @@ route('POST', '/api/invites/:id/respond', async (c) => {
   if (accept) {
     await c.db.tx(async (db) => {
       await db.query("UPDATE club_invites SET status = 'accepted', resolved_at = now() WHERE id = $1", [inv.id]);
-      await joinClub(db, target, club);
+      await moveToClub(db, target, club);
     });
     await notify(c.db, target.id, 'club', `Welcome to ${club.name}! Your request was accepted.`, { clubId: club.id });
     await checkAchievements(c.db, target.id);
@@ -842,6 +839,244 @@ route('POST', '/api/clubs/:id/chat', async (c) => {
   const id = newId('cm_');
   await c.db.query("INSERT INTO club_messages (id, club_id, player_id, kind, text) VALUES ($1, $2, $3, 'msg', $4)", [id, club.id, p.id, text]);
   return { ok: true, id };
+});
+
+// ---------- home, garage & memorabilia ----------
+
+interface LifeRow { item_id: string; data: { color?: string }; price: number; acquired_at: Date }
+
+async function lifeItems(db: Db, playerId: string) {
+  return db.query<LifeRow>('SELECT item_id, data, price, acquired_at FROM life_items WHERE player_id = $1 ORDER BY acquired_at', [playerId]);
+}
+
+function homeOf(p: PlayerRow) {
+  return sanitizeHome(Object.keys(p.home ?? {}).length ? p.home : DEFAULT_HOME);
+}
+
+function ownedLife(rows: LifeRow[]) {
+  const houses = new Set(['studio']);
+  const furniture = new Set(FURNITURE.filter((f) => f.price === 0).map((f) => f.id));
+  const cars: { id: string; color: string; at: string }[] = [];
+  for (const r of rows) {
+    if (HOUSE_BY_ID[r.item_id]) houses.add(r.item_id);
+    else if (FURNITURE_BY_ID[r.item_id]) furniture.add(r.item_id);
+    else if (CAR_BY_ID[r.item_id]) cars.push({ id: r.item_id, color: r.data.color ?? CAR_COLORS[0], at: new Date(r.acquired_at).toISOString() });
+  }
+  return { houses, furniture, cars };
+}
+
+route('GET', '/api/house/:id', async (c) => {
+  const p = (await c.db.query<PlayerRow>('SELECT * FROM players WHERE id = $1 AND NOT is_bot', [c.params[0]]))[0];
+  if (!p) throw notFound('Player not found');
+  const owned = ownedLife(await lifeItems(c.db, p.id));
+  const club = p.club_id ? await getClub(c.db, p.club_id) : null;
+  const items = await c.db.query<{ id: string; kind: string; label: string; data: unknown; created_at: Date }>(
+    'SELECT id, kind, label, data, created_at FROM collectibles WHERE player_id = $1 ORDER BY created_at DESC LIMIT 60', [p.id]);
+  const trophies = await c.db.query<{ kind: string; season_number: number }>('SELECT kind, season_number FROM trophies WHERE player_id = $1 ORDER BY season_number DESC', [p.id]);
+  const mine = !!c.user && p.user_id === c.user.id;
+  return {
+    mine,
+    player: playerDto(p, false),
+    club: club ? clubBrief(club) : null,
+    coins: mine ? p.coins : undefined,
+    home: homeOf(p),
+    houses: [...owned.houses],
+    furniture: [...owned.furniture],
+    cars: owned.cars,
+    collectibles: items.map((i) => ({ id: i.id, kind: i.kind, label: i.label, data: i.data, at: new Date(i.created_at).toISOString() })),
+    trophies: trophies.map((t) => ({ kind: t.kind, season: t.season_number })),
+  };
+});
+
+async function spend(db: Db, playerId: string, price: number) {
+  const r = await db.query<{ coins: number }>('UPDATE players SET coins = coins - $2 WHERE id = $1 AND coins >= $2 RETURNING coins', [playerId, price]);
+  if (!r.length) throw bad('Not enough coins');
+  return r[0].coins;
+}
+
+route('POST', '/api/house/buy', async (c) => {
+  const p = await myPlayer(c);
+  const house = HOUSE_BY_ID[String(c.body.houseId ?? '')];
+  if (!house) throw notFound('House not found');
+  const owned = ownedLife(await lifeItems(c.db, p.id));
+  const home = homeOf(p);
+  let coins = p.coins;
+  if (!owned.houses.has(house.id)) {
+    coins = await c.db.tx(async (db) => {
+      const left = await spend(db, p.id, house.price);
+      await db.query('INSERT INTO life_items (player_id, item_id, price) VALUES ($1, $2, $3)', [p.id, house.id, house.price]);
+      return left;
+    });
+  }
+  // Buying a home also moves you in; owned homes can be moved back into for free.
+  home.tier = house.id;
+  await c.db.query('UPDATE players SET home = $2 WHERE id = $1', [p.id, JSON.stringify(home)]);
+  const achievements = await checkAchievements(c.db, p.id);
+  return { ok: true, coins, home, achievements };
+});
+
+route('POST', '/api/house/furniture', async (c) => {
+  const p = await myPlayer(c);
+  const f = FURNITURE_BY_ID[String(c.body.itemId ?? '')];
+  if (!f) throw notFound('Item not found');
+  const owned = ownedLife(await lifeItems(c.db, p.id));
+  let coins = p.coins;
+  if (!owned.furniture.has(f.id)) {
+    coins = await c.db.tx(async (db) => {
+      const left = await spend(db, p.id, f.price);
+      await db.query('INSERT INTO life_items (player_id, item_id, price) VALUES ($1, $2, $3)', [p.id, f.id, f.price]);
+      return left;
+    });
+  }
+  const home = homeOf(p);
+  home.furniture[f.slot] = f.id;
+  await c.db.query('UPDATE players SET home = $2 WHERE id = $1', [p.id, JSON.stringify(home)]);
+  return { ok: true, coins, home };
+});
+
+route('POST', '/api/house/arrange', async (c) => {
+  const p = await myPlayer(c);
+  const owned = ownedLife(await lifeItems(c.db, p.id));
+  const home = homeOf(p);
+  if (c.body.wall !== undefined) {
+    const w = Number(c.body.wall);
+    if (!Number.isInteger(w) || w < 0 || w >= WALL_COLORS.length) throw bad('Unknown wall colour');
+    home.wall = w;
+  }
+  if (c.body.floor !== undefined) {
+    const f = Number(c.body.floor);
+    if (!Number.isInteger(f) || f < 0 || f >= FLOOR_STYLES.length) throw bad('Unknown floor');
+    home.floor = f;
+  }
+  if (c.body.clear !== undefined) {
+    const slot = oneOf(c.body.clear, FURNITURE_SLOTS, 'slot') as FurnitureSlot;
+    delete home.furniture[slot];
+  }
+  if (c.body.itemId !== undefined) {
+    const f = FURNITURE_BY_ID[String(c.body.itemId)];
+    if (!f || !owned.furniture.has(f.id)) throw bad('You do not own that');
+    home.furniture[f.slot] = f.id;
+  }
+  await c.db.query('UPDATE players SET home = $2 WHERE id = $1', [p.id, JSON.stringify(home)]);
+  return { ok: true, home };
+});
+
+route('POST', '/api/garage/buy', async (c) => {
+  const p = await myPlayer(c);
+  const car = CAR_BY_ID[String(c.body.carId ?? '')];
+  if (!car) throw notFound('Car not found');
+  const color = String(c.body.color ?? CAR_COLORS[0]);
+  if (!CAR_COLORS.includes(color)) throw bad('Pick one of the paint colours');
+  const owned = ownedLife(await lifeItems(c.db, p.id));
+  if (owned.cars.some((x) => x.id === car.id)) throw bad(`You already own a ${car.name}`);
+  const home = homeOf(p);
+  const space = HOUSE_BY_ID[home.tier].garage;
+  if (owned.cars.length >= space) throw bad(`Your garage holds ${space} car${space === 1 ? '' : 's'}. Move somewhere bigger for more space.`);
+  const coins = await c.db.tx(async (db) => {
+    const left = await spend(db, p.id, car.price);
+    await db.query('INSERT INTO life_items (player_id, item_id, price, data) VALUES ($1, $2, $3, $4)', [p.id, car.id, car.price, JSON.stringify({ color })]);
+    return left;
+  });
+  if (!home.favCar) {
+    home.favCar = car.id;
+    await c.db.query('UPDATE players SET home = $2 WHERE id = $1', [p.id, JSON.stringify(home)]);
+  }
+  const achievements = await checkAchievements(c.db, p.id);
+  return { ok: true, coins, achievements };
+});
+
+route('POST', '/api/garage/respray', async (c) => {
+  const p = await myPlayer(c);
+  const carId = String(c.body.carId ?? '');
+  const color = String(c.body.color ?? '');
+  if (!CAR_COLORS.includes(color)) throw bad('Pick one of the paint colours');
+  const row = (await lifeItems(c.db, p.id)).find((r) => r.item_id === carId && CAR_BY_ID[carId]);
+  if (!row) throw bad('You do not own that car');
+  if (row.data.color === color) return { ok: true, coins: p.coins };
+  const coins = await c.db.tx(async (db) => {
+    const left = await spend(db, p.id, RESPRAY_COST);
+    await db.query('UPDATE life_items SET data = $3 WHERE player_id = $1 AND item_id = $2', [p.id, carId, JSON.stringify({ ...row.data, color })]);
+    return left;
+  });
+  return { ok: true, coins };
+});
+
+route('POST', '/api/garage/favourite', async (c) => {
+  const p = await myPlayer(c);
+  const carId = String(c.body.carId ?? '');
+  const owned = ownedLife(await lifeItems(c.db, p.id));
+  if (!owned.cars.some((x) => x.id === carId)) throw bad('You do not own that car');
+  const home = homeOf(p);
+  home.favCar = carId;
+  await c.db.query('UPDATE players SET home = $2 WHERE id = $1', [p.id, JSON.stringify(home)]);
+  return { ok: true, home };
+});
+
+route('GET', '/api/life/catalog', async () => ({ houses: HOUSES, furniture: FURNITURE }));
+
+// ---------- transfer market ----------
+
+interface VacancyRow { id: string; club_id: string; position: string; min_ovr: number; note: string; created_at: Date }
+
+route('GET', '/api/transfers', async (c) => {
+  const me = c.user ? (await c.db.query<PlayerRow>('SELECT * FROM players WHERE user_id = $1', [c.user.id]))[0] : undefined;
+  const vac = await c.db.query<VacancyRow>(
+    'SELECT v.* FROM vacancies v JOIN clubs cl ON cl.id = v.club_id WHERE v.active AND cl.active AND NOT cl.is_bot ORDER BY v.created_at DESC LIMIT 60');
+  const clubs = new Map<string, ClubRow>();
+  for (const v of vac) if (!clubs.has(v.club_id)) clubs.set(v.club_id, await getClub(c.db, v.club_id));
+  const humans = new Map<string, number>();
+  for (const id of clubs.keys()) humans.set(id, +((await c.db.query<{ n: string }>('SELECT count(*) n FROM players WHERE club_id = $1 AND NOT is_bot', [id]))[0].n));
+  const avail = await c.db.query<PlayerRow>(
+    "SELECT * FROM players WHERE NOT is_bot AND (club_id IS NULL OR transfer_status = 'open') ORDER BY created_at DESC LIMIT 80");
+  const availClubs = new Map<string, ClubRow>();
+  for (const a of avail) if (a.club_id && !availClubs.has(a.club_id)) availClubs.set(a.club_id, await getClub(c.db, a.club_id));
+  const myClubVacancies = me?.club_id ? vac.filter((v) => v.club_id === me.club_id).map((v) => v.id) : [];
+  return {
+    me: me ? { id: me.id, clubId: me.club_id, open: me.transfer_status === 'open', note: me.transfer_note, canPost: !!me.club_id && can(me.club_role, 'invite'), position: me.position, ovr: overall(me.attrs, me.position) } : null,
+    vacancies: vac.map((v) => ({
+      id: v.id, position: v.position, minOvr: v.min_ovr, note: v.note, at: new Date(v.created_at).toISOString(),
+      club: clubBrief(clubs.get(v.club_id)!), humans: humans.get(v.club_id) ?? 0, maxHumans: MAX_HUMANS, mine: myClubVacancies.includes(v.id),
+    })),
+    players: avail
+      .map((a) => ({ ...playerDto(a, false), note: a.transfer_note, club: a.club_id ? clubBrief(availClubs.get(a.club_id)!) : null }))
+      .sort((x, y) => y.ovr - x.ovr),
+  };
+});
+
+route('POST', '/api/transfers/status', async (c) => {
+  const p = await myPlayer(c);
+  const open = c.body.open === true;
+  if (open && !p.club_id) throw bad('Free agents are always on the market. Join a club first.');
+  const note = String(c.body.note ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  await c.db.query('UPDATE players SET transfer_status = $2, transfer_note = $3 WHERE id = $1', [p.id, open ? 'open' : '', note]);
+  if (p.club_id && open !== (p.transfer_status === 'open')) {
+    await clubMessage(c.db, p.club_id, open ? `${p.name} is now open to offers from other clubs` : `${p.name} is staying put and off the transfer list`);
+  }
+  return { ok: true, open, note };
+});
+
+route('POST', '/api/clubs/:id/vacancies', async (c) => {
+  const p = await myPlayer(c);
+  const club = await getClub(c.db, c.params[0]);
+  if (p.club_id !== club.id || !can(p.club_role, 'invite')) throw forbidden('Only the founder, president or captain can post vacancies');
+  const position = oneOf(c.body.position, POSITIONS, 'position');
+  const minOvr = Math.max(0, Math.min(99, Math.round(Number(c.body.minOvr) || 0)));
+  const note = String(c.body.note ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const n = +((await c.db.query<{ n: string }>('SELECT count(*) n FROM vacancies WHERE club_id = $1 AND active', [club.id]))[0].n);
+  if (n >= 3) throw bad('A club can have at most 3 open vacancies. Close one first.');
+  const id = newId('v_');
+  await c.db.query('INSERT INTO vacancies (id, club_id, position, min_ovr, note) VALUES ($1, $2, $3, $4, $5)', [id, club.id, position, minOvr, note]);
+  await clubMessage(c.db, club.id, `${p.name} posted a vacancy: ${position}${minOvr ? `, ${minOvr}+ OVR` : ''}`);
+  return { ok: true, id };
+});
+
+route('POST', '/api/vacancies/:id/close', async (c) => {
+  const p = await myPlayer(c);
+  const v = (await c.db.query<VacancyRow>('SELECT * FROM vacancies WHERE id = $1 AND active', [c.params[0]]))[0];
+  if (!v) throw notFound('Vacancy not found');
+  if (p.club_id !== v.club_id || !can(p.club_role, 'invite')) throw forbidden();
+  await c.db.query('UPDATE vacancies SET active = false WHERE id = $1', [v.id]);
+  return { ok: true };
 });
 
 // ---------- entry ----------

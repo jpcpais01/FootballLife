@@ -32,6 +32,11 @@ const P: Record<string, string> = {
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   check: '<path d="m5 12 5 5 9-10"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  car: '<path d="M4 16v-3l2-5h12l2 5v3zM4 16v2h3v-2M17 16v2h3v-2M6.5 13h11"/><circle cx="7.5" cy="14.5" r=".6"/><circle cx="16.5" cy="14.5" r=".6"/>',
+  shirt: '<path d="M8 3 3 6l2 4 2-1v12h10V9l2 1 2-4-5-3a4 4 0 0 1-8 0z"/>',
+  swap: '<path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/>',
+  sofa: '<path d="M4 11V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3M3 11h18v6H3zM5 17v2M19 17v2"/>',
+  paint: '<path d="M4 4h13v5H4zM17 6.5h3v5h-8.5V15M10 15h3v6h-3z"/>',
   whistle: '<path d="M3 11a5 5 0 1 0 10 0l8-3V5l-9 3.2A5 5 0 0 0 3 11z"/>',
 };
 
