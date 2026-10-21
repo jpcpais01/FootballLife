@@ -9,6 +9,7 @@ export const PATCH_NOTES: PatchGroup[] = [
   {
     hour: '2026-10-21T22:00:00Z',
     entries: [
+      { title: 'Brand-new players', body: 'Every footballer has been rebuilt from scratch: athletic proportions, real kits with side panels, stripes or hoops, cuffs, sock bands and shirt numbers, shaped boots with soles, and faces with eyes, brows and your chosen expression. Beards and earrings now show, every hairstyle has been redone, and players pump their arms and twist through the shoulders when they run.' },
       { title: 'Instant menus', body: 'Switching pages is now instant. Each page opens straight away from what you saw last time and quietly updates if anything changed, pages start loading the moment your finger touches a button, and the 3D training pitch and shop stand stay ready between visits. Page transitions are snappier too.' },
     ],
   },
