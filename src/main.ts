@@ -118,7 +118,7 @@ function dockHtml(path: string) {
       : '';
     const accent = n.href === '/club' && state.club ? state.club.colors.primary : n.accent;
     const active = n.href.startsWith('/match/') ? path === n.href : isActive(n.href, path);
-    return html`<a href="${navHref(n.href)}" class="dk ${active ? 'active' : ''}" style="--accent:${accent};--i:${i}" aria-label="${n.label}"><i class="dk-face">${icon(n.icon)}${badge}</i><span>${n.label}</span></a>`;
+    return html`<a href="${navHref(n.href)}" class="dk ${active ? 'active' : ''}" style="--accent:${accent};--i:${i}" aria-label="${n.label}" title="${n.label}"><i class="dk-face">${icon(n.icon)}${badge}</i></a>`;
   });
 }
 
@@ -216,26 +216,15 @@ function updateNav(path: string) {
   closeMenu();
 }
 
-/** Keeps the current page's tile in view, and tucks the dock away while scrolling down a page. */
+/** Keeps the current page's tile in view. */
 function dockState(path: string, first = false) {
   root.querySelector('.app')?.classList.toggle('at-home', path === '/');
-  root.querySelector('.dock')?.classList.remove('tucked');
   const dock = document.getElementById('dock');
   const on = dock?.querySelector<HTMLElement>('.active');
   if (!dock || !on) return;
   const x = on.offsetLeft - (dock.clientWidth - on.offsetWidth) / 2;
   dock.scrollTo({ left: Math.max(0, x), behavior: first ? 'auto' : 'smooth' });
 }
-let lastY = 0;
-window.addEventListener('scroll', () => {
-  const y = window.scrollY;
-  const dock = root.querySelector('.dock');
-  if (dock && Math.abs(y - lastY) > 6) {
-    const atEnd = y + innerHeight >= document.documentElement.scrollHeight - 4;
-    dock.classList.toggle('tucked', y > lastY && y > 120 && !atEnd);
-    lastY = y;
-  }
-}, { passive: true });
 
 function closeMenu() {
   const m = document.getElementById('user-menu');
