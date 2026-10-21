@@ -1,7 +1,7 @@
 import './styles/main.css';
 import { registerSW } from 'virtual:pwa-register';
 import { api, markTouched, newVisit, onStaleData } from './api.ts';
-import { avatarSvg, brandMark } from './art.ts';
+import { avatarSvg } from './art.ts';
 import { html, mount } from './dom.ts';
 import { icon } from './icons.ts';
 import { addRoute, match, navigate, runPage, startRouter } from './router.ts';
@@ -154,6 +154,7 @@ function meTop() {
   const p = state.player;
   if (!p) return html``;
   return html`<a href="/shop" class="coin-chip" aria-label="Coins">${icon('coin', 15)}<b>${p.coins.toLocaleString()}</b></a>
+    <button class="top-icon" aria-label="Refresh the game" title="Refresh for updates" data-refresh>${icon('refresh', 18)}</button>
     <button class="top-icon ${state.unread ? 'has-dot' : ''}" aria-label="Inbox" data-inbox>${icon('bell', 19)}</button>
     <button class="top-avatar" data-menu aria-label="Menu">${avatarSvg(p.appearance, state.club?.colors, 36, undefined, { eq: p.equipped })}</button>`;
 }
@@ -217,7 +218,6 @@ function renderShell(path: string) {
     <div class="ambient" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i><div class="grain"></div></div>
     <header class="topnav">
       <button class="top-back" data-back aria-label="Go back" title="Go back">${icon('back', 18)}</button>
-      <a href="/" class="brand" aria-label="FootbalLife home">${brandMark(30)}<span class="wordmark">FOOTBAL<b>LIFE</b></span></a>
       <nav class="topnav-links">${links('tn-link')}</nav>
       <div class="topnav-right" >
         <div class="row" style="gap:10px" id="me-top">${meTop()}</div>
@@ -272,7 +272,27 @@ export function goBack() {
 }
 document.addEventListener('click', (e) => {
   if ((e.target as HTMLElement).closest('[data-back]')) goBack();
+  const r = (e.target as HTMLElement).closest<HTMLElement>('[data-refresh]');
+  if (r) {
+    r.classList.add('spinning');
+    void hardReload();
+  }
 });
+
+/** Reloads the whole game from the network: fetches the newest deploy and drops every cached file. */
+async function hardReload() {
+  const settle = <T,>(p: Promise<T>) => Promise.race([p.catch(() => undefined), new Promise<undefined>((r) => setTimeout(r, 2500))]);
+  try {
+    const reg = await settle(navigator.serviceWorker?.getRegistration() ?? Promise.resolve(undefined));
+    if (reg) {
+      await settle(reg.update());
+      await settle(reg.unregister());
+    }
+    if ('caches' in window) await settle(caches.keys().then((ks) => Promise.all(ks.map((k) => caches.delete(k)))));
+  } finally {
+    location.reload();
+  }
+}
 
 function closeMenu() {
   const m = document.getElementById('user-menu');

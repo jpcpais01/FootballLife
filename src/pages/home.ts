@@ -1,11 +1,11 @@
 // Home screen: what's happening, not where to go (the dock is the menu).
 // A swipeable spotlight of big cards (next match, club, training, league…)
-// with dots and arrows, and a row of activity cards below.
+// with arrows, and a row of activity cards below.
 import { HOUSE_BY_ID } from '../../shared/life.ts';
 import { ITEM_BY_ID, RARITY_COLORS } from '../../shared/cosmetics.ts';
 import { api } from '../api.ts';
 import { avatarSvg } from '../art.ts';
-import { badge, keyAttrs, linkRows, matchRow, posChip, roleLabel, standingsTable, type MatchBrief } from '../components.ts';
+import { badge, homeTable, keyAttrs, linkRows, matchRow, posChip, roleLabel, standingsTable, type MatchBrief } from '../components.ts';
 import { html, mount, type Raw } from '../dom.ts';
 import { itemArt, trophyArt } from '../gearArt.ts';
 import { icon } from '../icons.ts';
@@ -225,13 +225,11 @@ export async function homePage(el: HTMLElement) {
 
   const card = (t: Tile, i: number): Raw => html`<article class="hero spot-card" data-card="${t.id}" style="--i:${i}" aria-label="${t.label}">
       <div class="hero-bg" style="--accent:${t.accent}"></div><div class="hero-inner" data-hero="${t.id}">${t.hero()}</div></article>`;
-  const dot = (t: Tile): Raw => html`<button class="spot-dot ${t.id === focus ? 'on' : ''}" data-dot="${t.id}" style="--accent:${t.accent}" aria-label="${t.label}"><i>${t.art()}</i><span>${t.label}</span></button>`;
 
   const activity = (): Raw => {
     const d = data;
     const unread = d.notifications.filter((n: any) => !n.read).length;
     const cards: Raw[] = [];
-    if (d.liveNow.length) cards.push(html`<div class="act-card"><div class="act-head"><span class="chip live">LIVE</span><span class="h3">Live now</span></div>${d.liveNow.slice(0, 3).map((m: MatchBrief) => matchRow(m, d.club?.id))}</div>`);
     cards.push(html`<div class="act-card"><div class="act-head"><span class="h3">Inbox</span>${unread ? html`<span class="chip lime">${unread} new</span><button class="btn sm ghost" data-read style="margin-left:auto">Mark read</button>` : ''}</div>
       ${d.notifications.length ? html`<div class="list">${d.notifications.slice(0, 4).map((n: any) => html`<${n.data?.matchId ? 'a' : 'div'} class="list-item" ${n.data?.matchId ? html`href="/match/${n.data.matchId}"` : ''} style="align-items:flex-start">
           <span style="color:${n.read ? 'var(--dim)' : 'var(--lime)'};margin-top:2px">${icon(n.kind === 'result' ? 'ball' : n.kind === 'season' ? 'trophy' : n.kind === 'collect' ? 'shirt' : 'bell', 16)}</span>
@@ -240,7 +238,7 @@ export async function homePage(el: HTMLElement) {
         : html`<div class="empty small">Results and rewards land here.</div>`}</div>`);
     cards.push(html`<div class="act-card"><div class="act-head"><span class="h3">${d.recent.length ? 'Recent results' : 'Results'}</span><a class="card-link" style="margin-left:auto" href="/league?tab=fixtures">Fixtures</a></div>
       ${d.recent.length ? d.recent.slice(0, 4).map((m: MatchBrief) => matchRow(m, d.club?.id)) : html`<div class="empty small">No results yet. League matches kick off every morning and evening.</div>`}</div>`);
-    if (d.table) cards.push(html`<div class="act-card wide"><div class="act-head"><span class="h3">League table</span><a class="card-link" style="margin-left:auto" href="/league">Full table</a></div><div id="tbl">${standingsTable(d.table, d.club?.id, true)}</div></div>`);
+    if (d.table) cards.push(html`<div class="act-card wide"><div class="act-head"><span class="h3">League table</span><a class="card-link" style="margin-left:auto" href="/league">Full table</a></div><div id="tbl">${homeTable(d.table, d.club?.id)}</div></div>`);
     return html`${cards}`;
   };
 
@@ -259,7 +257,6 @@ export async function homePage(el: HTMLElement) {
         <button class="spot-arrow prev" data-step="-1" aria-label="Previous">${icon('back', 20)}</button>
         <button class="spot-arrow next" data-step="1" aria-label="Next">${icon('arrow', 20)}</button>
       </section>
-      <div class="spot-dots" id="dots">${tiles.map(dot)}</div>
       <div class="act-title"><span class="h2">Your activity</span></div>
       <div class="act-row">${activity()}</div>`);
     bind();
@@ -268,8 +265,6 @@ export async function homePage(el: HTMLElement) {
   const setFocus = (id: string, scroll = false) => {
     focus = id;
     lastFocus = id;
-    el.querySelectorAll<HTMLElement>('[data-dot]').forEach((d) => d.classList.toggle('on', d.dataset.dot === id));
-    el.querySelector<HTMLElement>(`[data-dot="${id}"]`)?.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
     if (scroll) {
       const track = el.querySelector<HTMLElement>('#track');
       const c = el.querySelector<HTMLElement>(`[data-card="${id}"]`);
@@ -317,8 +312,6 @@ export async function homePage(el: HTMLElement) {
 
   el.addEventListener('click', async (e) => {
     const t = e.target as HTMLElement;
-    const dt = t.closest('[data-dot]') as HTMLElement | null;
-    if (dt) { setFocus(dt.dataset.dot!, true); return; }
     const st = t.closest('[data-step]') as HTMLElement | null;
     if (st) { step(Number(st.dataset.step)); return; }
     const b = t.closest('[data-respond]') as HTMLElement | null;

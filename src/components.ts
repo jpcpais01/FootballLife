@@ -61,6 +61,7 @@ export interface StandingRow {
   ga: number;
   points: number;
   form: string[];
+  reds?: number;
 }
 
 export function standingsTable(rows: StandingRow[], myClub?: string | null, compact = false): Raw {
@@ -74,6 +75,23 @@ export function standingsTable(rows: StandingRow[], myClub?: string | null, comp
       <td class="c">${r.gf - r.ga > 0 ? '+' : ''}${r.gf - r.ga}</td>
       <td class="c pts">${r.points}</td>
       ${compact ? '' : html`<td class="hide-sm"><span class="form">${r.form.map((f) => html`<i class="${f}">${f}</i>`)}</span></td>`}
+    </tr>`)}</tbody></table>`;
+}
+
+/** The home screen's league card: goals for and against, red cards and recent form. */
+export function homeTable(rows: StandingRow[], myClub?: string | null): Raw {
+  return html`<table class="table home-table">
+    <thead><tr><th class="c">#</th><th>Club</th><th class="c">P</th><th class="c">GF</th><th class="c">GA</th><th class="c">GD</th><th class="c" title="Red cards"><i class="red-card"></i></th><th class="c">Pts</th><th>Form</th></tr></thead>
+    <tbody>${rows.map((r, i) => html`<tr class="click ${r.clubId === myClub ? 'me' : ''}" data-href="/club/${r.clubId}">
+      <td class="c dim" style="font-weight:700">${i + 1}</td>
+      <td><div class="row" style="gap:9px">${badge({ ...r, id: r.clubId }, 22)}<span class="ellipsis" style="font-weight:600;max-width:150px">${r.name}</span></div></td>
+      <td class="c">${r.played}</td>
+      <td class="c">${r.gf}</td>
+      <td class="c">${r.ga}</td>
+      <td class="c ${r.gf - r.ga > 0 ? 'lime' : r.gf - r.ga < 0 ? 'neg' : ''}">${r.gf - r.ga > 0 ? '+' : ''}${r.gf - r.ga}</td>
+      <td class="c ${r.reds ? '' : 'dim'}">${r.reds ?? 0}</td>
+      <td class="c pts">${r.points}</td>
+      <td><span class="form">${r.form.length ? r.form.map((f) => html`<i class="${f}">${f}</i>`) : html`<span class="dim tiny">—</span>`}</span></td>
     </tr>`)}</tbody></table>`;
 }
 

@@ -565,23 +565,25 @@ export interface StandingRow {
   ga: number;
   points: number;
   form: string[];
+  reds: number;
 }
 
 export async function standings(db: Db, seasonId: string): Promise<StandingRow[]> {
   const clubs = await db.query<ClubRow>('SELECT c.* FROM season_clubs sc JOIN clubs c ON c.id = sc.club_id WHERE sc.season_id = $1', [seasonId]);
   const rows = new Map<string, StandingRow>();
   for (const c of clubs) {
-    rows.set(c.id, { clubId: c.id, name: c.name, short: c.short, colors: c.colors, badge: c.badge, isBot: c.is_bot, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, points: 0, form: [] });
+    rows.set(c.id, { clubId: c.id, name: c.name, short: c.short, colors: c.colors, badge: c.badge, isBot: c.is_bot, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, points: 0, form: [], reds: 0 });
   }
-  const ms = await db.query<{ home_id: string; away_id: string; home_goals: number; away_goals: number }>(
-    "SELECT home_id, away_id, home_goals, away_goals FROM matches WHERE season_id = $1 AND kind = 'league' AND status = 'final' ORDER BY kickoff_at",
+  const ms = await db.query<{ home_id: string; away_id: string; home_goals: number; away_goals: number; hr: number | null; ar: number | null }>(
+    "SELECT home_id, away_id, home_goals, away_goals, (result->'stats'->0->>'red')::int hr, (result->'stats'->1->>'red')::int ar FROM matches WHERE season_id = $1 AND kind = 'league' AND status = 'final' ORDER BY kickoff_at",
     [seasonId],
   );
   for (const m of ms) {
-    for (const [id, gf, ga] of [[m.home_id, m.home_goals, m.away_goals], [m.away_id, m.away_goals, m.home_goals]] as [string, number, number][]) {
+    for (const [id, gf, ga, red] of [[m.home_id, m.home_goals, m.away_goals, m.hr], [m.away_id, m.away_goals, m.home_goals, m.ar]] as [string, number, number, number | null][]) {
       const r = rows.get(id);
       if (!r) continue;
       r.played++;
+      r.reds += red ?? 0;
       r.gf += gf;
       r.ga += ga;
       if (gf > ga) { r.won++; r.points += POINTS.win; r.form.push('W'); }
