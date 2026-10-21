@@ -287,7 +287,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
     });
     c.innerHTML = html`<div class="row" style="margin-top:10px;gap:8px">
       <button class="btn sm" id="pp">${icon(playing ? 'pause' : 'play', 16)}</button>
-      <div class="seg">${[1, 2, 4, 8].map((s) => html`<button data-speed="${s}" class="${speed === s ? 'on' : ''}">${s}×</button>`)}</div>
+      <button class="btn sm speed-btn ${speed > 1 ? 'on' : ''}" data-speed title="Replay speed: tap to change"><b>${speed}×</b></button>
       <button class="btn sm ghost" id="nextgoal" title="Jump to next goal">${icon('fast', 16)} Next goal</button>
       <span class="grow"></span><span class="tiny muted" id="ff"></span>
     </div>
@@ -459,8 +459,12 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
       playing = !playing;
       renderControls();
     }
-    const sp = t.closest('[data-speed]') as HTMLElement | null;
-    if (sp) { speed = Number(sp.dataset.speed); renderControls(); }
+    if (t.closest('[data-speed]')) {
+      // One button cycles the replay speed.
+      const steps = [1, 2, 4, 8];
+      speed = steps[(steps.indexOf(speed) + 1) % steps.length];
+      renderControls();
+    }
     if (t.closest('#nextgoal')) {
       const now = clockAt(replayReal, timeline);
       const g = events.find((ev) => ev.k === 'goal' && ev.t > now + 1);
