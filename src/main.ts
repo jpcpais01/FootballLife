@@ -167,12 +167,45 @@ function menu() {
     <a href="/transfers">${icon('swap', 17)} Transfers</a>
     <a href="/clubs">${icon('users', 17)} Clubs</a>
     <a href="/patch-notes">${icon('notes', 17)} Patch notes</a>
+    <div class="um-themes"><div class="label">Theme</div><div class="theme-row">${THEMES.map((t) => html`<button type="button" class="theme-sw ${t.id === theme() ? 'on' : ''}" data-theme-pick="${t.id}" style="--sw-acc:${t.accent}"><i style="background:${t.swatch}"></i>${t.name}</button>`)}</div></div>
     <button data-logout>${icon('logout', 17)} Sign out</button>
   </div>`;
 }
 
+// Colour themes: the classic floodlit look plus two alternatives, remembered per device.
+const THEMES = [
+  { id: 'classic', name: 'Floodlight', accent: '#c6ff3d', swatch: 'radial-gradient(120% 120% at 20% 0%, #1d2a3a, #05070a 70%)', bar: '#05070a' },
+  { id: 'aero', name: 'Aero', accent: '#8cf542', swatch: 'linear-gradient(180deg, #7fdcff 0%, #1aa3dc 45%, #0a6f9e 55%, #0b8f8a 100%)', bar: '#0d7fb3' },
+  { id: 'gold', name: "Ballon d'Or", accent: '#f3c45a', swatch: 'radial-gradient(120% 120% at 20% 0%, #3a2a12, #070605 70%)', bar: '#070605' },
+];
+function theme() {
+  try { return localStorage.getItem('fl-theme') ?? 'classic'; } catch { return 'classic'; }
+}
+function applyTheme(id = theme()) {
+  const t = THEMES.find((x) => x.id === id) ?? THEMES[0];
+  if (t.id === 'classic') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t.id;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t.bar);
+  applyTint();
+}
+applyTheme();
+document.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-theme-pick]');
+  if (!b) return;
+  try { localStorage.setItem('fl-theme', b.dataset.themePick!); } catch { /* storage unavailable */ }
+  applyTheme(b.dataset.themePick);
+  document.querySelectorAll('.theme-sw').forEach((x) => x.classList.toggle('on', x === b));
+});
+
 /** Tints the ambient background with your club colours. */
 function applyTint() {
+  const st = document.documentElement.style;
+  // Alternative themes bring their own palette.
+  if (document.documentElement.dataset.theme) {
+    st.removeProperty('--tint-a');
+    st.removeProperty('--tint-b');
+    return;
+  }
   const c = state.club?.colors;
   document.documentElement.style.setProperty('--tint-a', c?.primary ?? '#3d6bff');
   document.documentElement.style.setProperty('--tint-b', c?.secondary ?? '#c6ff3d');
