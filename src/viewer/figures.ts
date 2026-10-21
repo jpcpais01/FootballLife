@@ -16,6 +16,8 @@ const geo = {
   torso: new THREE.CapsuleGeometry(0.27, 0.42, 6, 14),
   shorts: new THREE.CylinderGeometry(0.29, 0.31, 0.3, 14),
   leg: new THREE.CapsuleGeometry(0.095, 0.5, 4, 10),
+  thigh: new THREE.CapsuleGeometry(0.1, 0.2, 4, 10),
+  shin: new THREE.CapsuleGeometry(0.088, 0.18, 4, 10),
   sock: new THREE.CylinderGeometry(0.105, 0.1, 0.32, 10),
   boot: new THREE.BoxGeometry(0.15, 0.1, 0.28),
   arm: new THREE.CapsuleGeometry(0.075, 0.42, 4, 10),
@@ -34,6 +36,7 @@ const geo = {
 };
 geo.ring.rotateX(-Math.PI / 2);
 
+const numberPlane = new THREE.PlaneGeometry(0.34, 0.34);
 const matCache = new Map<string, THREE.Material>();
 function plastic(color: string | number, opts: Partial<THREE.MeshPhysicalMaterialParameters> = {}): THREE.MeshPhysicalMaterial {
   const key = `${color}|${JSON.stringify(opts)}`;
@@ -55,6 +58,16 @@ export class Figure {
   body = new THREE.Group();
   private legL: THREE.Group;
   private legR: THREE.Group;
+  private kneeL: THREE.Group;
+  private kneeR: THREE.Group;
+  /** Body height above the root: on a base, or standing on the grass. */
+  private lift: number;
+  /** Local velocity (m/s): forward and sideways. Set by the match viewer for backpedals and side-steps. */
+  fwd = 0;
+  side = 0;
+  /** Lean from acceleration (radians), forward and into turns. */
+  leanX = 0;
+  leanZ = 0;
   private armL: THREE.Group;
   private armR: THREE.Group;
   ring: THREE.Mesh;
@@ -69,11 +82,13 @@ export class Figure {
   star = false;
   private celT = 0;
   /** One-shot training pose layered over the run cycle; `poseK` is its 0..1 progress. */
-  pose: '' | 'kick' | 'juggle' | 'slide' | 'dive' = '';
+  pose: '' | 'kick' | 'juggle' | 'slide' | 'dive' | 'header' = '';
   poseK = 0;
   poseSide = 1;
 
-  constructor(kit: Kit, app: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped) {
+  constructor(kit: Kit, app: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped, opts: { base?: boolean; number?: number } = {}) {
+    const withBase = opts.base !== false;
+    this.lift = withBase ? 0.12 : -0.04;
     const g = gear(eq);
     this.celStyle = g.celebration?.style ?? '';
     const k = isKeeper ? gkKit : kit;
@@ -91,33 +106,41 @@ export class Figure {
     };
 
     // Base (team-coloured puck) and a selection ring.
-    const base = mesh(geo.base, trim);
-    base.position.y = 0.06;
-    base.receiveShadow = true;
-    this.root.add(base);
+    if (withBase) {
+      const base = mesh(geo.base, trim);
+      base.position.y = 0.06;
+      base.receiveShadow = true;
+      this.root.add(base);
+    }
     this.ring = new THREE.Mesh(geo.ring, new THREE.MeshBasicMaterial({ color: 0xc6ff3d, transparent: true, opacity: 0, depthWrite: false }));
     this.ring.position.y = 0.03;
     this.root.add(this.ring);
 
-    this.body.position.y = 0.12;
+    this.body.position.y = this.lift;
     this.root.add(this.body);
 
     const hip = 0.92;
+    // Legs bend at the knee: thigh on the hip joint, shin, sock and boot on the knee.
     const mkLeg = (side: number) => {
       const g = new THREE.Group();
       g.position.set(side * 0.13, hip, 0);
-      const leg = mesh(geo.leg, skin);
-      leg.position.y = -0.36;
+      const thigh = mesh(geo.thigh, skin);
+      thigh.position.y = -0.17;
+      const knee = new THREE.Group();
+      knee.position.y = -0.38;
+      const shin = mesh(geo.shin, skin);
+      shin.position.y = -0.11;
       const sock = mesh(geo.sock, trim);
-      sock.position.y = -0.58;
+      sock.position.y = -0.2;
       const boot = mesh(geo.boot, bootM);
-      boot.position.set(0, -0.82, 0.05);
-      g.add(leg, sock, boot);
+      boot.position.set(0, -0.44, 0.05);
+      knee.add(shin, sock, boot);
+      g.add(thigh, knee);
       this.body.add(g);
-      return g;
+      return [g, knee] as const;
     };
-    this.legL = mkLeg(-1);
-    this.legR = mkLeg(1);
+    [this.legL, this.kneeL] = mkLeg(-1);
+    [this.legR, this.kneeR] = mkLeg(1);
 
     const shorts = mesh(geo.shorts, isKeeper ? plastic(0x1b1b1b) : trim);
     shorts.position.y = hip + 0.05;
@@ -131,6 +154,26 @@ export class Figure {
     collar.rotation.x = Math.PI / 2;
     collar.position.y = hip + 0.79;
     this.body.add(collar);
+    if (opts.number !== undefined) {
+      // Shirt number on the back.
+      const c = document.createElement('canvas');
+      c.width = c.height = 128;
+      const g2 = c.getContext('2d')!;
+      g2.font = '800 96px "Barlow Condensed", Impact, sans-serif';
+      g2.textAlign = 'center';
+      g2.textBaseline = 'middle';
+      g2.lineWidth = 8;
+      g2.strokeStyle = 'rgba(0,0,0,0.25)';
+      g2.strokeText(String(opts.number), 64, 70);
+      g2.fillStyle = isKeeper ? '#111111' : k.secondary;
+      g2.fillText(String(opts.number), 64, 70);
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const num = new THREE.Mesh(numberPlane, new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 }));
+      num.position.set(0, hip + 0.5, -0.222);
+      num.rotation.y = Math.PI;
+      this.body.add(num);
+    }
 
     const wrist = g.wrist ? gearMat(g.wrist) : app.accessory === 3 ? trim : null;
     const mkArm = (side: number) => {
@@ -243,21 +286,40 @@ export class Figure {
   /** Advances the run cycle. `speed` in m/s. */
   animate(dt: number, speed: number, time: number) {
     const run = Math.min(1, speed / 7);
-    this.phase += dt * (4 + speed * 1.15);
-    const sw = Math.sin(this.phase) * (0.15 + run * 0.85);
+    // Strides lengthen with speed; cadence rises more slowly. Standing still the legs settle.
+    const moving = speed > 0.25 ? 1 : 0;
+    this.phase += dt * (speed > 0.25 ? 5.2 + speed * 0.95 : 0);
+    const shuffle = Math.abs(this.side) > Math.abs(this.fwd) * 1.3 && speed < 4.5 && speed > 0.25;
+    const back = !shuffle && this.fwd < -0.4;
+    const amp = (0.12 + run * 0.95) * moving * (back ? 0.6 : 1) * (shuffle ? 0.25 : 1);
+    const sp = Math.sin(this.phase);
+    const cp = Math.cos(this.phase);
+    const sw = sp * amp * (back ? -1 : 1);
     const b = this.body;
-    this.legL.rotation.x = sw;
-    this.legR.rotation.x = -sw;
-    this.armL.rotation.x = -sw * 0.8;
-    this.armR.rotation.x = sw * 0.8;
-    this.armL.rotation.z = -0.12;
-    this.armR.rotation.z = 0.12;
-    b.position.set(0, 0.12 + Math.abs(Math.cos(this.phase)) * 0.07 * run, 0);
-    b.rotation.set(run * 0.16, 0, 0);
+    this.legL.rotation.set(sw, 0, 0);
+    this.legR.rotation.set(-sw, 0, 0);
+    // Knees fold as each leg swings through: deep at a sprint, soft at a jog.
+    const flex = (0.2 + run * 1.35) * moving;
+    const fl = back ? Math.max(0, cp) : Math.max(0, -cp);
+    const fr = back ? Math.max(0, -cp) : Math.max(0, cp);
+    this.kneeL.rotation.x = 0.06 + flex * fl * fl;
+    this.kneeR.rotation.x = 0.06 + flex * fr * fr;
+    if (shuffle) {
+      // Side-step: legs open and close, a little hop.
+      const open = Math.abs(sp) * 0.32;
+      const sgn = Math.sign(this.side);
+      this.legL.rotation.z = -open * (sgn > 0 ? 0.6 : 1);
+      this.legR.rotation.z = open * (sgn > 0 ? 1 : 0.6);
+    }
+    this.armL.rotation.set(-sw * 0.85, 0, -0.14 - run * 0.08);
+    this.armR.rotation.set(sw * 0.85, 0, 0.14 + run * 0.08);
+    const bounce = shuffle ? Math.abs(sp) * 0.06 : Math.abs(cp) * (0.025 + run * 0.06) * moving;
+    b.position.set(0, this.lift + bounce, 0);
+    b.rotation.set((back ? -0.06 : run * 0.2) + this.leanX, 0, this.leanZ);
     if (this.celebrate <= 0) {
       this.celT = 0;
       // Idle breathing.
-      b.rotation.z = Math.sin(time * 1.7 + this.phase) * 0.015;
+      if (speed < 0.25) b.rotation.z = Math.sin(time * 1.7 + this.phase) * 0.015;
       this.applyPose();
       return;
     }
@@ -275,7 +337,7 @@ export class Figure {
       case 'slide': {
         // Drop to the knees, lean back, arms wide.
         const k = Math.min(1, t / 0.35);
-        b.position.y = 0.12 - 0.42 * k;
+        b.position.y = this.lift - 0.42 * k;
         b.rotation.x = -0.32 * k;
         this.legL.rotation.x = 1.45 * k;
         this.legR.rotation.x = 1.45 * k;
@@ -286,7 +348,7 @@ export class Figure {
       case 'spin': {
         const u = (t % 1.3) / 1.3;
         const hop = Math.sin(Math.min(1, u / 0.7) * Math.PI);
-        b.position.y = 0.12 + hop * 0.65;
+        b.position.y = this.lift + hop * 0.65;
         b.rotation.y = u < 0.7 ? (u / 0.7) * Math.PI * 2 : 0;
         this.armL.rotation.set(0, 0, -1.2 - hop);
         this.armR.rotation.set(0, 0, 1.2 + hop);
@@ -300,7 +362,7 @@ export class Figure {
         const h = Math.sin(air * Math.PI) * 1.1;
         const c = 0.95;
         b.rotation.set(th, 0, 0);
-        b.position.set(0, 0.12 + h + c - c * Math.cos(th), -c * Math.sin(th));
+        b.position.set(0, this.lift + h + c - c * Math.cos(th), -c * Math.sin(th));
         const tuck = Math.sin(air * Math.PI);
         this.legL.rotation.x = -1.2 * tuck;
         this.legR.rotation.x = -1.2 * tuck;
@@ -316,7 +378,7 @@ export class Figure {
         // Arms up, little hops.
         this.armL.rotation.x = -2.6 + Math.sin(time * 9) * 0.25;
         this.armR.rotation.x = -2.6 + Math.cos(time * 9) * 0.25;
-        b.position.y = 0.12 + Math.abs(Math.sin(time * 7 + this.phase)) * 0.25;
+        b.position.y = this.lift + Math.abs(Math.sin(time * 7 + this.phase)) * 0.25;
       }
     }
   }
@@ -330,6 +392,8 @@ export class Figure {
         const th = k < 0.35 ? 0.9 * (k / 0.35) : k < 0.55 ? 0.9 - 2.3 * ((k - 0.35) / 0.2) : -1.4 * (1 - (k - 0.55) / 0.45);
         this.legR.rotation.x = th;
         this.legL.rotation.x = 0.1;
+        this.kneeR.rotation.x = k < 0.4 ? 1.3 * (k / 0.4) : Math.max(0.05, 1.3 * (1 - (k - 0.4) / 0.15));
+        this.kneeL.rotation.x = 0.2;
         this.armL.rotation.z = -0.75;
         this.armR.rotation.z = 0.5;
         b.rotation.x = k > 0.35 && k < 0.75 ? -0.12 : 0.04;
@@ -347,19 +411,34 @@ export class Figure {
       }
       case 'slide': {
         const d = Math.min(1, k * 3) * (k > 0.8 ? (1 - k) / 0.2 : 1);
-        b.position.y = 0.12 - 0.45 * d;
+        b.position.y = this.lift - 0.45 * d;
         b.rotation.x = -0.75 * d;
         this.legR.rotation.x = -1.45 * d;
         this.legL.rotation.x = -0.9 * d;
+        this.kneeR.rotation.x = 0.05;
+        this.kneeL.rotation.x = 0.9 * d;
         this.armL.rotation.set(0.6 * d, 0, -1.2 * d);
         this.armR.rotation.set(0.6 * d, 0, 1.0 * d);
+        break;
+      }
+      case 'header': {
+        // Leap, arch back, snap the head through the ball.
+        const j = Math.sin(Math.min(1, k) * Math.PI);
+        b.position.y = this.lift + j * 0.75;
+        b.rotation.x = k < 0.45 ? -0.35 * (k / 0.45) : -0.35 + 0.75 * Math.min(1, (k - 0.45) / 0.2);
+        this.legL.rotation.x = 0.3 * j;
+        this.legR.rotation.x = -0.2 * j;
+        this.kneeL.rotation.x = 1.1 * j;
+        this.kneeR.rotation.x = 0.7 * j;
+        this.armL.rotation.set(-1.2 * j, 0, -0.9 * j);
+        this.armR.rotation.set(-1.2 * j, 0, 0.9 * j);
         break;
       }
       case 'dive': {
         const d = Math.sin((Math.min(1, k * 1.4) * Math.PI) / 2) * (k > 0.85 ? (1 - k) / 0.15 : 1);
         const s = this.poseSide;
         b.rotation.z = -s * 1.35 * d;
-        b.position.set(s * 1.1 * d, 0.12 + 0.45 * Math.sin(Math.min(1, k * 1.6) * Math.PI), 0);
+        b.position.set(s * 1.1 * d, this.lift + 0.45 * Math.sin(Math.min(1, k * 1.6) * Math.PI), 0);
         this.armL.rotation.set(0, 0, -2.8 * d);
         this.armR.rotation.set(0, 0, 2.8 * d);
         break;

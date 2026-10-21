@@ -3,6 +3,7 @@
 import { getFormation, type Slot, type Tactics } from '../../shared/formations.ts';
 import { fromAbs, slotPosition, toAbs } from '../../shared/shape.ts';
 import type { MatchEvent } from '../../shared/sim/types.ts';
+import { direct } from './director.ts';
 
 export interface TeamInfo {
   formation: string;
@@ -23,6 +24,13 @@ export interface Frame {
   /** True during a goal celebration. */
   celebrating: number; // scorer index or -1
   phase: 'play' | 'dead' | 'flight';
+  /** Who strikes the ball for the coming (or current) flight, and when. */
+  kicker: number;
+  kickAt: number;
+  /** Progress of the current flight, 0..1 (0 when not in flight). */
+  flightF: number;
+  /** Where the ball carrier is about to play it. */
+  aim: { x: number; y: number } | null;
 }
 
 const FLIGHT_SPEED: Record<string, number> = { short: 15, long: 21, through: 19, gk: 24, cross: 21, clear: 24, shot: 30, intercept: 17 };
@@ -93,6 +101,11 @@ export class Playback {
     let holder = prev ? holderAfter(prev) : -1;
     let phase: Frame['phase'] = 'play';
     let poss: 0 | 1 = prev ? possDuring(prev) : 0;
+    let kicker = -1;
+    let kickAt = Infinity;
+    let flightF = 0;
+    let holdK: number | null = null;
+    let aim: { x: number; y: number } | null = null;
     if (prev && next) {
       poss = possDuring(next);
       const dt = Math.max(0.001, next.t - prev.t);
@@ -102,10 +115,16 @@ export class Playback {
         const kind = next.k === 'pass' ? (next.o ?? 'short').replace('-out', '') : next.k;
         const travel = Math.min(dt * 0.92, dist / (FLIGHT_SPEED[kind] ?? 18) + 0.05);
         const startFly = next.t - travel;
+        kicker = next.k === 'intercept' ? holderAfter(prev) : next.p ?? -1;
+        kickAt = startFly;
+        aim = { x: next.x, y: next.y };
         if (t < startFly) {
-          // Ball at the passer's feet, small dribble drift.
+          // Ball at the passer's feet: a couple of touches to set it, then the strike.
           const k = (t - prev.t) / Math.max(0.001, startFly - prev.t);
-          ball = { x: prev.x + Math.sin(k * 3) * 0.3, y: prev.y + Math.cos(k * 2.3) * 0.3, z: 0 };
+          holdK = k;
+          const d = this.dir(prev.s, t);
+          const settle = Math.sin(Math.min(1, k * 1.4) * Math.PI) * 0.6;
+          ball = { x: prev.x + d * settle, y: prev.y + Math.sin(k * 2.3) * 0.25, z: 0 };
         } else {
           const f = Math.min(1, (t - startFly) / travel);
           // Passes decelerate as they roll; shots stay fast.
@@ -117,6 +136,7 @@ export class Playback {
           ball = { x: prev.x + (next.x - prev.x) * ef, y: prev.y + (next.y - prev.y) * ef, z };
           holder = -1;
           phase = 'flight';
+          flightF = f;
         }
       } else if (RESTART.has(next.k)) {
         // Ball goes dead, then appears at the restart spot.
@@ -125,9 +145,14 @@ export class Playback {
         else ball = { x: next.x, y: next.y, z: 0.11 };
         holder = s < 0.7 ? -1 : next.p ?? -1;
       } else {
-        // Carry, dribble, tackle, foul…: ball moves with the play.
-        const w = Math.sin(s * Math.PI * 4) * 0.25;
-        ball = { x: prev.x + (next.x - prev.x) * s + w, y: prev.y + (next.y - prev.y) * s, z: 0.11 };
+        // Carry, dribble, tackle, foul…: the carrier knocks the ball ahead and runs onto it.
+        const dx = next.x - prev.x;
+        const dy = next.y - prev.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const touch = 1 - frac(t * 1.6 + prev.t);
+        const lead = len > 1.5 ? 0.35 + 0.9 * touch * touch : 0;
+        if (next.k === 'carry' || next.k === 'dribble') aim = { x: next.x, y: next.y };
+        ball = { x: prev.x + dx * s + (dx / len) * lead, y: prev.y + dy * s + (dy / len) * lead, z: 0.11 };
         holder = next.k === 'tackle' || next.k === 'foul' ? next.q ?? holder : next.p ?? holder;
         if (next.k === 'card' || next.k === 'offside' || next.k === 'halftime' || next.k === 'fulltime') phase = 'dead';
       }
@@ -162,26 +187,17 @@ export class Playback {
         targets.push(abs);
       }
     }
-    // The ball carrier is on the ball; receiver runs onto the pass; nearest defender presses.
-    if (holder >= 0) targets[holder] = { x: ball.x - this.dir(holder < 11 ? 0 : 1, t) * 0.55, y: ball.y };
+    // Off-ball movement: runs, support, the back line, pressing, marking and set pieces.
+    direct({ t, ball, holder, poss, phase, prev, next, holdK, slots: this.slots, sentOff, dir: (side) => this.dir(side, t) }, targets);
+    // The ball carrier is on the ball; the receiver runs onto the pass.
+    if (holder >= 0) {
+      const d = this.dir(holder < 11 ? 0 : 1, t);
+      const toward = aim ? Math.atan2(aim.y - ball.y, aim.x - ball.x) : d > 0 ? 0 : Math.PI;
+      targets[holder] = { x: ball.x - Math.cos(toward) * 0.6, y: ball.y - Math.sin(toward) * 0.6 };
+    }
     if (phase === 'flight' && next) {
       const recv = next.k === 'pass' || next.k === 'cross' ? next.q : next.k === 'intercept' ? next.p : undefined;
       if (recv !== undefined && recv >= 0) targets[recv] = { x: next.x - this.dir(recv < 11 ? 0 : 1, t) * 0.5, y: next.y };
-    }
-    if (phase === 'play' && holder >= 0) {
-      const dSide = holder < 11 ? 1 : 0;
-      let best = -1;
-      let bd = Infinity;
-      for (let k = 1; k < 11; k++) {
-        const idx = dSide * 11 + k;
-        if (sentOff[idx]) continue;
-        const d = Math.hypot(targets[idx].x - ball.x, targets[idx].y - ball.y);
-        if (d < bd) { bd = d; best = idx; }
-      }
-      if (best >= 0 && bd < 22) {
-        const ang = Math.atan2(targets[best].y - ball.y, targets[best].x - ball.x);
-        targets[best] = { x: ball.x + Math.cos(ang) * 1.8, y: ball.y + Math.sin(ang) * 1.8 };
-      }
     }
     // Shot / corner set-ups: keeper on the line.
     if (celebrating >= 0) {
@@ -194,9 +210,11 @@ export class Playback {
         if (idx === celebrating || k % 3 !== 0) targets[idx] = { x: corner.x - this.dir(side, t) * (d + 1), y: corner.y - Math.sign(corner.y) * (Math.abs(Math.sin(a)) * d + 1) };
       }
     }
-    return { ball, holder, poss, targets, sentOff, score: this.scoreBefore(i), index: i, celebrating, phase };
+    return { ball, holder, poss, targets, sentOff, score: this.scoreBefore(i), index: i, celebrating, phase, kicker, kickAt, flightF, aim };
   }
 }
+
+const frac = (x: number) => x - Math.floor(x);
 
 function holderAfter(e: MatchEvent): number {
   switch (e.k) {
