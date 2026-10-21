@@ -7,6 +7,7 @@ import { icon } from './icons.ts';
 import { addRoute, match, navigate, runPage, startRouter } from './router.ts';
 import { refreshMe, state } from './state.ts';
 import { errorBox } from './ui.ts';
+import { fullscreenOnFirstTap } from './fullscreen.ts';
 
 registerSW({ immediate: true });
 
@@ -137,3 +138,4 @@ document.addEventListener('me-changed', () => {
 });
 
 startRouter(render);
+fullscreenOnFirstTap();

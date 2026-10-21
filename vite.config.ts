@@ -28,6 +28,7 @@ export default defineConfig({
         theme_color: '#0a0c0e',
         background_color: '#0a0c0e',
         display: 'standalone',
+        display_override: ['fullscreen', 'standalone'],
         orientation: 'any',
         start_url: '/',
         icons: [
