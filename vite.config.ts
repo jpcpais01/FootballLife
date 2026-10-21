@@ -27,7 +27,7 @@ export default defineConfig({
         description: 'Online multiplayer football career game with live 3D matches.',
         theme_color: '#0a0c0e',
         background_color: '#0a0c0e',
-        display: 'standalone',
+        display: 'fullscreen',
         display_override: ['fullscreen', 'standalone'],
         orientation: 'any',
         start_url: '/',

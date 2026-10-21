@@ -9,6 +9,8 @@ export const PATCH_NOTES: PatchGroup[] = [
   {
     hour: '2026-10-21T22:00:00Z',
     entries: [
+      { title: 'Match data screen', body: 'When a match fast-forwards through build-up play, and at half-time, the 3D view now gives way to a live data screen: an attack momentum graph with every goal marked, a mini pitch with a heatmap and the ball\'s path, field tilt, and possession, xG, shots and passes counting up as they happen, plus the key moments so far. The pitch comes back just before the next chance. Turn it off with the chart button on the match screen.' },
+      { title: 'True fullscreen', body: 'The game now hides the phone\'s status bar and navigation bar, and stays fullscreen: if you swipe out of it, your next tap brings it back. Installed on Android, it opens fullscreen straight away.' },
       { title: 'Brand-new players', body: 'Every footballer has been rebuilt from scratch: athletic proportions, real kits with side panels, stripes or hoops, cuffs, sock bands and shirt numbers, shaped boots with soles, and faces with eyes, brows and your chosen expression. Beards and earrings now show, every hairstyle has been redone, and players pump their arms and twist through the shoulders when they run.' },
       { title: 'Instant menus', body: 'Switching pages is now instant. Each page opens straight away from what you saw last time and quietly updates if anything changed, pages start loading the moment your finger touches a button, and the 3D training pitch and shop stand stay ready between visits. Page transitions are snappier too.' },
     ],

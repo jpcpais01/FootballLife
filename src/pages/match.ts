@@ -10,6 +10,7 @@ import { html, mount, raw, type Raw } from '../dom.ts';
 import { icon } from '../icons.ts';
 import { countdown, errorBox, kickoffLabel, skeleton } from '../ui.ts';
 import type { CameraMode, MatchViewer, Quality } from '../viewer/viewer.ts';
+import { createBoard, type Board } from './matchBoard.ts';
 
 interface Snap {
   clubId: string;
@@ -30,6 +31,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   let raf = 0;
   let poll = 0;
   let viewer: MatchViewer | null = null;
+  let board: Board | null = null;
   let data: any;
   try {
     data = await api.get(`/api/matches/${id}`);
@@ -42,6 +44,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
     cancelAnimationFrame(raf);
     clearInterval(poll);
     viewer?.dispose();
+    board?.dispose();
   };
 
   // ---------- pre-match ----------
@@ -130,6 +133,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
             <button data-cam="tactical" title="Tactical view">${icon('top')}</button>
             <button data-cam="orbit" title="Free camera">${icon('sparkle')}</button>
             <button data-q title="Toggle HD effects" style="font-weight:800;font-size:11px">HD</button>
+            <button data-ffb title="Data screen while fast-forwarding">${icon('chart')}</button>
           </div>
           <div id="flash"></div>
           <div class="overlay-msg" id="loading"><div><div class="countdown">Loading stadium…</div></div></div>
@@ -154,6 +158,16 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   viewer?.setEvents(events);
   el.querySelector('#loading')?.remove();
   el.querySelector('[data-q]')?.classList.toggle('on', viewer?.quality === 'high');
+  let boardPref = true;
+  try { boardPref = localStorage.getItem('fl-ff-board') !== 'off'; } catch { /* ignore */ }
+  el.querySelector('[data-ffb]')?.classList.toggle('on', boardPref);
+  board = createBoard(stage, {
+    teams: [0, 1].map((i) => ({ short: lineups[i].short, primary: lineups[i].colors.primary, secondary: lineups[i].colors.secondary })) as Parameters<typeof createBoard>[1]['teams'],
+    halftimeAt,
+    events: () => events,
+    lines: () => lines,
+  });
+  let boardSince = 0;
 
   // ---------- clock ----------
   const liveReal = () => (Date.now() + serverOffset - kickoff) / 1000 - LIVE_DELAY;
@@ -312,7 +326,21 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
     }
     const t = currentClock();
     const rate = rateAt(t, timeline);
-    viewer?.render(t, rate * (finished && !catchup ? speed : 1));
+    const eff = finished && !catchup ? speed : 1;
+    // Long skips and the half-time break show the data board instead of the 3D pitch.
+    // It hands back to the pitch shortly before the next highlight starts.
+    const rNow = finished && !catchup ? replayReal : Math.max(0, liveReal());
+    const seg = timeline.find((s) => rNow >= s[2] && rNow < s[3]);
+    const lastEvT = events.length ? events[events.length - 1].t : 0;
+    const isBreak = !!seg && seg[0] === seg[1];
+    const longSkip = !!seg && !isBreak && rate >= 6 && (seg[3] - seg[2]) / eff >= 2.5 && (seg[3] - rNow) / eff > 0.8 && (finished || t < lastEvT - 1);
+    const onBoard = !!board && boardPref && !!viewer && (isBreak || longSkip) && !(finished && !catchup && !playing && replayReal >= total);
+    if (board) {
+      if (onBoard !== board.visible) { board.show(onBoard); boardSince = now; }
+      if (onBoard) board.update({ t, from: seg![0], to: seg![1], rate: rate * eff, breakLeft: isBreak ? (seg![3] - rNow) / eff : null, idx: indexAt(t) });
+    }
+    // Once the board fully covers the pitch, skip drawing the 3D scene.
+    viewer?.render(t, rate * eff, !(onBoard && now - boardSince > 400));
 
     // HUD.
     const sc = scoreAt(t);
@@ -414,6 +442,11 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
       viewer.setQuality(q);
       try { localStorage.setItem('fl-quality', q); } catch { /* ignore */ }
       el.querySelector('[data-q]')!.classList.toggle('on', q === 'high');
+    }
+    if (t.closest('[data-ffb]')) {
+      boardPref = !boardPref;
+      try { localStorage.setItem('fl-ff-board', boardPref ? 'on' : 'off'); } catch { /* ignore */ }
+      el.querySelector('[data-ffb]')!.classList.toggle('on', boardPref);
     }
     const tb = t.closest('[data-tab]') as HTMLElement | null;
     if (tb) {
