@@ -73,7 +73,7 @@ img, svg { display: block; }
 
 /* ---------- layout ---------- */
 
-.app { min-height: 100vh; isolation: isolate; }
+.app { min-height: 100vh; min-height: 100dvh; isolation: isolate; }
 .topnav {
   position: sticky; top: 0; z-index: 40; height: var(--top-h);
   display: flex; align-items: center; gap: 22px; padding: 0 28px;
@@ -533,7 +533,7 @@ a.list-item:hover { background: rgba(255, 255, 255, 0.02); }
 .pos-badge.p1 { background: linear-gradient(135deg, #ffe07a, #d9a61c); color: #2a1d00; }
 .pos-badge.p2 { background: linear-gradient(135deg, #f0f3f6, #a9b3bd); color: #1a1d20; }
 .pos-badge.p3 { background: linear-gradient(135deg, #e6a670, #9c5a26); color: #1d0f04; }
-@media (max-width: 700px) { .chat-card { height: calc(100vh - 330px); } .chat-msg { max-width: 92%; } }
+@media (max-width: 700px) { .chat-card { height: calc(100vh - 330px); height: calc(100dvh - 330px); } .chat-msg { max-width: 92%; } }
 .hon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
 .hon { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--line); min-width: 0; }
 .shop-main, .shop-stage-col { min-width: 0; }
@@ -720,8 +720,9 @@ a.bk-tie:hover { border-color: var(--line-2); }
   .hero-cta .btn.lg { height: 46px; padding: 0 20px; font-size: 15px; }
   .house-thumb.big { height: 150px; }
   .ta-big svg { width: 100px; height: 100px; }
-  .act-row { grid-auto-columns: 86%; margin: 0 -16px; padding: 0 16px 6px; }
+  .act-row { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); overflow: visible; gap: 12px; padding: 0; }
   .act-card.wide { min-width: 0; }
+  .act-title { margin: 24px 0 10px; }
 }
 
 /* ---------- Training ground ---------- */
@@ -834,3 +835,32 @@ a.bk-tie:hover { border-color: var(--line-2); }
   .tr-rcard { padding: 16px; }
 }
 .tr-results[hidden], .tr-meter[hidden] { display: none; }
+
+/* ---------- Phone & touch polish ---------- */
+@media (max-width: 900px) {
+  /* 16px stops iOS zooming into focused fields. */
+  input, select, textarea, .input { font-size: 16px; }
+  .page-head { flex-wrap: wrap; row-gap: 10px; }
+  /* Scrollable rows fade at the edge so it's clear there's more. */
+  .tabs, .filter-row { max-width: 100%; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); padding-right: 24px; }
+  .tabs::-webkit-scrollbar, .filter-row::-webkit-scrollbar, .rail::-webkit-scrollbar { display: none; }
+  .tabbar a:active svg { transform: scale(0.88); }
+  .toast-wrap { width: calc(100% - 32px); }
+  .toast-wrap > * { max-width: 100%; }
+}
+@media (pointer: coarse) {
+  /* Comfortable thumb targets (Apple asks for 44pt, Material for 48dp). */
+  .btn.sm { height: 40px; padding: 0 16px; }
+  .seg button { height: 40px; padding: 0 14px; }
+  .tabs button { height: 40px; }
+  .fchip { height: 40px; padding: 0 16px; }
+  .swatch { width: 40px; height: 40px; border-radius: 12px; }
+  .swatches { gap: 10px; }
+  .stepper button { width: 44px; height: 44px; border-radius: 12px; }
+  .toggle { width: 58px; height: 34px; }
+  .toggle i { width: 26px; height: 26px; }
+  .toggle.on i { transform: translateX(24px); }
+  .card-link { display: inline-flex; align-items: center; min-height: 40px; padding: 0 4px; margin: -10px -4px; }
+  .btn:active, .fchip:active, .seg button:active, .tabs button:active, .swatch:active { transform: scale(0.96); }
+  [data-switch] { display: inline-block; padding: 10px 4px; margin: -10px 0; }
+}
