@@ -48,12 +48,29 @@ export function startRouter(render: (path: string) => Promise<void>) {
   void renderFn(location.pathname);
 }
 
+// Pages attach listeners to the long-lived page element. Each visit gets its
+// own AbortSignal so those listeners go away with the page instead of piling up.
+let listeners = new AbortController();
+const scoped = new WeakSet<HTMLElement>();
+function scopeListeners(el: HTMLElement) {
+  if (scoped.has(el)) return;
+  scoped.add(el);
+  const native = el.addEventListener.bind(el);
+  el.addEventListener = ((type: string, fn: EventListenerOrEventListenerObject, opts?: boolean | AddEventListenerOptions) => {
+    const o = typeof opts === 'object' ? opts : { capture: !!opts };
+    native(type, fn, { ...o, signal: o.signal ?? listeners.signal });
+  }) as typeof el.addEventListener;
+}
+
 export async function runPage(el: HTMLElement, page: Page, params: string[]) {
   const id = ++renderId;
   if (cleanup) {
     try { cleanup(); } catch { /* ignore */ }
     cleanup = null;
   }
+  listeners.abort();
+  listeners = new AbortController();
+  scopeListeners(el);
   const c = await page(el, params);
   if (id !== renderId) {
     if (typeof c === 'function') c();

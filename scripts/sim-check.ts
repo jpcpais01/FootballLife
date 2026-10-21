@@ -5,6 +5,7 @@ import { DEFAULT_TACTICS, getFormation, type Tactics } from '../shared/formation
 import { simulateMatch } from '../shared/sim/engine.ts';
 import type { SimTeam } from '../shared/sim/types.ts';
 import { shootout } from '../shared/sim/penalties.ts';
+import { drillMultiplier, trainingSession } from '../server/progression.ts';
 
 function team(name: string, level: number, formation = '4-3-3', tactics: Tactics = DEFAULT_TACTICS): SimTeam {
   const f = getFormation(formation);
@@ -99,5 +100,15 @@ const valid = so.every((x) => {
 check('shootout kicks add up and stop when decided', valid);
 const rate = so.reduce((s2, x) => s2 + x.kicks.filter((k) => k.in).length, 0) / so.reduce((s2, x) => s2 + x.kicks.length, 0);
 check('penalty conversion is realistic', rate > 0.65 && rate < 0.88, rate.toFixed(2));
+
+// Training drills: the score scales XP within sensible bounds.
+check('drill multiplier bounds', drillMultiplier(0) === 0.8 && drillMultiplier(100) === 1.3 && drillMultiplier(undefined) === 1 && drillMultiplier(500) === 1.3 && drillMultiplier(NaN) === 1);
+{
+  const at = generateAttributes('ST', 50, 'drill');
+  const lo = trainingSession('ST', at, {}, 'finishing', 0, drillMultiplier(10));
+  const hi = trainingSession('ST', at, {}, 'finishing', 0, drillMultiplier(95));
+  const gained = (r: typeof lo) => (r.attrs.finishing - at.finishing) * 1000 + (r.xp.finishing ?? 0);
+  check('a better drill earns more XP', gained(hi) > gained(lo), [gained(lo), gained(hi)]);
+}
 
 process.exit(failed ? 1 : 0);

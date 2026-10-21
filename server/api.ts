@@ -10,7 +10,7 @@ import { clearCookie, currentUser, login, logout, register, sessionCookie, type 
 import { getDb, hasDatabaseConfig, type Db } from './db.ts';
 import { bad, forbidden, hexColor, HttpError, newId, notFound, oneOf, readJson, sendJson, str } from './http.ts';
 import { currentSeason, placeNewClub, standings, tick, type LineupSnapshot } from './league.ts';
-import { trainingSession, TRAINING_FOCI, type TrainingFocus } from './progression.ts';
+import { drillMultiplier, trainingSession, TRAINING_FOCI, type TrainingFocus } from './progression.ts';
 import { clubPlayers, clubStrength, resolveLineup, syncSquad, type ClubRow, type PlayerRow } from './squads.ts';
 import { ACHIEVEMENTS, ACH_BY_ID } from '../shared/achievements.ts';
 import { featured, ITEM_BY_ID, ITEMS, priceOf, sanitizeEquipped, shopDay, SLOTS, type Slot } from '../shared/cosmetics.ts';
@@ -223,14 +223,16 @@ route('POST', '/api/train', async (c) => {
   // Regularity bonus: training again within a day of the last session.
   const last = p.last_train_at ? new Date(p.last_train_at).getTime() : 0;
   const streak = last && Date.now() - last < 24 * 3600_000 ? 0.15 : 0;
-  const res = trainingSession(p.position, p.attrs, p.xp as Partial<Record<Attr, number>>, focus, streak);
+  // The drill score scales the session: 0.8× for a botched drill up to 1.3× for a perfect one.
+  const perf = drillMultiplier(c.body.score as number | undefined);
+  const res = trainingSession(p.position, p.attrs, p.xp as Partial<Record<Attr, number>>, focus, streak, perf);
   const updated = await c.db.query(
     'UPDATE players SET attrs = $2, xp = $3, last_train_at = now(), train_count = train_count + 1 WHERE id = $1 AND (last_train_at IS NULL OR last_train_at = $4) RETURNING id',
     [p.id, JSON.stringify(res.attrs), JSON.stringify(res.xp), p.last_train_at],
   );
   if (!updated.length) throw bad('Training already in progress');
   const achievements = await checkAchievements(c.db, p.id);
-  return { achievements, levelUps: res.levelUps, xp: res.xp, attrs: res.attrs, ovr: overall(res.attrs, p.position), streak: streak > 0 };
+  return { achievements, levelUps: res.levelUps, xp: res.xp, attrs: res.attrs, ovr: overall(res.attrs, p.position), streak: streak > 0, perf };
 });
 
 route('GET', '/api/home', async (c) => {

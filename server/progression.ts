@@ -31,13 +31,19 @@ const CATEGORY_ATTRS: Record<string, Attr[]> = {
   attacking: ['finishing', 'shooting', 'offPositioning', 'keyPassing'],
 };
 
+/** XP multiplier for a drill score (0–100). A quick session without the drill counts as 40. */
+export function drillMultiplier(score: number | null | undefined): number {
+  const s = typeof score === 'number' && Number.isFinite(score) ? Math.max(0, Math.min(100, score)) : 40;
+  return Math.round((0.8 + s / 200) * 100) / 100;
+}
+
 /**
  * One training session. A focused attribute gets all the XP; a category
  * spreads it. Key attributes of the player's position train more efficiently,
  * so the chosen position shapes how a career develops.
  */
-export function trainingSession(pos: Position, attrs: Attributes, xp: Partial<Record<Attr, number>>, focus: TrainingFocus, streakBonus: number): XpResult {
-  const base = 70 * (1 + streakBonus);
+export function trainingSession(pos: Position, attrs: Attributes, xp: Partial<Record<Attr, number>>, focus: TrainingFocus, streakBonus: number, perf = 1): XpResult {
+  const base = 70 * (1 + streakBonus) * perf;
   const keys = new Set(KEY_ATTRS[pos]);
   let targets: Attr[];
   if (focus === 'position') targets = KEY_ATTRS[pos];

@@ -10,6 +10,7 @@ export const PATCH_NOTES: PatchGroup[] = [
     hour: '2026-10-21T21:00:00Z',
     entries: [
       { title: 'A new home screen', body: 'The home screen is now a row of big tiles: your next match, club, training, league, cup, shop, home, transfers and profile. Move across them with the mouse or arrow keys, or tap once on mobile, and the screen below changes to show what is waiting there.' },
+      { title: 'Training ground', body: 'Training is now played. Pick a drill (target finishing, rebound passing, speed gates, slide tackling or shot stopping) and run six reps on a sunny 3D training pitch by timing each strike on the meter. Your score sets the XP: from ×0.8 up to ×1.3 for a perfect run. Quick sessions still work, and you can practise for fun while you recover.' },
       { title: 'A real stadium', body: 'Matches now play in a closed two-tier bowl with a roof, floodlights, hospitality boxes, LED ribbons and big screens showing the score. The home end sings with scarves, flags and stripes in club colours, the away fans have their own block, and the whole crowd jumps up when a goal goes in. The pitch has proper mowing sheen, and day games get clouds and real roof shadows.' },
       { title: 'New look everywhere', body: 'Glass panels, a soft moving background in your club colours, rounder buttons and tabs, smoother page transitions, and a top menu with the time, your coins and your inbox. On mobile the tab bar now floats.' },
     ],
