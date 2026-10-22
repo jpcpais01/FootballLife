@@ -7,18 +7,22 @@
 
 /** One-shot body actions the animation layer plays, timed to the engine. */
 export type ActKind =
-  | 'pass' // side-foot pass
-  | 'drive' // driven / lofted pass, clearance
-  | 'shot'
-  | 'cross'
+  | 'pass' // side-foot pass along the ground
+  | 'chip' // short lofted pass
+  | 'cross' // long lofted ball: crosses, switches, diagonals
+  | 'shot' // shots and hoofed clearances
   | 'header'
-  | 'trap' // first touch
-  | 'tackle' // standing tackle / block
+  | 'trap' // first touch with the foot
+  | 'chest' // first touch on the chest
+  | 'tackle' // standing tackle / block (or a missed one)
   | 'slide'
-  | 'dive' // keeper dive (side in `a`)
+  | 'dive' // keeper dive; detail is the keeper's local side (+1 = his own left)
   | 'catch'
-  | 'throw' // throw-in
-  | 'fall'; // fouled / beaten
+  | 'keeperKick' // goal kick or punt
+  | 'keeperThrow'
+  | 'throwIn'
+  | 'fall' // fouled
+  | 'getUp';
 
 /** [game time, player index, kind, side or detail] */
 export type Act = [number, number, ActKind, number];

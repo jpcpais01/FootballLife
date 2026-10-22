@@ -20,12 +20,12 @@ const SLOW_SHARE = 0.6;
 
 /** A highlight window around an event, and how much it matters. */
 function isHighlight(e: MatchEvent): [number, number, number] | null {
-  if (e.k === 'goal') return [e.t - 14, e.t + 8, 10];
-  if (e.k === 'penalty') return [e.t - 4, e.t + 14, 8];
+  if (e.k === 'goal') return [e.t - 10, e.t + 8, 10];
+  if (e.k === 'penalty') return [e.t - 10, e.t + 14, 8];
   if (e.k === 'shot') return [e.t - 10, e.t + 3, 3 + (e.xg ?? 0) * 10];
-  if (e.k === 'card' && e.o !== 'yellow') return [e.t - 6, e.t + 4, 6];
-  if (e.k === 'freekick' && e.o === 'direct') return [e.t - 3, e.t + 4, 2];
-  if (e.k === 'corner') return [e.t - 2, e.t + 6, 1];
+  if (e.k === 'card' && e.o !== 'yellow') return [e.t - 10, e.t + 4, 6];
+  if (e.k === 'freekick' && e.o === 'direct') return [e.t - 10, e.t + 4, 2];
+  if (e.k === 'corner') return [e.t - 10, e.t + 6, 1];
   if (e.k === 'kickoff') return [e.t - 1, e.t + 6, e.t < 10 ? 5 : 0.5];
   return null;
 }

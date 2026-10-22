@@ -7,6 +7,14 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-22T02:30:00Z',
+    entries: [
+      { title: 'Shots that look like shots', body: 'Strikers now pick their shot: a side-foot finish into the far corner, a driven strike across the keeper, a curler that starts outside the post and bends in, a dipping free kick over the wall, or a chip when the keeper rushes out. The ball rises and dips with real weight, misses go just wide of the post or over the bar instead of miles off, and players only shoot when they can actually see the goal.' },
+      { title: 'Clean first touches', body: 'Passes are now hit to where the team-mate can actually get to, and he runs onto the ball before taking his touch, so the ball never jumps to a player\'s feet. Every touch uses the right move: side-foot passes, chips, long balls, chest control, headers, keeper throws and kicks, throw-ins, and fouled players go down and get back up.' },
+      { title: 'See the build-up', body: 'Every live highlight now starts ten seconds before the big moment, so you see the move that led to the goal, the chance, the card or the corner.' },
+    ],
+  },
+  {
     hour: '2026-10-22T02:00:00Z',
     entries: [
       { title: 'New menu icons', body: 'The side menu has a brand new set of icons drawn for FootbalLife: a training cone, a club crest with a star, a proper match ball, a kit for the shop and more. Each has its own colour detail, the resting tiles are cleaner glass, and the page you\'re on lights up in its colour. They match all three themes.' },

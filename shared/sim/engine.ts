@@ -29,6 +29,7 @@ const HALF = 2700;
 const DT = 0.1;
 const TRACK_HZ = 5;
 const GOAL_X = 52.5;
+const GOAL_HALF = 3.66;
 const BALL_R = 0.11;
 
 const hyp = (x: number, y: number) => Math.sqrt(x * x + y * y);
@@ -55,6 +56,8 @@ interface Flight {
   z1: number;
   apex: number;
   kind: 'ground' | 'air' | 'shot';
+  /** Sideways bend at mid-flight (metres, to the left of the line of flight). */
+  curl: number;
   done: () => void;
 }
 
@@ -251,6 +254,22 @@ class Engine {
     if (i >= 0) this.acts.push([r1(this.t), i, kind, detail]);
   }
 
+  /** Seconds for `i` to get to (x, y) at a run. */
+  private reach(i: number, x: number, y: number) {
+    const dx = x - this.px[i];
+    const dy = y - this.py[i];
+    const d = hyp(dx, dy);
+    if (d < 0.3) return 0;
+    const top = this.topSpeed(i) * 0.95;
+    const a = this.accel(i);
+    // Speed already carried toward the spot, then accelerate up to top speed.
+    const v0 = clamp((this.vx[i] * dx + this.vy[i] * dy) / d, 0, top);
+    const dAcc = (top * top - v0 * v0) / (2 * a);
+    const t = d <= dAcc ? (-v0 + Math.sqrt(v0 * v0 + 2 * a * d)) / a : (top - v0) / a + (d - dAcc) / top;
+    // A little slack for easing into the spot.
+    return t + 0.35;
+  }
+
   private topSpeed(i: number) {
     const p = this.player(i).attrs;
     const fatigue = Math.max(0, this.t / 5400 - p.stamina / 130) * 0.12;
@@ -436,10 +455,11 @@ class Engine {
         const push = ((1.1 - d) / d) * 0.3;
         const wi = i === this.owner ? 0.1 : 1;
         const wj = j === this.owner ? 0.1 : 1;
-        this.px[i] -= dx * push * wi;
-        this.py[i] -= dy * push * wi;
-        this.px[j] += dx * push * wj;
-        this.py[j] += dy * push * wj;
+        // Nudge velocities, not positions, so nobody jumps sideways.
+        this.vx[i] -= dx * push * wi * 3;
+        this.vy[i] -= dy * push * wi * 3;
+        this.vx[j] += dx * push * wj * 3;
+        this.vy[j] += dy * push * wj * 3;
       }
     }
   }
@@ -455,9 +475,20 @@ class Engine {
       } else if (f.kind === 'air') {
         const k = 0.3;
         e = (1 - Math.exp(-k * s * f.T)) / (1 - Math.exp(-k * f.T));
-      } else e = s;
+      } else {
+        // Struck balls lose a little pace through the air.
+        const k = 0.35;
+        e = (1 - Math.exp(-k * s * f.T)) / (1 - Math.exp(-k * f.T));
+      }
       this.bx = f.x0 + (f.x1 - f.x0) * e;
       this.by = f.y0 + (f.y1 - f.y0) * e;
+      if (f.curl) {
+        // Spin bends the flight off the straight line and back onto the target.
+        const L = hyp(f.x1 - f.x0, f.y1 - f.y0) || 1;
+        const c = f.curl * 4 * e * (1 - e);
+        this.bx -= ((f.y1 - f.y0) / L) * c;
+        this.by += ((f.x1 - f.x0) / L) * c;
+      }
       this.bz = f.kind === 'ground' ? BALL_R + (f.z0 - BALL_R) * Math.max(0, 1 - s * 4) : f.z0 + (f.z1 - f.z0) * s + f.apex * 4 * s * (1 - s);
       if (s >= 1) {
         // Velocity on arrival, for whatever happens next.
@@ -468,6 +499,21 @@ class Engine {
         this.flight = null;
         this.passInfo = null;
         f.done();
+      }
+      return;
+    }
+    if (this.owner >= 0 && this.receiving) {
+      // The ball rolls on and the receiver runs onto it; first touch when he gets there.
+      const i = this.owner;
+      this.rollFree();
+      this.carryX = this.bx + this.bvx * 0.35;
+      this.carryY = this.by + this.bvy * 0.35;
+      if (this.dist(i, this.bx, this.by) < 0.7) {
+        this.receiving = false;
+        this.ownerSince = this.t;
+        this.setCarry(i, 6);
+        if (this.pendingTouch) this.act(i, this.touchKind(this.pendingTouch));
+        this.decideAt = Math.max(this.decideAt, this.t + 0.3);
       }
       return;
     }
@@ -486,9 +532,11 @@ class Engine {
         hy = 0;
       }
       const ph = ((this.t - this.ownerSince) * (0.9 + sp * 0.12)) % 1;
-      const knock = sp > 2.5 ? (ph < 0.2 ? ph / 0.2 : (1 - ph) / 0.8) * Math.min(1.3, sp * 0.16) : 0;
-      const gx = this.px[i] + hx * (0.5 + knock);
-      const gy = this.py[i] + hy * (0.5 + knock);
+      // Close control: small touches, and the ball is tight to him when he's about to play it.
+      const ready = this.t >= this.decideAt ? 0.3 : 1;
+      const knock = sp > 2.5 ? (ph < 0.2 ? ph / 0.2 : (1 - ph) / 0.8) * Math.min(0.55, sp * 0.07) * ready : 0;
+      const gx = this.px[i] + hx * (0.4 + knock);
+      const gy = this.py[i] + hy * (0.4 + knock);
       // Glide onto the foot rather than snapping.
       const k = Math.min(1, (this.t - this.ownerSince) / 0.25);
       this.bx += (gx - this.bx) * (0.35 + 0.65 * k);
@@ -497,7 +545,32 @@ class Engine {
       return;
     }
     if (this.loose) {
-      // Free ball: gravity, bounce and grass friction.
+      this.rollFree();
+      this.outOfPlay();
+      return;
+    }
+    // Dead ball (in the net, or out of play before the restart): it runs on and settles.
+    if (this.bz > BALL_R + 0.01 || Math.abs(this.bvx) + Math.abs(this.bvy) > 0.05) {
+      const net = Math.abs(this.bx) > GOAL_X - 0.2 && Math.abs(this.by) < GOAL_HALF + 0.1 && this.bz < 2.5;
+      this.rollFree();
+      const back = net ? GOAL_X + 1.8 : GOAL_X + 5;
+      if (Math.abs(this.bx) > back) {
+        this.bx = Math.sign(this.bx) * back;
+        this.bvx *= -0.15;
+        this.bvy *= 0.4;
+        this.bvz *= 0.4;
+      }
+      if (net) this.by = clamp(this.by, -GOAL_HALF + 0.15, GOAL_HALF - 0.15);
+      if (Math.abs(this.by) > 37) {
+        this.by = Math.sign(this.by) * 37;
+        this.bvy *= -0.15;
+      }
+    }
+  }
+
+  /** Free ball: gravity, bounce and grass friction. */
+  private rollFree() {
+    {
       if (this.bz > BALL_R + 0.01 || this.bvz > 0) {
         this.bvz -= 9.81 * DT;
         this.bz += this.bvz * DT;
@@ -515,7 +588,6 @@ class Engine {
       }
       this.bx += this.bvx * DT;
       this.by += this.bvy * DT;
-      this.outOfPlay();
     }
   }
 
@@ -545,7 +617,22 @@ class Engine {
   // ball control
   // =====================================================================
 
-  private give(i: number) {
+  /** True while a receiver is still running onto a ball that has arrived ahead of him. */
+  private receiving = false;
+  private pendingTouch: ActKind | null = null;
+  /** The keeper has the ball in his hands. */
+  private inHands = false;
+
+  private touchKind(k: ActKind): ActKind {
+    if (k !== 'trap') return k;
+    return this.bz > 1.7 ? 'header' : this.bz > 0.9 ? 'chest' : 'trap';
+  }
+
+  /**
+   * `i` takes the ball. If it arrived a step ahead of him he runs onto it, and
+   * the first touch (`touch`) happens when he actually reaches it.
+   */
+  private give(i: number, touch: ActKind | null = 'trap') {
     const side = this.sideOf(i);
     if (side !== this.poss) this.lastPass = null;
     this.poss = side;
@@ -559,11 +646,20 @@ class Engine {
     this.boxRun = [];
     // First touch: better technique and less pressure → ready sooner.
     const press = this.nearest((1 - side) as Side, this.bx, this.by).d;
-    const touch = 0.25 + (1 - this.a(i, 'ballControl') / 100) * 0.45 + (press < 3 ? 0.1 : 0.25) + this.rng.range(0, 0.35);
-    this.decideAt = this.t + (this.role(i) === 'GK' ? this.rng.range(1.2, 3) : touch);
+    const settle = 0.25 + (1 - this.a(i, 'ballControl') / 100) * 0.45 + (press < 3 ? 0.1 : 0.25) + this.rng.range(0, 0.35);
+    this.decideAt = this.t + (this.role(i) === 'GK' ? this.rng.range(1.2, 3) : settle);
     this.setCarry(i, 6);
     this.lastEvX = this.bx;
     this.lastEvY = this.by;
+    this.inHands = this.role(i) === 'GK' && touch === 'catch';
+    if (this.dist(i, this.bx, this.by) > 0.85 && !this.inHands) {
+      this.receiving = true;
+      this.pendingTouch = touch;
+      this.decideAt = Math.max(this.decideAt, this.t + 0.4);
+    } else {
+      this.receiving = false;
+      if (touch) this.act(i, this.touchKind(touch));
+    }
   }
 
   /** Points the man on the ball at the most open space ahead of him. */
@@ -598,8 +694,8 @@ class Engine {
     const h = this.owner;
     const side = this.sideOf(h);
     const D = (1 - side) as Side;
-    // Keep the carry going.
-    if (this.dist(h, this.carryX, this.carryY) < 2.5) this.setCarry(h, 6);
+    // Keep the carry going (a receiver is still running onto the ball).
+    if (!this.receiving && this.dist(h, this.carryX, this.carryY) < 2.5) this.setCarry(h, 6);
     const press = this.nearest(D, this.bx, this.by);
     // A defender who gets tight can win it before the attacker plays.
     if (this.role(h) !== 'GK' && press.d < 1.4 && this.t - this.ownerSince > 0.45 && this.busy[press.idx] <= this.t) {
@@ -609,7 +705,7 @@ class Engine {
         return;
       }
     }
-    if (this.t < this.decideAt || this.busy[h] > this.t) return;
+    if (this.receiving || this.t < this.decideAt || this.busy[h] > this.t) return;
     const tac = this.tactics[side];
     let mean = press.d < 2.5 ? 0.45 : press.d < 6 ? 0.9 : 1.7;
     if (tac.tempo === 'direct') mean *= 0.8;
@@ -637,7 +733,14 @@ class Engine {
     const ment = tac.mentality === 'attacking' ? 1.05 : tac.mentality === 'defensive' ? 0.96 : 1;
     const shootQ = (this.a(h, 'shooting') + this.a(h, 'finishing')) / 200;
     let shootW = 0;
-    if (u > 0.72) shootW = (u - 0.72) * 0.6 * (1 - cv * 0.7) * (0.5 + shootQ) * ment;
+    if (u > 0.72) {
+      // How much of the goal he can see, and whether there's a body in the way.
+      const gx = this.dir(side) * GOAL_X;
+      const dx = Math.abs(gx - this.bx);
+      const view = Math.abs(Math.atan2(GOAL_HALF - this.by, dx) - Math.atan2(-GOAL_HALF - this.by, dx));
+      const lane = this.laneGap((1 - side) as Side, this.bx, this.by, gx, clamp(-this.by * 0.3, -2.5, 2.5));
+      shootW = (u - 0.72) * 0.75 * clamp(view / 0.45, 0.12, 1.4) * (lane < 0.8 ? 0.55 : lane > 2.5 ? 1.15 : 1) * (0.5 + shootQ) * ment;
+    }
     if (inBox) shootW *= 2.3;
     if (role === 'CB' || role === 'DM') shootW *= 0.5;
 
@@ -663,9 +766,11 @@ class Engine {
   // actions
   // =====================================================================
 
-  private launch(kind: Flight['kind'], x1: number, y1: number, T: number, apex: number, z1: number, done: () => void) {
-    this.flight = { t0: this.t, T: Math.max(0.25, T), x0: this.bx, y0: this.by, z0: this.bz, x1, y1, z1, apex, kind, done };
+  private launch(kind: Flight['kind'], x1: number, y1: number, T: number, apex: number, z1: number, done: () => void, curl = 0) {
+    this.flight = { t0: this.t, T: Math.max(0.25, T), x0: this.bx, y0: this.by, z0: this.bz, x1, y1, z1, apex, kind, curl, done };
     this.owner = -1;
+    this.receiving = false;
+    this.inHands = false;
     this.loose = false;
   }
 
@@ -758,13 +863,20 @@ class Engine {
     const speed = lofted ? 17 + d * 0.12 : 11 + d * 0.22 + this.a(h, 'passing') * 0.03;
     const T = d / speed + (lofted ? 0.5 : 0.1);
     const kicker = h;
-    this.act(kicker, kind === 'throw' ? 'throw' : lofted || d > 25 ? 'drive' : 'pass');
+    const gkHands = this.role(h) === 'GK' && this.inHands;
+    const kickAct: ActKind = kind === 'throw'
+      ? 'throwIn'
+      : this.role(h) === 'GK'
+        ? gkHands ? (d < 32 ? 'keeperThrow' : 'keeperKick') : lofted ? 'keeperKick' : 'pass'
+        : lofted ? (d > 30 ? 'cross' : 'chip') : 'pass';
+    this.act(kicker, kickAct);
     this.lastTouch = side;
 
     if (this.rng.chance(p)) {
       const mistimed = through && this.rng.chance(0.08 * (oppTac.mentality === 'attacking' || oppTac.pressing === 'high' ? 1.5 : 1));
       this.passInfo = { to, x: tgt.x, y: tgt.y, cross: false };
-      this.launch(lofted ? 'air' : 'ground', tgt.x, tgt.y, T, lofted ? (z ?? 2) : 0, BALL_R, () => {
+      // Played so he can get there: the ball and the runner arrive together.
+      this.launch(lofted ? 'air' : 'ground', tgt.x, tgt.y, Math.max(T, this.reach(to, tgt.x, tgt.y)), lofted ? (z ?? 2) : 0, BALL_R, () => {
         if (offside || mistimed) {
           this.emit('pass', side, this.bx, this.by, { p: kicker, q: to, z, o });
           this.t += 0.6;
@@ -780,7 +892,6 @@ class Engine {
         }
         this.emit('pass', side, this.bx, this.by, { p: kicker, q: to, z, o, hl: through && this.fr(this.bx, this.by, side).u > 0.8 ? 1 : undefined });
         this.lastPass = { from: kicker, t: this.t };
-        this.act(to, 'trap');
         this.give(to);
       });
       return;
@@ -810,10 +921,9 @@ class Engine {
     this.passInfo = null;
     this.chase = [icp.idx];
     this.landing = { x: ix, y: iy };
-    this.launch(lofted ? 'air' : 'ground', ix, iy, T * k, lofted ? (z ?? 2) * 0.9 : 0, lofted ? 0.9 : BALL_R, () => {
+    this.launch(lofted ? 'air' : 'ground', ix, iy, Math.max(T * k, this.reach(icp.idx, ix, iy)), lofted ? (z ?? 2) * 0.9 : 0, lofted ? 0.9 : BALL_R, () => {
       this.emit('intercept', D, this.bx, this.by, { p: icp.idx, q: kicker, z: z ? r1(z * 0.6) : undefined });
-      this.act(icp.idx, lofted ? 'header' : 'trap');
-      this.give(icp.idx);
+      this.give(icp.idx, lofted ? 'header' : 'trap');
     });
   }
 
@@ -865,12 +975,11 @@ class Engine {
     if (this.rng.chance(p)) {
       // Beaten: the defender is left on his heels, the attacker bursts past.
       this.busy[defender] = this.t + this.rng.range(0.8, 1.4);
-      this.act(defender, attackerStarted ? 'tackle' : 'tackle');
+      this.act(defender, 'tackle');
       const d = this.dir(side);
       const sideStep = (this.py[defender] > this.py[h] ? -1 : 1) * this.rng.range(2, 4);
       this.carryX = clamp(this.px[h] + d * this.rng.range(6, 10), -51, 51);
       this.carryY = clamp(this.py[h] + sideStep, -32, 32);
-      this.vx[h] += d * 1.5;
       this.decideAt = this.t + this.rng.range(0.6, 1.2);
       if (attackerStarted || this.rng.chance(0.5)) {
         const danger = this.fr(this.bx, this.by, side).u > 0.75;
@@ -887,6 +996,7 @@ class Engine {
     const inBox = this.fr(this.bx, this.by, side).u > 0.84 && Math.abs(this.fr(this.bx, this.by, side).v) < 0.42;
     if (this.rng.chance(foulP * (inBox ? 0.06 : 1))) {
       this.act(h, 'fall');
+      this.acts.push([r1(this.t + 1.3), h, 'getUp', 0]);
       this.busy[h] = this.t + 1.6;
       this.foul(defender, h);
       return;
@@ -914,7 +1024,7 @@ class Engine {
       this.startScramble();
       return;
     }
-    this.give(defender);
+    this.give(defender, null);
   }
 
   private foul(offender: number, victim: number) {
@@ -988,12 +1098,13 @@ class Engine {
     this.lastTouch = side;
     const fly = (to: number, done: () => void) => {
       this.passInfo = to >= 0 ? { to, x: tgt.x, y: tgt.y, cross: true } : null;
-      this.launch('air', tgt.x, tgt.y, T, z, to >= 0 && this.role(to) !== 'GK' ? 1.9 : 1.6, done);
+      this.launch('air', tgt.x, tgt.y, to >= 0 ? Math.max(T, this.reach(to, tgt.x, tgt.y)) : T, z, to >= 0 && this.role(to) !== 'GK' ? 1.9 : 1.6, done);
     };
     const clear = (marker: number, withQ: boolean) => {
       this.chase = [marker];
       this.landing = { x: tgt.x, y: tgt.y };
-      fly(-1, () => {
+      this.passInfo = null;
+      this.launch('air', tgt.x, tgt.y, Math.max(T, this.reach(marker, tgt.x, tgt.y)), z, 1.9, () => {
         this.emit('cross', side, this.bx, this.by, { p: h, z, o: 'cleared', q: withQ ? marker : undefined });
         this.act(marker, 'header');
         this.lastTouch = D;
@@ -1011,8 +1122,7 @@ class Engine {
       if (this.rng.chance(claimP * 2)) {
         fly(gk, () => {
           this.emit('cross', side, this.bx, this.by, { p: h, z, o: 'claimed', q: gk });
-          this.act(gk, 'catch');
-          this.give(gk);
+          this.give(gk, 'catch');
         });
         return;
       }
@@ -1022,8 +1132,7 @@ class Engine {
     if (this.rng.chance(claimP)) {
       fly(gk, () => {
         this.emit('cross', side, this.bx, this.by, { p: h, z, o: 'claimed', q: gk });
-        this.act(gk, 'catch');
-        this.give(gk);
+        this.give(gk, 'catch');
       });
       return;
     }
@@ -1057,7 +1166,7 @@ class Engine {
   private clearance(clearer: number) {
     const side = this.poss; // attacking side
     const D = (1 - side) as Side;
-    this.act(clearer, this.bz > 1.2 ? 'header' : 'drive');
+    this.act(clearer, this.bz > 1.2 ? 'header' : 'shot');
     this.lastTouch = D;
     if (this.rng.chance(0.2)) {
       const out = this.abs({ u: this.rng.range(0.5, 0.85), v: (this.fr(this.bx, this.by, side).v >= 0 ? 1 : -1) * (this.rng.chance(0.75) ? 1.04 : -1.04) }, side);
@@ -1113,8 +1222,7 @@ class Engine {
     }
     const side = this.sideOf(best);
     this.emit('carry', side, this.bx, this.by, { p: best });
-    this.act(best, this.bz > 0.9 ? 'header' : 'trap');
-    this.give(best);
+    this.give(best, 'trap');
   }
 
   private inOwnBox(i: number) {
@@ -1261,33 +1369,80 @@ class Engine {
     const o = header ? 'header' : setPiece ?? (d > 20 ? 'long' : 'close');
     this.act(h, header ? 'header' : 'shot');
     this.lastTouch = side;
-    const speed = header ? 13 : setPiece === 'penalty' ? 24 : 20 + this.a(h, 'shooting') * 0.1;
-    const fly = (x: number, y: number, z1: number, apex: number, done: () => void) => {
+
+    // ---- What kind of strike, where he's aiming, and how it flies ----
+    const gkY = this.py[gk];
+    const near = Math.sign(this.by) || (this.rng.chance(0.5) ? 1 : -1);
+    const keeperOut = !this.sentOff[gk] && Math.abs(this.px[gk] - gx) > 4 && this.dist(gk, this.bx, this.by) < 9;
+    type Style = 'header' | 'pen' | 'fk' | 'placed' | 'drive' | 'curler' | 'chip';
+    let style: Style;
+    if (header) style = 'header';
+    else if (setPiece === 'penalty') style = 'pen';
+    else if (setPiece === 'freekick') style = 'fk';
+    else if (keeperOut && d < 16 && this.rng.chance(0.3)) style = 'chip';
+    else if (d < 11) style = this.rng.chance(0.72) ? 'placed' : 'drive';
+    else if (d < 20) style = (['placed', 'curler', 'drive'] as const)[this.rng.weighted([0.3, 0.35 + this.a(h, 'shooting') / 300, 0.35])];
+    else style = this.rng.chance(0.38 + this.a(h, 'shooting') / 400) ? 'curler' : 'drive';
+    const shotPow = this.a(h, 'shooting');
+    const speed =
+      style === 'header' ? this.rng.range(10, 14)
+      : style === 'pen' ? this.rng.range(20, 26)
+      : style === 'fk' ? this.rng.range(21, 25)
+      : style === 'chip' ? this.rng.range(11, 13.5)
+      : style === 'placed' ? this.rng.range(16, 21) + shotPow * 0.02
+      : style === 'curler' ? this.rng.range(20, 24) + shotPow * 0.02
+      : this.rng.range(24, 29) + shotPow * 0.04;
+    // Corner he goes for: across the keeper to the far post, or beat him at his near post.
+    let aimSide: number;
+    if (style === 'pen' || style === 'chip') aimSide = this.rng.chance(0.5) ? 1 : -1;
+    else if (style === 'drive') aimSide = Math.abs(gkY) > 0.4 && this.rng.chance(0.7) ? -Math.sign(gkY) : this.rng.chance(0.5) ? 1 : -1;
+    else aimSide = this.rng.chance(style === 'curler' || style === 'fk' ? 0.75 : 0.62) ? -near : near;
+    const aimY = aimSide * (style === 'drive' ? this.rng.range(1.4, 3.2) : this.rng.range(2.4, 3.3));
+    const aimZ =
+      style === 'header' ? this.rng.range(0.2, 1.3)
+      : style === 'chip' ? this.rng.range(1.2, 2.2)
+      : style === 'fk' ? this.rng.range(1.3, 2.3)
+      : style === 'curler' ? (this.rng.chance(0.6) ? this.rng.range(1.5, 2.3) : this.rng.range(0.3, 1))
+      : style === 'placed' ? (this.rng.chance(0.75) ? this.rng.range(0.12, 0.55) : this.rng.range(1.4, 2.2))
+      : this.rng.range(0.25, 2.2);
+    // Bend: curlers and free kicks start outside the target and swing in.
+    const bendMag =
+      style === 'curler' || style === 'fk' ? this.rng.range(1.1, 2.2) * (d / 20)
+      : style === 'placed' ? this.rng.range(0.15, 0.5)
+      : style === 'drive' ? this.rng.range(-0.25, 0.25)
+      : 0;
+    const fly = (x: number, y: number, z1: number, done: () => void) => {
       const dd = hyp(x - this.bx, y - this.by);
-      this.launch('shot', x, y, dd / speed, apex, z1, done);
+      const T = dd / speed;
+      // Gravity sets how much a struck ball rises and dips over its flight time;
+      // low finishes are kept down, curlers and chips get more arc.
+      const lift = style === 'header' ? 0.15 : style === 'chip' ? 2 : style === 'fk' || style === 'curler' ? 1.15 : z1 < 0.6 ? 0.35 : 0.85;
+      const apex = (9.81 * T * T) / 8 * lift;
+      const curl = Math.sign(y || 1) * this.dir(side) * bendMag;
+      this.launch('shot', x, y, T, apex, z1, done, curl);
     };
-    const keeperGoes = (y: number, z: number, save: boolean) => {
+    const flightT = (y: number) => hyp(gx - this.bx, y - this.by) / speed;
+    const keeperGoes = (y: number, z: number, save: boolean, wrongWay = false) => {
       if (this.sentOff[gk]) return;
       const dy = y - this.py[gk];
-      const dd = hyp(gx - this.bx, y - this.by);
-      // Times the dive to meet the ball.
-      const tAt = this.t + Math.max(0, dd / speed - 0.45);
+      // Times the dive to meet the ball (later for a near-post reaction save).
+      const tAt = this.t + Math.max(0.1, flightT(y) - 0.4);
       // Local side for the figure: +1 is the keeper's own left as he faces the play.
-      const sideSign = -Math.sign(dy) * this.dir(D);
-      if (Math.abs(dy) > 0.8 || z > 1.9) this.acts.push([r1(tAt), gk, 'dive', sideSign]);
+      let sideSign = -Math.sign(dy || 1) * this.dir(D);
+      if (wrongWay) sideSign = -sideSign;
+      if (Math.abs(dy) > 0.8 || z > 1.9 || wrongWay) this.acts.push([r1(tAt), gk, 'dive', sideSign]);
       else if (save) this.acts.push([r1(tAt + 0.2), gk, 'catch', 0]);
     };
 
     const blockP = (setPiece === 'penalty' ? 0 : setPiece === 'freekick' ? 0.25 : d > 13 ? 0.22 : 0.1) * (dTac.mentality === 'defensive' && !setPiece ? 1.35 : 1);
     const r = this.rng.next();
-    const dirSign = this.rng.chance(0.5) ? 1 : -1;
     if (r < blockP) {
       const blocker = this.nearestTo(D, this.bx + (gx - this.bx) * 0.15, this.by * 0.85);
       const bx = this.bx + (gx - this.bx) * clamp(1.5 / d, 0.05, 0.3);
-      const by = this.by + (0 - this.by) * clamp(1.5 / d, 0.05, 0.3);
+      const by = this.by + (aimY - this.by) * clamp(1.5 / d, 0.05, 0.3);
       this.chase = [blocker];
       this.landing = { x: bx, y: by };
-      fly(bx, by, 0.6, 0.2, () => {
+      fly(bx, by, 0.6, () => {
         this.emit('shot', side, this.bx, this.by, { p: h, q: blocker, o: 'blocked', xg: xgR, hl: 1 });
         this.act(blocker, 'tackle');
         this.lastTouch = D;
@@ -1308,25 +1463,27 @@ class Engine {
       return;
     }
     if (this.rng.next() < pGoal / (1 - blockP)) {
-      const y = dirSign * this.rng.range(0.3, 3.4);
-      const z = r1(this.rng.range(0.2, 2.2));
-      keeperGoes(y, z, false);
-      fly(gx + this.dir(side) * 0.8, y, z, header ? 0.2 : Math.min(1.5, d / 25), () => {
+      // Finds the corner.
+      const y = clamp(aimY + this.rng.range(-0.3, 0.3), -GOAL_HALF + 0.2, GOAL_HALF - 0.2);
+      const z = r1(clamp(aimZ + this.rng.range(-0.15, 0.15), 0.12, 2.3));
+      keeperGoes(y, z, false, style === 'pen' && this.rng.chance(0.4));
+      fly(gx + this.dir(side) * 0.8, y, z, () => {
         this.score[side]++;
         this.emit('shot', side, this.bx, this.by, { p: h, q: gk, o: 'goal', xg: xgR, z, hl: 1 });
         this.emit('goal', side, this.bx, this.by, { p: h, q: assist >= 0 ? assist : undefined, sc: [...this.score] as [number, number], o, hl: 1 });
-        this.place(gx + this.dir(side) * 1.6, y * 0.8, BALL_R);
+        // Into the net: the ball keeps going and drops in the goal.
         this.celebrate(h, D);
       });
       return;
     }
     const onTargetP = clamp(0.36 + (sq - 55) * 0.005, 0.2, 0.6);
     if (this.rng.chance(onTargetP)) {
-      const parry = this.rng.chance(0.35);
-      const y = clamp(this.py[gk] + dirSign * this.rng.range(0.2, 2.8), -3.3, 3.3);
-      const z = r1(this.rng.range(0.3, 2));
+      // On target, but close enough to the keeper for him to get there.
+      const parry = this.rng.chance(style === 'drive' || style === 'curler' ? 0.45 : 0.3);
+      const y = clamp(gkY + (aimY - gkY) * this.rng.range(0.15, 0.8), -GOAL_HALF + 0.3, GOAL_HALF - 0.3);
+      const z = r1(clamp(aimZ, 0.2, 2.1));
       keeperGoes(y, z, !parry);
-      fly(gx - this.dir(side) * 0.6, y, z, Math.min(1.2, d / 30), () => {
+      fly(gx - this.dir(side) * 0.6, y, z, () => {
         this.emit('shot', side, this.bx, this.by, { p: h, q: gk, o: parry ? 'parried' : 'saved', xg: xgR, z, hl: 1 });
         this.lastTouch = D;
         if (parry) {
@@ -1334,16 +1491,32 @@ class Engine {
           this.outOfPlay(true, 'corner');
           return;
         }
-        this.give(gk);
+        this.give(gk, null);
+        this.inHands = true;
+        this.receiving = false;
         this.decideAt = this.t + this.rng.range(4, 8);
       });
       return;
     }
+    // Off target: dragged wide of the post he aimed for, or over the bar.
     const post = this.rng.chance(0.06);
-    const y = dirSign * (post ? 3.66 : this.rng.range(4.4, 10));
-    const z = r1(this.rng.range(0.5, 4));
-    keeperGoes(clamp(y, -3.5, 3.5), z, false);
-    fly(gx + this.dir(side) * 1.5, y, z, Math.min(2, d / 18), () => {
+    const overP = style === 'drive' ? 0.5 : style === 'curler' || style === 'fk' ? 0.45 : style === 'header' || style === 'chip' ? 0.4 : 0.25;
+    const over = !post && this.rng.chance(overP);
+    let y: number;
+    let z: number;
+    if (post) {
+      const bar = this.rng.chance(0.3);
+      y = bar ? clamp(aimY, -3.2, 3.2) : Math.sign(aimY) * GOAL_HALF;
+      z = bar ? 2.44 : r1(this.rng.range(0.3, 2.2));
+    } else if (over) {
+      y = aimY + this.rng.range(-0.8, 0.8);
+      z = r1(2.6 + this.rng.range(0, 0.6 + d / 25));
+    } else {
+      y = Math.sign(aimY) * (GOAL_HALF + 0.25 + this.rng.range(0, 0.6 + d / 10));
+      z = r1(clamp(aimZ + this.rng.range(-0.3, 0.3), 0.15, 2.4));
+    }
+    keeperGoes(clamp(y, -3.5, 3.5), Math.min(z, 2.4), false);
+    fly(gx + this.dir(side) * (post ? 0 : 1.5), y, z, () => {
       this.emit('shot', side, this.bx, this.by, { p: h, o: post ? 'post' : 'wide', xg: xgR, z, hl: 1 });
       this.lastTouch = side;
       this.goalKick(D);
@@ -1399,7 +1572,6 @@ class Engine {
         this.act(taker, 'pass');
         this.passInfo = { to: mate, x: tgt.x, y: tgt.y, cross: false };
         this.launch('ground', tgt.x, tgt.y, d / 11 + 0.2, 0, BALL_R, () => {
-          this.act(mate, 'trap');
           this.give(mate);
         });
       },
