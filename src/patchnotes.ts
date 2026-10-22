@@ -9,6 +9,8 @@ export const PATCH_NOTES: PatchGroup[] = [
   {
     hour: '2026-10-22T01:00:00Z',
     entries: [
+      { title: 'New player bodies', body: 'Every player has a brand new body: one smooth, athletic figure with longer legs, broader shoulders and real joints instead of stiff separate pieces. All your look studio choices carry over, and the new body is lighter for your phone to draw.' },
+      { title: 'Real motion capture', body: 'Players now move with motion captured from real people. Walking, jogging, running, side-steps and backpedals blend smoothly with each player\'s actual speed, feet plant on the grass without sliding, and heads turn to follow the ball. Passes, shots, chips, crosses, traps, slide tackles, falls, keeper dives and catches are all captured too, timed so the foot meets the ball on the exact moment it\'s struck.' },
       { title: 'No more random flashing', body: 'Pages no longer flash or redraw themselves out of nowhere. The home screen, the top bar and the menu bar now only change when something actually changed, like a new result or more coins, and game updates install quietly while FootbalLife is in the background instead of reloading the screen while you play.' },
     ],
   },

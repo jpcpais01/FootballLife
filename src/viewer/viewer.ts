@@ -14,7 +14,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { sanitizeAppearance } from '../../shared/appearance.ts';
 import type { Tactics } from '../../shared/formations.ts';
 import type { MatchEvent } from '../../shared/sim/types.ts';
-import { Figure, GK_KITS, type Kit } from './figures.ts';
+import { type ActionKind, Figure, GK_KITS, type Kit } from './figures.ts';
 import { Playback } from './playback.ts';
 import { buildStadium, PL, PW, type Stadium } from './stadium.ts';
 
@@ -332,12 +332,9 @@ export class MatchViewer {
     this.updateTrail(fr.phase === 'flight' && rate < 6, jumped);
 
     // Players: steered bodies with acceleration limits, arrival, separation and ball-watching.
-    if (jumped) {
-      this.poses.clear();
-      this.fired.clear();
-    }
+    if (jumped) this.fired.clear();
     this.steer(fr, Math.max(0, gameDt), jumped, rate);
-    this.triggerPoses(fr, t);
+    this.triggerActions(fr, t, rate);
     for (let i = 0; i < 22; i++) {
       const f = this.figures[i];
       if (fr.sentOff[i]) {
@@ -369,17 +366,8 @@ export class MatchViewer {
       f.leanZ += (Math.max(-0.14, Math.min(0.14, -(acc.x * ch - acc.y * sh) * 0.02)) - f.leanZ) * Math.min(1, realDt * 6);
       f.celebrate = fr.celebrating >= 0 && (i < 11) === (fr.celebrating < 11) ? 1 : 0;
       f.star = fr.celebrating === i;
-      const pose = this.poses.get(i);
-      if (pose && !f.celebrate) {
-        pose.k += realDt / pose.dur;
-        f.pose = pose.kind;
-        f.poseK = Math.min(1, pose.k);
-        f.poseSide = pose.side;
-        if (pose.k >= 1) {
-          this.poses.delete(i);
-          f.pose = '';
-        }
-      } else f.pose = '';
+      // Eyes on the ball, unless the time-lapse is too fast to follow.
+      f.look = rate < 6 ? this.ball.position : null;
       f.animate(realDt, Math.min(9.5, speed), this.elapsed);
       const ringMat = f.ring.material as THREE.MeshBasicMaterial;
       ringMat.opacity += ((i === fr.holder ? 0.9 : 0) - ringMat.opacity) * Math.min(1, realDt * 10);
@@ -402,7 +390,6 @@ export class MatchViewer {
   }
 
   private accel = Array.from({ length: 22 }, () => new THREE.Vector2());
-  private poses = new Map<number, { kind: Figure['pose']; k: number; dur: number; side: number }>();
   private fired = new Set<string>();
 
   /**
@@ -485,32 +472,49 @@ export class MatchViewer {
     }
   }
 
-  /** One-shot actions: strikes, headers, slide tackles and keeper dives. */
-  private triggerPoses(fr: ReturnType<Playback['frame']>, t: number) {
-    const fire = (key: string, idx: number, kind: Figure['pose'], dur: number, k0 = 0, side = 1) => {
+  /**
+   * One-shot actions: strikes, headers, tackles and keeper saves, each timed
+   * so the contact frame lands when the ball is actually played.
+   */
+  private triggerActions(fr: ReturnType<Playback['frame']>, t: number, rate: number) {
+    if (rate > 3) return;
+    // Real seconds until a game-clock moment.
+    const until = (at: number) => Math.max(0, (at - t) / Math.max(0.05, rate));
+    const fire = (key: string, idx: number, kind: ActionKind, at: number, side: 1 | -1 = 1) => {
       if (idx < 0 || idx > 21 || this.fired.has(key) || fr.sentOff[idx]) return;
       this.fired.add(key);
-      this.poses.set(idx, { kind, k: k0, dur, side });
+      this.figures[idx].act(kind, { contactIn: until(at), side });
     };
     const ev = this.playback.events;
     const next = ev[fr.index + 1];
-    if (fr.kicker >= 0 && t >= fr.kickAt - 0.22 && t < fr.kickAt + 0.4) {
+    if (fr.kicker >= 0 && until(fr.kickAt) < 0.5 && t < fr.kickAt + 0.2) {
       const header = next && next.k === 'clear' && (next.z ?? 0) > 0 && fr.ball.z > 1.2;
-      fire(`k${fr.index}`, fr.kicker, header ? 'header' : 'kick', header ? 0.6 : 0.55, header ? 0.3 : 0.12);
+      const kind: ActionKind = header ? 'header'
+        : next?.k === 'shot' ? 'shot'
+        : next?.k === 'cross' ? 'cross'
+        : (next?.z ?? 0) > 2.5 ? 'chip'
+        : next?.k === 'clear' ? 'shot'
+        : 'pass';
+      fire(`k${fr.index}`, fr.kicker, kind, fr.kickAt, fr.kicker % 5 === 3 ? -1 : 1);
     }
     if (!next) return;
-    if (next.k === 'cross' && next.q !== undefined && fr.phase === 'flight' && fr.flightF > 0.72 && (next.o === 'won' || next.o === 'cleared')) {
-      fire(`h${fr.index}`, next.q, 'header', 0.65);
+    if (next.k === 'cross' && next.q !== undefined && fr.phase === 'flight' && until(next.t) < 0.6 && (next.o === 'won' || next.o === 'cleared')) {
+      fire(`h${fr.index}`, next.q, 'header', next.t);
     }
-    if ((next.k === 'tackle' || next.k === 'foul') && next.p !== undefined && next.t - t < 0.55 && next.t >= t) {
-      fire(`t${fr.index}`, next.p, (fr.index * 7) % 5 < 3 ? 'slide' : 'kick', 0.8, 0.1);
+    if ((next.k === 'tackle' || next.k === 'foul') && next.p !== undefined && until(next.t) < 0.6 && next.t >= t) {
+      fire(`t${fr.index}`, next.p, (fr.index * 7) % 5 < 3 ? 'slide' : 'tackle', next.t);
+      if (next.k === 'foul' && next.q !== undefined) fire(`f${fr.index}`, next.q, 'fall', next.t + 0.1);
     }
-    if (next.k === 'shot' && next.q !== undefined && fr.phase === 'flight' && fr.flightF > 0.35 && ['saved', 'parried', 'goal'].includes(next.o ?? '')) {
+    if (next.k === 'shot' && next.q !== undefined && fr.phase === 'flight' && ['saved', 'parried', 'goal'].includes(next.o ?? '')) {
       const gk = this.figures[next.q];
       const dx = next.x - gk.pos.x;
       const dz = next.y - gk.pos.y;
       const side = dx * Math.cos(gk.heading) - dz * Math.sin(gk.heading) >= 0 ? 1 : -1;
-      if (Math.abs(next.y - gk.pos.y) > 0.6) fire(`d${fr.index}`, next.q, 'dive', 0.95, 0, side);
+      fire(`s${fr.index}`, next.q, 'keeperSet', next.t - 0.2);
+      if (until(next.t) < 0.7) {
+        if (Math.abs(next.y - gk.pos.y) > 1.2) fire(`d${fr.index}`, next.q, 'dive', next.t, side);
+        else if (next.o === 'saved') fire(`c${fr.index}`, next.q, 'catch', next.t);
+      }
     }
   }
 
