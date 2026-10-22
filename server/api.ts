@@ -8,6 +8,7 @@ import { hashSeed } from '../shared/rng.ts';
 import type { MatchResult } from '../shared/sim/types.ts';
 import { clearCookie, currentUser, login, logout, register, sessionCookie, type User } from './auth.ts';
 import { getDb, hasDatabaseConfig, type Db } from './db.ts';
+import { sanitizeBadge } from '../shared/badge.ts';
 import { bad, forbidden, hexColor, HttpError, newId, notFound, oneOf, readJson, sendJson, str } from './http.ts';
 import { currentSeason, placeNewClub, standings, tick, type LineupSnapshot } from './league.ts';
 import { drillMultiplier, trainingSession, TRAINING_FOCI, type TrainingFocus } from './progression.ts';
@@ -331,15 +332,11 @@ route('GET', '/api/clubs', async (c) => {
 route('POST', '/api/clubs', async (c) => {
   const p = await myPlayer(c);
   if (p.club_id) throw bad('Leave your current club first');
-  const name = str(c.body.name, 'Club name', 3, 24);
-  if (!/^[\p{L}\p{M}\p{N}' .&-]+$/u.test(name)) throw bad('Club name has unsupported characters');
-  const short = str(c.body.short, 'Short name', 2, 4).toUpperCase();
-  if (!/^[A-Z0-9]+$/.test(short)) throw bad('Short name must be letters or numbers');
+  const { name, short } = clubIdentity(c.body);
   const colors = { primary: hexColor(c.body.primary, 'primary colour'), secondary: hexColor(c.body.secondary, 'secondary colour') };
-  const badge = { shape: Math.max(0, Math.min(3, Number(c.body.shape) | 0)), icon: Math.max(0, Math.min(5, Number(c.body.icon) | 0)) };
+  const badge = sanitizeBadge(c.body.badge ?? { shape: c.body.shape, icon: c.body.icon });
   const joinMode = oneOf(c.body.joinMode ?? 'open', ['open', 'invite'] as const, 'join mode');
-  const taken = await c.db.query('SELECT 1 FROM clubs WHERE name_lc = $1', [name.toLowerCase()]);
-  if (taken.length) throw bad('That club name is taken');
+  await nameFree(c.db, name);
   const id = newId('c_');
   const placement = await c.db.tx(async (db) => {
     await db.query(
@@ -356,6 +353,19 @@ route('POST', '/api/clubs', async (c) => {
   await checkAchievements(c.db, p.id);
   return { id, placement };
 });
+
+function clubIdentity(body: Record<string, unknown>) {
+  const name = str(body.name, 'Club name', 3, 24).replace(/\s+/g, ' ');
+  if (!/^[\p{L}\p{M}\p{N}' .&-]+$/u.test(name)) throw bad('Club name has unsupported characters');
+  const short = str(body.short, 'Short name', 2, 4).toUpperCase();
+  if (!/^[A-Z0-9]+$/.test(short)) throw bad('Short name must be letters or numbers');
+  return { name, short };
+}
+
+async function nameFree(db: Db, name: string, except = '') {
+  const taken = await db.query('SELECT 1 FROM clubs WHERE name_lc = $1 AND id <> $2', [name.toLowerCase(), except]);
+  if (taken.length) throw bad('That club name is taken');
+}
 
 function inviteCode() {
   return newId().slice(0, 8).toUpperCase().replace(/[^A-Z0-9]/g, 'X');
@@ -455,9 +465,17 @@ route('POST', '/api/clubs/:id/settings', async (c) => {
   if (p.club_id !== club.id || !can(p.club_role, 'settings')) throw forbidden();
   const joinMode = oneOf(c.body.joinMode ?? club.join_mode, ['open', 'invite'] as const, 'join mode');
   const colors = c.body.primary ? { primary: hexColor(c.body.primary, 'primary colour'), secondary: hexColor(c.body.secondary, 'secondary colour') } : club.colors;
-  const badge = c.body.shape !== undefined ? { shape: Math.max(0, Math.min(3, Number(c.body.shape) | 0)), icon: Math.max(0, Math.min(5, Number(c.body.icon) | 0)) } : club.badge;
+  const badge = c.body.badge !== undefined ? sanitizeBadge(c.body.badge) : club.badge;
   const code = c.body.newCode ? inviteCode() : club.invite_code;
-  await c.db.query('UPDATE clubs SET join_mode = $2, colors = $3, badge = $4, invite_code = $5 WHERE id = $1', [club.id, joinMode, JSON.stringify(colors), JSON.stringify(badge), code]);
+  let { name, short } = club;
+  if (c.body.name !== undefined || c.body.short !== undefined) {
+    ({ name, short } = clubIdentity({ name: c.body.name ?? club.name, short: c.body.short ?? club.short }));
+    if (name !== club.name) await nameFree(c.db, name, club.id);
+  }
+  await c.db.query('UPDATE clubs SET join_mode = $2, colors = $3, badge = $4, invite_code = $5, name = $6, name_lc = $7, short = $8 WHERE id = $1',
+    [club.id, joinMode, JSON.stringify(colors), JSON.stringify(badge), code, name, name.toLowerCase(), short]);
+  if (name !== club.name) await clubMessage(c.db, club.id, `${p.name} renamed the club from ${club.name} to ${name}`);
+  else if (c.body.badge !== undefined) await clubMessage(c.db, club.id, `${p.name} updated the club badge`);
   return { ok: true, inviteCode: code };
 });
 

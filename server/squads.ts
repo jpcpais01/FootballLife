@@ -1,3 +1,4 @@
+import type { Badge } from '../shared/badge.ts';
 import { generateAttributes, overall, POSITIONS, STARTING_LEVEL, type Attributes, type Position } from '../shared/attributes.ts';
 import { randomAppearance } from '../shared/appearance.ts';
 import { getFormation, roleFit } from '../shared/formations.ts';
@@ -34,7 +35,7 @@ export interface ClubRow {
   name: string;
   short: string;
   colors: { primary: string; secondary: string };
-  badge: { shape: number; icon: number };
+  badge: Badge;
   is_bot: boolean;
   founder_user_id: string | null;
   join_mode: 'open' | 'invite';

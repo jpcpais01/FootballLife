@@ -27,6 +27,7 @@ async function call(who: string, method: string, path: string, body?: unknown) {
 }
 
 let failed = false;
+const league0Name = (d: { clubs: { id: string; name: string; isBot: boolean }[] }, not: string) => d.clubs.find((c) => c.isBot && c.id !== not)!.name;
 const check = (name: string, ok: boolean, info?: unknown) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`, info ?? '');
   if (!ok) failed = true;
@@ -55,6 +56,23 @@ check('player cannot change tactics', await call('bo', 'POST', `/api/clubs/${cre
 await call('ana', 'POST', `/api/clubs/${created.id}/role`, { playerId: club2.members.find((m: { name: string }) => m.name === 'Bo Larsen').id, role: 'coach' });
 await call('bo', 'POST', `/api/clubs/${created.id}/lineup`, { formation: '4-4-2', tactics: { mentality: 'attacking' } });
 check('coach changed formation', (await call('bo', 'GET', `/api/clubs/${created.id}`)).club.formation === '4-4-2');
+
+// Club identity can be edited any time by the founder or president.
+check('coach cannot edit the badge', await call('bo', 'POST', `/api/clubs/${created.id}/settings`, { name: 'Bo United' }).then(() => false, () => true));
+const aiName = league0Name(await call('ana', 'GET', '/api/clubs'), created.id);
+check('rename to a taken name is refused', await call('ana', 'POST', `/api/clubs/${created.id}/settings`, { name: aiName }).then(() => false, () => true));
+await call('ana', 'POST', `/api/clubs/${created.id}/settings`, {
+  name: 'Lime Rovers', short: 'lro', primary: '#1e6bff', secondary: '#f5f5f5',
+  badge: { shape: 9, icon: 21, pattern: 2, border: 4, iconScale: 999, iconRot: -30, text: 'est 2026 <b>', textPos: 3, stars: 9, accent: '#F2C14E', base: 'red' },
+});
+const renamed = (await call('ana', 'GET', `/api/clubs/${created.id}`)).club;
+check('club renamed with new short name', renamed.name === 'Lime Rovers' && renamed.short === 'LRO', `${renamed.name}/${renamed.short}`);
+check('kit colours updated', renamed.colors.primary === '#1e6bff');
+const bd = renamed.badge;
+check('badge options saved and cleaned', bd.shape === 9 && bd.icon === 21 && bd.pattern === 2 && bd.border === 4 && bd.textPos === 3 && bd.iconRot === -30, bd);
+check('badge values clamped', bd.iconScale === 160 && bd.stars === 5 && bd.text === 'EST 2026 B' && bd.accent === '#f2c14e' && bd.base === undefined, bd);
+await call('ana', 'POST', `/api/clubs/${created.id}/settings`, { name: 'Lime Rockets', short: 'LRK' });
+check('renamed back, badge kept', (await call('ana', 'GET', `/api/clubs/${created.id}`)).club.badge.icon === 21);
 
 const train = await call('ana', 'POST', '/api/train', { focus: 'finishing', score: 100 });
 check('perfect drill gives the top multiplier', train.perf === 1.3, train.perf);
