@@ -599,6 +599,7 @@ export class MatchViewer {
         break;
       case 'throwIn':
       case 'keeperThrow':
+      case 'keeperSet':
       case 'fall':
       case 'getUp':
         act = kind;
@@ -618,7 +619,7 @@ export class MatchViewer {
       side = Math.abs(across) > 0.6 ? (across > 0 ? 1 : -1) : strong;
     }
     const heading = face ?? this.figures[i].heading;
-    const aim = act === 'fall' || act === 'getUp' || act === 'throwIn' || act === 'keeperThrow'
+    const aim = act === 'fall' || act === 'getUp' || act === 'throwIn' || act === 'keeperThrow' || act === 'keeperSet'
       ? null
       : { ball: new THREE.Vector3(b0.x, b0.z, b0.y), x: me.x, z: me.y, heading };
     void detail;

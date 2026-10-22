@@ -7,6 +7,14 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-22T03:00:00Z',
+    entries: [
+      { title: 'Players think like footballers', body: 'Every time a player has the ball he now weighs up everything he could do: a safe pass to a free team-mate, a pass that breaks the lines, a switch of play to the open wing, a ball in behind for a runner, carrying it into space, taking his man on, crossing or shooting. Each is judged by the danger it creates against the risk of losing the ball there, and better decision makers pick the right one more often. No more passes into a crowd or shots from nowhere.' },
+      { title: 'Teams move as a unit', body: 'Out of possession teams defend in compact lines that slide across with the ball, press when the moment is right, mark tightly in their own box and double up on the man on the ball. In possession they spread across the pitch, keep defenders back for the counter, and the players around the ball keep moving into pockets of space. Passers go again after a one-two, full-backs overlap, and teams break at speed after winning it back.' },
+      { title: 'Smarter keepers', body: 'Keepers set themselves as the shot is struck, rush out to close down a striker clean through, sweep up balls played over their defence, and no longer dive at shots that are going well wide.' },
+    ],
+  },
+  {
     hour: '2026-10-22T02:45:00Z',
     entries: [
       { title: 'Goalkeepers rebuilt', body: 'Keepers now read the real flight of the ball. They scoop low shots, gather them at the waist, catch at the chest, jump for high balls and dive low or high to the right side, timed so their hands meet the ball instead of diving early at thin air. After a dive they land, get back up and walk back to their spot, and after a save the ball stays in their hands until they throw it, drop-kick it or put it down.' },
