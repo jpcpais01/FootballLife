@@ -74,6 +74,12 @@ export class Playback {
     return null;
   }
 
+  /** The recorded positions and ball at clock `t`, or null outside the recorded windows. */
+  recorded(t: number) {
+    const tr = this.trackAt(t);
+    return tr ? this.sample(tr, t) : null;
+  }
+
   /** Positions, velocities and ball straight from a recorded window. */
   private sample(tr: Track, t: number) {
     const pos: { x: number; y: number }[] = [];

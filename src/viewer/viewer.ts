@@ -160,10 +160,10 @@ export class MatchViewer {
     }
 
     // Ball.
-    this.ball = new THREE.Mesh(new THREE.SphereGeometry(0.3, 28, 20), new THREE.MeshPhysicalMaterial({ map: ballTexture(), roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.15 }));
+    this.ball = new THREE.Mesh(new THREE.SphereGeometry(0.11, 28, 20), new THREE.MeshPhysicalMaterial({ map: ballTexture(), roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.15 }));
     this.ball.castShadow = true;
     this.scene.add(this.ball);
-    this.ballShadow = new THREE.Mesh(new THREE.CircleGeometry(0.35, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }));
+    this.ballShadow = new THREE.Mesh(new THREE.CircleGeometry(0.15, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }));
     this.ballShadow.rotation.x = -Math.PI / 2;
     this.scene.add(this.ballShadow);
     this.trail = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0xc6ff3d, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
@@ -279,7 +279,7 @@ export class MatchViewer {
       this.scene.add(this.confetti);
     }
     this.confettiState = [];
-    const x = (this.lastBallX >= 0 ? 1 : -1) * (PL / 2 + 6);
+    const x = (this.lastBall.x >= 0 ? 1 : -1) * (PL / 2 + 6);
     for (let i = 0; i < n; i++) {
       const c = new THREE.Color(colors[i % colors.length]);
       this.confettiState.push({
@@ -296,7 +296,7 @@ export class MatchViewer {
     if (this.confetti.instanceColor) this.confetti.instanceColor.needsUpdate = true;
   }
 
-  private lastBallX = 0;
+  private lastBall = new THREE.Vector2();
 
   private resize() {
     const w = this.container.clientWidth;
@@ -325,11 +325,17 @@ export class MatchViewer {
 
     const fr = this.playback.frame(t);
     // Ball.
-    this.ball.position.set(fr.ball.x, fr.ball.z + 0.18, fr.ball.y);
-    const bv = new THREE.Vector2(fr.ball.x - this.lastBallX, 0);
-    this.ball.rotation.z -= bv.x * 0.9;
-    this.ball.rotation.x += gameDt * 2;
-    this.lastBallX = fr.ball.x;
+    this.ball.position.set(fr.ball.x, fr.ball.z, fr.ball.y);
+    // Rolls by the distance it covers (spins in the air), unless the clock jumped.
+    const mx = fr.ball.x - this.lastBall.x;
+    const mz = fr.ball.y - this.lastBall.y;
+    const md = Math.hypot(mx, mz);
+    if (md > 1e-4 && md < 6 && !jumped) {
+      rollAxis.set(mz / md, 0, -mx / md);
+      rollQ.setFromAxisAngle(rollAxis, (md / 0.11) * (fr.ball.z > 0.3 ? 0.35 : 1));
+      this.ball.quaternion.premultiply(rollQ);
+    }
+    this.lastBall.set(fr.ball.x, fr.ball.y);
     this.ballShadow.position.set(fr.ball.x, 0.02, fr.ball.y);
     const sh = Math.max(0.15, 1 - fr.ball.z / 8);
     this.ballShadow.scale.setScalar(0.7 + (1 - sh) * 1.5);
@@ -372,7 +378,11 @@ export class MatchViewer {
         const away = Math.cos(velAng - toBall) < -0.25;
         face = away && speed < 5.5 && i !== fr.holder ? toBall : velAng;
       } else face = toBall;
-      f.heading = lerpAngle(f.heading, face, Math.min(1, realDt * (speed > 5 ? 6 : 9)));
+      // Lining up a strike or a first touch holds the body to the line of the ball.
+      const lining = f.faceTo !== null && t < f.faceUntil && fr.tracked;
+      if (lining) face = f.faceTo!;
+      else f.faceTo = null;
+      f.heading = turnToward(f.heading, face, realDt, lining ? 14 : speed > 5 ? 6 : 9, lining ? 12 : speed > 5 ? 5 : 8);
       f.root.position.set(f.pos.x, 0, f.pos.y);
       f.root.rotation.y = f.heading;
       // Local velocity and lean for the animation rig.
@@ -397,7 +407,7 @@ export class MatchViewer {
     this.updateLabel(fr.holder);
     if (fr.holder >= 0) {
       const f = this.figures[fr.holder];
-      this.labelSprite.position.set(f.pos.x, 3.6, f.pos.y);
+      this.labelSprite.position.set(f.pos.x, 2.6, f.pos.y);
     }
 
     this.updateCamera(fr, realDt, rate, jumped);
@@ -495,25 +505,120 @@ export class MatchViewer {
   /** One-shot actions from the engine's recording, warped so contact lands on the recorded moment. */
   private trackedActions(fr: ReturnType<Playback['frame']>, t: number, rate: number) {
     if (rate > 3) return;
-    const map: Partial<Record<string, ActionKind>> = {
-      pass: 'pass', chip: 'chip', cross: 'cross', shot: 'shot', header: 'header', trap: 'trap', chest: 'chest',
-      tackle: 'tackle', slide: 'slide', dive: 'dive', catch: 'catch', keeperKick: 'keeperKick', keeperThrow: 'keeperThrow',
-      throwIn: 'throwIn', fall: 'fall', getUp: 'getUp',
-      // Older recordings.
-      drive: 'shot', throw: 'keeperThrow',
-    };
     for (const [at, i, kind, detail] of fr.acts) {
-      const act = map[kind];
       const key = `a${at}:${i}:${kind}`;
-      if (!act || this.fired.has(key) || fr.sentOff[i]) continue;
-      // Start about half a second of real time ahead of the contact.
+      if (this.fired.has(key) || fr.sentOff[i]) continue;
+      const f = this.figures[i];
       const lead = (at - t) / Math.max(0.05, rate);
-      if (lead > 0.5 || lead < -0.15) continue;
+      if (lead < -0.15) continue;
+      const plan = this.planAct(i, kind, detail, at);
+      if (!plan) {
+        this.fired.add(key);
+        continue;
+      }
+      // Start so the clip reaches contact at its natural pace (a little quicker when the game asks).
+      if (lead > Math.min(1, f.contactTime(plan.kind, plan.side) * 1.1) / Math.max(1, rate)) continue;
       this.fired.add(key);
-      // Dives carry their side; strikes use the left foot now and then.
-      const side: 1 | -1 = kind === 'dive' ? (detail >= 0 ? 1 : -1) : i % 5 === 3 ? -1 : 1;
-      this.figures[i].act(act, { contactIn: Math.max(0, lead), side });
+      if (plan.face !== null) {
+        f.faceTo = plan.face;
+        f.faceUntil = at + 0.3;
+      }
+      f.act(plan.kind, { contactIn: Math.max(0, lead), side: plan.side }, plan.aim ?? undefined);
     }
+  }
+
+  /**
+   * Reads the recording around an action to choose how the body plays it:
+   * the clip (a short side-foot pass, a long ball, a chip, a shot…), the foot,
+   * the facing at contact, and where the ball will be, so the foot meets it.
+   */
+  private planAct(i: number, kind: string, detail: number, at: number) {
+    const rec = (dt: number) => this.playback.recorded(at + dt);
+    const now = rec(0);
+    if (!now) return null;
+    const after = rec(0.3) ?? now;
+    const before = rec(-0.25) ?? now;
+    const b0 = now.ball;
+    const out = { x: after.ball.x - b0.x, y: after.ball.y - b0.y };
+    const inc = { x: b0.x - before.ball.x, y: b0.y - before.ball.y };
+    const outSpeed = Math.hypot(out.x, out.y) / 0.3;
+    const rising = after.ball.z - b0.z > 0.6;
+    const me = now.pos[i];
+    const keeper = i % 11 === 0;
+    let act: ActionKind;
+    let face: number | null = null;
+    let side: 1 | -1 = 1;
+    let foot = false;
+    switch (kind) {
+      case 'pass':
+        act = rising ? 'chip' : outSpeed > 17 ? 'passLong' : 'pass';
+        foot = true;
+        break;
+      case 'drive': // older recordings: any long or lofted ball
+        act = rising && outSpeed < 22 ? 'chip' : 'passLong';
+        foot = true;
+        break;
+      case 'chip':
+      case 'cross':
+      case 'shot':
+        act = kind;
+        foot = true;
+        break;
+      case 'keeperKick':
+        act = 'keeperKick';
+        foot = true;
+        break;
+      case 'trap':
+      case 'chest':
+        act = kind === 'chest' || b0.z > 0.9 ? 'chest' : 'trap';
+        if (Math.hypot(inc.x, inc.y) > 0.3) face = Math.atan2(-inc.x, -inc.y);
+        break;
+      case 'header':
+        act = 'header';
+        if (Math.hypot(out.x, out.y) > 0.5) face = Math.atan2(out.x, out.y);
+        else if (Math.hypot(inc.x, inc.y) > 0.3) face = Math.atan2(-inc.x, -inc.y);
+        break;
+      case 'tackle':
+      case 'slide':
+        act = kind;
+        face = Math.atan2(b0.x - me.x, b0.y - me.y);
+        break;
+      case 'dive':
+        act = 'dive';
+        side = detail >= 0 ? 1 : -1;
+        break;
+      case 'catch':
+        act = 'catch';
+        if (Math.hypot(inc.x, inc.y) > 0.3) face = Math.atan2(-inc.x, -inc.y);
+        break;
+      case 'throw': // older recordings: keeper throws and throw-ins alike
+        act = keeper ? 'keeperThrow' : 'throwIn';
+        break;
+      case 'throwIn':
+      case 'keeperThrow':
+      case 'fall':
+      case 'getUp':
+        act = kind;
+        break;
+      default:
+        return null;
+    }
+    if (foot && Math.hypot(out.x, out.y) > 0.2) {
+      face = Math.atan2(out.x, out.y);
+      // Which foot: the stronger one, unless the ball goes well across the body (then the other one).
+      const v = now.vel[i];
+      const run = Math.hypot(v.x, v.y) > 1 ? Math.atan2(v.x, v.y) : face;
+      let across = face - run;
+      while (across > Math.PI) across -= Math.PI * 2;
+      while (across < -Math.PI) across += Math.PI * 2;
+      const strong: 1 | -1 = (i * 7) % 5 === 3 ? -1 : 1;
+      side = Math.abs(across) > 0.6 ? (across > 0 ? 1 : -1) : strong;
+    }
+    const heading = face ?? this.figures[i].heading;
+    const aim = act === 'fall' || act === 'getUp' || act === 'throwIn' || act === 'keeperThrow'
+      ? null
+      : { ball: new THREE.Vector3(b0.x, b0.z, b0.y), x: me.x, z: me.y, heading };
+    return { kind: act, side, face, aim };
   }
 
   /**
@@ -537,7 +642,7 @@ export class MatchViewer {
         : next?.k === 'shot' ? 'shot'
         : next?.k === 'cross' ? 'cross'
         : (next?.z ?? 0) > 2.5 ? 'chip'
-        : next?.k === 'clear' ? 'shot'
+        : next?.k === 'clear' ? 'passLong'
         : 'pass';
       fire(`k${fr.index}`, fr.kicker, kind, fr.kickAt, fr.kicker % 5 === 3 ? -1 : 1);
     }
@@ -746,11 +851,17 @@ export class MatchViewer {
   }
 }
 
-function lerpAngle(a: number, b: number, t: number) {
+const rollAxis = new THREE.Vector3();
+const rollQ = new THREE.Quaternion();
+
+/** Eases an angle toward a target, never turning faster than `maxRate` radians a second. */
+function turnToward(a: number, b: number, dt: number, k: number, maxRate: number) {
   let d = b - a;
   while (d > Math.PI) d -= Math.PI * 2;
   while (d < -Math.PI) d += Math.PI * 2;
-  return a + d * t;
+  const step = d * Math.min(1, dt * k);
+  const lim = maxRate * dt;
+  return a + Math.max(-lim, Math.min(lim, step));
 }
 
 function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {

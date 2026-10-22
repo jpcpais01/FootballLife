@@ -6,12 +6,15 @@
 //     actions time-warped so the strike lands on the frame the game asks for.
 //  3. Procedural touches: head and chest tracking a target, then leg IK that
 //     locks planted feet to the grass and keeps them out of it.
+// Whenever the source of the motion changes at once (an action starts or
+// replaces another), the last pose shown is held and blended out, so the body
+// never pops from one motion to the next.
 import * as THREE from 'three';
-import { type Clip, Pose, accumulate, clearPose, duration, feetAt, mixPose, normalisePose, sample, sampleLoopPhase } from './clip.ts';
+import { type Clip, Pose, accumulate, clearPose, duration, feetAt, fkFrame, mixPose, normalisePose, sample, sampleLoopPhase } from './clip.ts';
 import { getClip, hasClip, libraryVersion } from './library.ts';
 import { ANKLE_Y, B, NB, REST } from './skeleton.ts';
 
-export type ActionKind = 'pass' | 'shot' | 'chip' | 'cross' | 'trap' | 'chest' | 'header' | 'slide' | 'tackle' | 'keeperSet' | 'dive' | 'catch' | 'fall' | 'getUp' | 'throwIn' | 'keeperThrow' | 'keeperKick';
+export type ActionKind = 'pass' | 'passLong' | 'shot' | 'chip' | 'cross' | 'trap' | 'chest' | 'header' | 'slide' | 'tackle' | 'keeperSet' | 'dive' | 'catch' | 'fall' | 'getUp' | 'throwIn' | 'keeperThrow' | 'keeperKick';
 
 export interface ActOpts {
   /** Real seconds from now until the contact frame (foot on ball, hands on ball…). */
@@ -50,6 +53,18 @@ interface Running {
 }
 
 const LOCO = { fwd: ['walk', 'jog', 'run', 'sprint'], back: ['walkBack', 'runBack'] };
+
+/** Clip per action where it isn't simply the action's own name. */
+const CLIP_OF: Partial<Record<ActionKind, string>> = { passLong: 'cross' };
+
+/** Which part of the body meets the ball in each action. */
+const EFFECTOR: Partial<Record<ActionKind, 'foot' | 'head' | 'chest' | 'hands'>> = {
+  pass: 'foot', passLong: 'foot', shot: 'foot', chip: 'foot', cross: 'foot', trap: 'foot', slide: 'foot', tackle: 'foot', keeperKick: 'foot',
+  header: 'head', chest: 'chest', catch: 'hands', dive: 'hands',
+};
+
+const fkPos = new Float32Array(NB * 3);
+const smooth = (x: number) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
@@ -112,6 +127,15 @@ export class Animator {
   private tmp = new Pose();
   private ver = -1;
   private cache = new Map<string, Clip>();
+  /** The pose shown last frame, and a held copy being blended out after a cut. */
+  private last = new Pose();
+  private hasPose = false;
+  private from = new Pose();
+  private fromT = 1;
+  private fromDur = 0;
+  /** Smoothed local velocity (body units / s), so gait changes ease in. */
+  private vF = 0;
+  private vS = 0;
 
   constructor(bones: THREE.Bone[], root: THREE.Object3D) {
     this.bones = bones;
@@ -134,9 +158,22 @@ export class Animator {
     return c;
   }
 
-  /** Starts a one-shot action, warped so its contact frame lands `contactIn` seconds from now. */
-  act(kind: ActionKind, opts: ActOpts = {}) {
-    const clip = this.clip(kind, opts.side === -1);
+  /** Holds the current pose and blends from it over `dur` seconds. */
+  private cut(dur: number) {
+    if (!this.hasPose) return;
+    // Mid-blend: keep blending from what is on screen now.
+    this.from.copy(this.last);
+    this.fromT = 0;
+    this.fromDur = dur;
+  }
+
+  /**
+   * Starts a one-shot action, warped so its contact frame lands `contactIn`
+   * seconds from now. Returns where the body part that meets the ball is at
+   * that frame (body units, in the player's own frame), or null.
+   */
+  act(kind: ActionKind, opts: ActOpts = {}): THREE.Vector3 | null {
+    const clip = this.clip(CLIP_OF[kind] ?? kind, opts.side === -1);
     const dur = duration(clip);
     const contact = clip.contact ?? dur * 0.4;
     let rate = 1;
@@ -147,8 +184,31 @@ export class Animator {
       // Too early: wait before starting. Too late: start partway through the wind-up.
       t = contact - ci * rate;
     }
-    const keep = this.action && this.action.t >= 0 ? this.action.w : 0;
-    this.action = { clip, t, contact, rate, w: keep, sx: 0, sz: 0, shifted: false };
+    // Cutting in on another action: blend from the pose on screen. Otherwise it blends in when it starts.
+    const busy = !!this.action && this.action.t >= 0;
+    if (busy) this.cut(0.22);
+    this.action = { clip, t, contact, rate, w: busy && t >= 0 ? 1 : 0, sx: 0, sz: 0, shifted: false };
+    return this.effector(clip, contact, EFFECTOR[kind]);
+  }
+
+  /** Seconds from the start of an action's clip to its contact frame. */
+  contactOf(kind: ActionKind, side: 1 | -1 = 1) {
+    const clip = this.clip(CLIP_OF[kind] ?? kind, side === -1);
+    return clip.contact ?? duration(clip) * 0.4;
+  }
+
+  private effector(clip: Clip, at: number, part: (typeof EFFECTOR)[ActionKind]) {
+    if (!part) return null;
+    fkFrame(clip, Math.min(clip.frames - 1, Math.round(at * clip.fps)), fkPos);
+    const P = (b: number) => new THREE.Vector3(fkPos[b * 3], fkPos[b * 3 + 1], fkPos[b * 3 + 2]);
+    if (part === 'head') return P(B.Head).setY(REST[B.Head][1] + 0.17);
+    if (part === 'chest') return P(B.Spine2);
+    if (part === 'hands') return P(B.LeftHand).add(P(B.RightHand)).multiplyScalar(0.5);
+    // The striking foot is the one out in front; the ball sits just beyond the toe.
+    const l = P(B.LeftToeBase);
+    const r = P(B.RightToeBase);
+    const toe = l.z > r.z ? l : r;
+    return toe.add(new THREE.Vector3(0, 0, 0.1));
   }
 
   /**
@@ -164,7 +224,11 @@ export class Animator {
 
   update(dt: number, inp: AnimInput) {
     const scale = inp.scale || 1;
-    const v = inp.speed / scale;
+    // Ease the gait toward the body's velocity: recorded motion steps at its sample rate.
+    const kv = dt > 0 ? 1 - Math.exp(-dt * 9) : 1;
+    this.vF += (inp.fwd / scale - this.vF) * kv;
+    this.vS += (inp.side / scale - this.vS) * kv;
+    const v = Math.min(inp.speed / scale, Math.hypot(this.vF, this.vS));
     const pose = this.pose;
 
     // ---- Locomotion blend ----
@@ -176,9 +240,9 @@ export class Animator {
     let strideW = 0;
     let footL = 0;
     let footR = 0;
-    let len = Math.hypot(inp.fwd, inp.side);
-    const fx = len > 1e-3 ? inp.fwd / len : 1;
-    const sx = len > 1e-3 ? inp.side / len : 0;
+    const len = Math.hypot(this.vF, this.vS);
+    const fx = len > 1e-3 ? this.vF / len : 1;
+    const sx = len > 1e-3 ? this.vS / len : 0;
     const wF = fx > 0 ? fx * fx : 0;
     const wB = fx < 0 ? fx * fx : 0;
     const wS = sx * sx;
@@ -265,7 +329,12 @@ export class Animator {
       a.t += dt * (a.t < a.contact ? a.rate : 1);
       if (a.t >= dur) this.action = null;
       else if (a.t >= 0) {
-        const fadeOut = Math.min(1, (dur - a.t) / 0.28);
+        // Starting: the held pose blends into the action, so the wind-up begins from where the body is.
+        if (a.w === 0) {
+          this.cut(Math.max(0.08, Math.min(0.2, ((a.contact - a.t) / a.rate) * 0.6)));
+          a.w = 1;
+        }
+        const fadeOut = Math.min(1, (dur - a.t) / 0.35);
         a.w = Math.min(fadeOut, a.w + dt / 0.1);
         sample(a.clip, a.t, this.tmp);
         if (!a.shifted && fadeOut < 1) {
@@ -273,8 +342,12 @@ export class Animator {
           a.shifted = true;
           a.sx = this.tmp.p[0];
           a.sz = this.tmp.p[2];
-          if (Math.hypot(a.sx, a.sz) > 0.05) this.shift.set(a.sx, 0, a.sz);
-          else a.sx = a.sz = 0;
+          if (Math.hypot(a.sx, a.sz) > 0.05) {
+            this.shift.set(a.sx, 0, a.sz);
+            // The held pose moves with the body.
+            this.from.p[0] -= a.sx;
+            this.from.p[2] -= a.sz;
+          } else a.sx = a.sz = 0;
         }
         this.tmp.p[0] -= a.sx;
         this.tmp.p[2] -= a.sz;
@@ -283,6 +356,14 @@ export class Animator {
     }
     const actW = this.action && this.action.t >= 0 ? this.action.w : 0;
     const override = Math.max(actW, this.celW, this.scrubW);
+
+    // ---- Blend out of a cut ----
+    if (this.fromT < this.fromDur) {
+      this.fromT += dt;
+      mixPose(pose, this.from, pose, smooth(this.fromT / this.fromDur));
+    }
+    this.last.copy(pose);
+    this.hasPose = true;
 
     // ---- Write the pose ----
     const bones = this.bones;

@@ -17,7 +17,14 @@ export interface Kit {
   secondary: string;
 }
 
-const SCALE = 1.45;
+/**
+ * World metres per body unit. The body is modelled about 2.2 units tall, so
+ * this makes a 1.8 m player against the real 105 x 68 m pitch, 7.32 m goals
+ * and 22 cm ball. Showcase scenes (portraits, the kit turntable) pass their own.
+ */
+export const LIFE_SCALE = 0.82;
+/** The larger, closer-up size the drills, portraits and kit turntable are framed for. */
+export const SHOWCASE_SCALE = 1.45;
 
 // ---------- Palette ----------
 
@@ -873,6 +880,18 @@ const numberPlane = new THREE.PlaneGeometry(0.2, 0.2);
 const SCRUB: Record<string, [string, number]> = { kick: ['shot', 0.45], slide: ['slide', 0.3], dive: ['ph:dive', 0.45], header: ['header', 0.5] };
 
 const tmpScale = new THREE.Vector3();
+const tmpOff = new THREE.Vector3();
+const tmpQ = new THREE.Quaternion();
+
+/** Where a timed action should meet the ball. */
+export interface ActAim {
+  /** The ball's position at contact (world, y up). */
+  ball: THREE.Vector3;
+  /** The player's ground position at contact (world x, z) and facing then. */
+  x: number;
+  z: number;
+  heading: number;
+}
 
 export type { ActionKind, ActOpts };
 
@@ -899,6 +918,9 @@ export class Figure {
   pose: '' | 'kick' | 'juggle' | 'slide' | 'dive' | 'header' = '';
   poseK = 0;
   poseSide = 1;
+  /** A heading the match viewer holds the player to until game time `faceUntil` (lining up a strike). */
+  faceTo: number | null = null;
+  faceUntil = 0;
   /** A world point the head and chest turn toward (usually the ball). */
   look: THREE.Vector3 | null = null;
   readonly keeper: boolean;
@@ -906,8 +928,18 @@ export class Figure {
   private anim: Animator;
   /** Body height above the root: on a base, or standing on the grass. */
   private lift: number;
+  /**
+   * The body's offset from the root, in world metres: `carry` is travel an
+   * action took it on (a dive) that eases back to the player's spot, `reach`
+   * is the small step that puts the foot, head or hands on the ball at contact.
+   */
+  private carry = new THREE.Vector3();
+  private reach = new THREE.Vector3();
+  private reachT = 0;
+  private reachLead = 0;
+  private reachOn = false;
 
-  constructor(kit: Kit, look: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped, opts: { base?: boolean; number?: number } = {}) {
+  constructor(kit: Kit, look: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped, opts: { base?: boolean; number?: number; scale?: number } = {}) {
     loadMocap(`${import.meta.env.BASE_URL}anims/mocap.json`);
     // Older and bot looks may lack newer features; fill them in consistently.
     const app = sanitizeAppearance(look);
@@ -1003,7 +1035,7 @@ export class Figure {
       this.bones[B.Spine2].add(num);
     }
     this.anim = new Animator(this.bones, this.root);
-    this.root.scale.setScalar(SCALE);
+    this.root.scale.setScalar(opts.scale ?? LIFE_SCALE);
   }
 
   /**
@@ -1011,12 +1043,30 @@ export class Figure {
    * catch…), warped so its contact lands `contactIn` real seconds from now.
    * `side` -1 is the left foot, or a dive to the player's right.
    */
-  act(kind: ActionKind, opts?: ActOpts) {
-    this.anim.act(kind, opts);
+  act(kind: ActionKind, opts?: ActOpts, aim?: ActAim) {
+    const eff = this.anim.act(kind, opts);
+    if (!eff || !aim) return;
+    // Where that body part will be at contact, if the player is where the game puts him.
+    const s = this.root.scale.x;
+    tmpQ.setFromAxisAngle(UP, aim.heading);
+    eff.multiplyScalar(s).applyQuaternion(tmpQ);
+    this.reach.set(aim.ball.x - aim.x - eff.x, 0, aim.ball.z - aim.z - eff.z);
+    // Only small corrections: a gap wider than a stride (a keeper's extra lunge) is the play's, not the animation's.
+    const len = this.reach.length();
+    const most = kind === 'dive' ? 1.6 : 0.9;
+    if (len > most) this.reach.multiplyScalar(most / len);
+    this.reachLead = Math.max(0.2, opts?.contactIn ?? 0.3);
+    this.reachT = opts?.contactIn ?? 0;
+    this.reachOn = true;
   }
 
   get acting() {
     return this.anim.acting;
+  }
+
+  /** Seconds an action takes from its start to the moment it meets the ball, at natural speed. */
+  contactTime(kind: ActionKind, side: 1 | -1 = 1) {
+    return this.anim.contactOf(kind, side);
   }
 
   /** Advances the animation. `speed` in m/s. */
@@ -1053,15 +1103,27 @@ export class Figure {
     });
     const sh = this.anim.shift;
     if (sh.lengthSq() > 0) {
-      // Hand an action's travel (a dive) to the root, so the body stays where it landed.
+      // Keep the body where an action's travel (a dive) took it, then ease it back once it's up.
       sh.applyQuaternion(this.root.quaternion).multiplyScalar(this.root.scale.x);
-      this.root.position.add(sh);
-      this.pos.x += sh.x;
-      this.pos.y += sh.z;
+      this.carry.add(sh);
       sh.set(0, 0, 0);
     }
+    if (!this.anim.acting && this.carry.lengthSq() > 1e-6) this.carry.multiplyScalar(Math.exp(-dt / 0.45));
+    tmpOff.copy(this.carry);
+    if (this.reachOn) {
+      this.reachT -= dt;
+      // Step into it on the way to contact, then let go.
+      const w = this.reachT > 0 ? smoothstep(0, 1, 1 - this.reachT / this.reachLead) : 1 - smoothstep(0, 1, -this.reachT / 0.45);
+      if (this.reachT < -0.45) this.reachOn = false;
+      tmpOff.addScaledVector(this.reach, w);
+    }
+    // Into the root's own frame.
+    tmpOff.applyQuaternion(tmpQ.copy(this.root.quaternion).invert()).divideScalar(this.root.scale.x || 1);
+    this.body.position.set(tmpOff.x, this.lift, tmpOff.z);
   }
 }
+
+const UP = new THREE.Vector3(0, 1, 0);
 
 export const GK_KITS: Kit[] = [
   { primary: '#ffb020', secondary: '#1b1b1b' },

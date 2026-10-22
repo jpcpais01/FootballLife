@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { randomAppearance, type Appearance } from '../../shared/appearance.ts';
 import type { Equipped } from '../../shared/cosmetics.ts';
-import { Figure, GK_KITS, type Kit } from './figures.ts';
+import { Figure, GK_KITS, SHOWCASE_SCALE, type Kit } from './figures.ts';
 
 export type DrillId = 'shooting' | 'passing' | 'sprint' | 'defending' | 'keeper';
 export type Outcome = 'perfect' | 'good' | 'miss';
@@ -364,7 +364,7 @@ export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
   let me: Figure | null = null;
   let keeper = false;
   let kit: Kit = { primary: '#1d2329', secondary: '#c6ff3d' };
-  const dummy = new Figure({ primary: '#ff7a1a', secondary: '#1b1b1b' }, randomAppearance(Math.random), false, GK_KITS[0]);
+  const dummy = new Figure({ primary: '#ff7a1a', secondary: '#1b1b1b' }, randomAppearance(Math.random), false, GK_KITS[0], undefined, { scale: SHOWCASE_SCALE });
   dummy.root.traverse((o) => { (o as THREE.Mesh).castShadow = true; });
   scene.add(dummy.root);
 
@@ -753,7 +753,7 @@ export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
       kit = k;
       keeper = isKeeper;
       if (me) scene.remove(me.root);
-      me = new Figure(k, app, keeper, GK_KITS[0], eq);
+      me = new Figure(k, app, keeper, GK_KITS[0], eq, { scale: SHOWCASE_SCALE });
       me.root.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
       scene.add(me.root);
       startPositions();

@@ -27,6 +27,8 @@ interface Spec {
   contact?: 'rfoot' | 'lfoot' | 'foot' | 'head' | 'hands' | 'reach' | 'flight' | 'low' | number;
   /** Mirror so the canonical clip is right-footed / dives to the left. */
   mirror?: boolean;
+  /** Seconds of leg draw-back to add before a strike that starts from a standstill. */
+  backswing?: number;
 }
 
 /** Game clip name → source. Names ending in _m are the mirrored-side variant of the same action. */
@@ -45,14 +47,15 @@ const SPECS: Record<string, Spec> = {
   strafeRight: { file: 'jog strafe right', loop: true },
   keeperShuffleLeft: { file: 'goalkeeper sidestep', loop: true },
   keeperShuffleRight: { file: 'goalkeeper sidestep (2)', loop: true },
-  pass: { file: 'kick soccerball (2)', contact: 'rfoot' },
-  cross: { file: 'kick soccerball', contact: 'lfoot', mirror: true },
+  pass: { file: 'kick soccerball (2)', contact: 'rfoot', backswing: 0.3 },
+  cross: { file: 'kick soccerball', contact: 'lfoot', mirror: true, backswing: 0.32 },
   shot: { file: 'strike foward jog', contact: 'rfoot' },
   chip: { file: 'soccer penalty kick', contact: 'rfoot' },
-  trap: { file: 'stall soccerball (4)', trim: [0.9, 1.87], contact: 'rfoot' },
+  // First touch: the sole reaches out and stops the ball, then the player moves off with it.
+  trap: { file: 'receive soccerball', trim: [0.05, 1.1], contact: 0.37 },
   // A standing header; the jumping one stays hand-made.
   headerStand: { file: 'header soccerball', contact: 'head' },
-  slide: { file: 'soccer tackle', contact: 'rfoot' },
+  slide: { file: 'soccer tackle (2)', contact: 0.45 },
   dive: { file: 'goalkeeper diving save', keepX: true, trim: [0, 2.2], contact: 'flight' },
   dive_m: { file: 'goalkeeper diving save (2)', keepX: true, trim: [0, 2.2], contact: 'flight' },
   catch: { file: 'goalkeeper catch (2)', contact: 'hands' },
@@ -193,12 +196,45 @@ function convert(name: string, spec: Spec): Clip {
     clip.dirZ = sp ? tz / Math.hypot(tx, tz) : 1;
   }
   let out = clip;
+  if (spec.contact !== undefined) out.contact = typeof spec.contact === 'number' ? spec.contact : findContact(out, spec.contact);
+  if (spec.backswing && out.contact !== undefined) out = addBackswing(out, spec.contact === 'lfoot' ? 'Left' : 'Right', spec.backswing);
   if (spec.mirror) {
-    out = mirrorClip(clip, name);
-    out.contact = undefined;
+    const at = out.contact;
+    out = mirrorClip(out, name);
+    out.contact = at;
   }
-  if (spec.contact !== undefined) out.contact = typeof spec.contact === 'number' ? spec.contact : findContact(out, spec.mirror ? swapSide(spec.contact) : spec.contact);
   return analyse(out);
+}
+
+/**
+ * Mixamo's standing kicks swing straight from a standstill. This draws the
+ * kicking leg back first (hip extended, knee folded, toe pointed), then
+ * swings it through into the original strike, so a pass has a wind-up.
+ */
+function addBackswing(c: Clip, side: 'Left' | 'Right', secs: number): Clip {
+  const nb = Math.round(secs * c.fps);
+  const cf = Math.max(1, Math.round(c.contact! * c.fps));
+  const leg = [B[`${side}UpLeg`], B[`${side}Leg`], B[`${side}Foot`]];
+  const bend = [0.6, 1.35, 0.35];
+  const frames = c.frames + nb;
+  const rot = new Float32Array(frames * NB * 4);
+  const pos = new Float32Array(frames * 3);
+  const q = (f: number, b: number) => new THREE.Quaternion().fromArray(c.rot, (f * NB + b) * 4);
+  const back = leg.map((b, k) => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), bend[k]).multiply(q(0, b)));
+  const ease = (u: number) => u * u * (3 - 2 * u);
+  for (let f = 0; f < frames; f++) {
+    const src = Math.max(0, f - nb);
+    rot.set(c.rot.subarray(src * NB * 4, (src + 1) * NB * 4), f * NB * 4);
+    pos.set(c.pos.subarray(src * 3, src * 3 + 3), f * 3);
+    leg.forEach((b, k) => {
+      let r: THREE.Quaternion;
+      if (f < nb) r = q(0, b).slerp(back[k], ease((f + 1) / nb));
+      else if (src < cf) r = back[k].clone().slerp(q(src, b), ease(src / cf));
+      else return;
+      rot.set([r.x, r.y, r.z, r.w], (f * NB + b) * 4);
+    });
+  }
+  return { ...c, frames, rot, pos, contact: c.contact! + nb / c.fps };
 }
 
 /** Joint paths over a clip in body space. */
@@ -229,16 +265,30 @@ function peak(T: Float32Array[], fps: number, score: (f: number) => number) {
   return at / fps;
 }
 
-function swapSide<T>(k: T): T {
-  return (k === 'rfoot' ? 'lfoot' : k === 'lfoot' ? 'rfoot' : k) as T;
+/**
+ * A strike meets the ball while the swing is at full pace, low to the ground
+ * and out in front of the body: the frame that best combines the three
+ * (the follow-through is just as fast, but high and done).
+ */
+function strike(T: Float32Array[], fps: number, toe: number) {
+  let top = 0;
+  for (let f = 0; f < T.length; f++) top = Math.max(top, speedOf(T, toe, f, fps));
+  return peak(T, fps, (f) => {
+    const y = T[f][toe * 3 + 1];
+    const z = T[f][toe * 3 + 2] - T[f][B.Hips * 3 + 2];
+    const g = T[Math.min(T.length - 1, f + 1)][toe * 3 + 2] - T[Math.max(0, f - 1)][toe * 3 + 2];
+    // Only on the way through: the foot coming back down is quick and low too.
+    if (g <= 0) return -Infinity;
+    return speedOf(T, toe, f, fps) / top + z * 2 - Math.max(0, y - 0.3) * 6;
+  });
 }
 
 function findContact(c: Clip, kind: Exclude<Spec['contact'], number | undefined>) {
   const T = track(c);
   const fps = c.fps;
   switch (kind) {
-    case 'rfoot': return peak(T, fps, (f) => speedOf(T, B.RightToeBase, f, fps));
-    case 'lfoot': return peak(T, fps, (f) => speedOf(T, B.LeftToeBase, f, fps));
+    case 'rfoot': return strike(T, fps, B.RightToeBase);
+    case 'lfoot': return strike(T, fps, B.LeftToeBase);
     case 'foot': return peak(T, fps, (f) => Math.max(speedOf(T, B.RightToeBase, f, fps), speedOf(T, B.LeftToeBase, f, fps)));
     case 'head': return peak(T, fps, (f) => speedOf(T, B.Head, f, fps));
     case 'hands': return peak(T, fps, (f) => speedOf(T, B.LeftHand, f, fps) + speedOf(T, B.RightHand, f, fps));

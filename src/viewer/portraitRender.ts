@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { Appearance } from '../../shared/appearance.ts';
 import type { Equipped } from '../../shared/cosmetics.ts';
-import { Figure, GK_KITS, type Kit } from './figures.ts';
+import { Figure, GK_KITS, SHOWCASE_SCALE, type Kit } from './figures.ts';
 
 let renderer: THREE.WebGLRenderer | null = null;
 let scene: THREE.Scene;
@@ -44,7 +44,7 @@ export function renderPortrait(app: Appearance, kit: Kit, eq: Equipped | undefin
   if (!renderer) setup();
   const r = renderer!;
   r.setSize(px, px, false);
-  const fig = new Figure(kit, app, !!opts.keeper, GK_KITS[0], eq, { base: false });
+  const fig = new Figure(kit, app, !!opts.keeper, GK_KITS[0], eq, { base: false, scale: SHOWCASE_SCALE });
   fig.root.rotation.y = opts.yaw ?? 0.32;
   fig.animate(0, 0, 0);
   scene.add(fig.root);
