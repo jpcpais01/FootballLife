@@ -688,7 +688,7 @@ export class MatchViewer {
       this.camera.fov = fov;
     } else {
       this.camPos.lerp(pos, k);
-      this.camTarget.lerp(look, Math.min(1, dt * 2.4));
+      this.camTarget.lerp(look, Math.min(1, dt * 3));
     }
     this.camera.position.copy(this.camPos);
     if (this.shake > 0) {
