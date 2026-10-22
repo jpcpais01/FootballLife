@@ -4,7 +4,7 @@
 import { HOUSE_BY_ID } from '../../shared/life.ts';
 import { ITEM_BY_ID, RARITY_COLORS } from '../../shared/cosmetics.ts';
 import { api } from '../api.ts';
-import { avatarSvg } from '../art.ts';
+import { avatar } from '../art.ts';
 import { badge, homeTable, keyAttrs, linkRows, matchRow, posChip, roleLabel, standingsTable, type MatchBrief } from '../components.ts';
 import { html, mount, type Raw } from '../dom.ts';
 import { itemArt, trophyArt } from '../gearArt.ts';
@@ -70,7 +70,7 @@ export async function homePage(el: HTMLElement) {
               <div class="grow"><a href="/club/${i.club.id}" style="font-weight:700">${i.club.name}</a><div class="tiny muted">${i.kind === 'invite' ? `Invited by ${i.from ?? 'the club'}` : 'You asked to join'} · ${relTime(i.at)}</div></div>
               ${i.kind === 'invite' ? html`<button class="btn sm primary" data-respond="${i.id}" data-accept="1">Accept</button><button class="btn sm ghost" data-respond="${i.id}" data-accept="0">Decline</button>` : html`<span class="chip">Pending</span>`}</div>`)}</div>` : ''}
           </div>
-          <div class="hero-art">${avatarSvg(p.appearance, undefined, 220, undefined, { eq: p.equipped })}</div>`,
+          <div class="hero-art">${avatar(p.appearance, undefined, 220, undefined, { eq: p.equipped })}</div>`,
       });
     } else {
       const live = m?.status === 'live';
@@ -211,14 +211,14 @@ export async function homePage(el: HTMLElement) {
     // ---- profile ----
     t.push({
       id: 'profile', label: p.name, href: `/player/${p.id}`, accent: '#c6ff3d',
-      art: () => html`<div class="ta-icon">${avatarSvg(p.appearance, d.club?.colors, 70, d.club ? p.shirt : undefined, { eq: p.equipped })}</div>`,
+      art: () => html`<div class="ta-icon">${avatar(p.appearance, d.club?.colors, 70, d.club ? p.shirt : undefined, { eq: p.equipped })}</div>`,
       hero: () => html`<div class="hero-copy">
           <div class="eyebrow">${d.club ? d.club.name : 'Free agent'}</div>
           <div class="hero-title">${p.name}</div>
           <div class="hero-stats"><div><b class="lime">${p.ovr}</b><span>${posChip(p.position)}</span></div><div><b>${p.career.apps}</b><span>Apps</span></div><div><b>${p.career.goals}</b><span>Goals</span></div><div><b>${p.career.assists}</b><span>Assists</span></div><div><b>${p.career.rating?.toFixed(1) ?? '–'}</b><span>Rating</span></div></div>
           <div class="hero-cta"><a class="btn white lg" href="/player/${p.id}">My profile</a><a class="btn lg" href="/shop/look">Edit look</a></div>
         </div>
-        <div class="hero-art">${avatarSvg(p.appearance, d.club?.colors, 240, d.club ? p.shirt : undefined, { eq: p.equipped })}</div>`,
+        <div class="hero-art">${avatar(p.appearance, d.club?.colors, 240, d.club ? p.shirt : undefined, { eq: p.equipped })}</div>`,
     });
     return t;
   };

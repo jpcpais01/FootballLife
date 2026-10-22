@@ -9,6 +9,8 @@ import { Figure, GK_KITS, type Kit } from './figures.ts';
 export interface Turntable {
   set(app: Appearance, eq: Equipped, kit: Kit, keeper?: boolean): void;
   celebrate(): void;
+  /** Frames the face (for the look studio) or the whole player. */
+  focus(mode: 'face' | 'body'): void;
   /** Moves the canvas into a new container (after the page re-renders). */
   attach(host: HTMLElement): void;
   /** Stops rendering and takes the canvas off the page, keeping it ready for the next visit. */
@@ -67,6 +69,12 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
   let dragging = false;
   let lastX = 0;
   let celebrateUntil = 0;
+  // Camera framing: 0 = whole player, 1 = close on the face.
+  let zoom = 0;
+  let zoomTo = 0;
+  const camBody = { pos: new THREE.Vector3(0, 2.9, 10.2), look: new THREE.Vector3(0, 1.55, 0) };
+  const camFace = { pos: new THREE.Vector3(0, 3.2, 3.1), look: new THREE.Vector3(0, 3.02, 0) };
+  const look = new THREE.Vector3();
 
   const onDown = (e: PointerEvent) => {
     dragging = true;
@@ -108,8 +116,22 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
     const dt = Math.min(0.05, clock.getDelta());
     const time = clock.getElapsed();
     if (!dragging) {
-      spin += (0.4 - spin) * Math.min(1, dt * 1.5);
-      yaw += spin * dt;
+      if (zoomTo > 0.5) {
+        // Close up, ease back to a three-quarter view of the face with a gentle sway.
+        spin *= 1 - Math.min(1, dt * 3);
+        const target = 0.28 * Math.sin(time * 0.5);
+        const d = Math.atan2(Math.sin(target - yaw), Math.cos(target - yaw));
+        yaw += spin * dt + d * Math.min(1, dt * 2.2);
+      } else {
+        spin += (0.4 - spin) * Math.min(1, dt * 1.5);
+        yaw += spin * dt;
+      }
+    }
+    if (Math.abs(zoom - zoomTo) > 0.001) {
+      zoom += (zoomTo - zoom) * Math.min(1, dt * 4);
+      const k = zoom * zoom * (3 - 2 * zoom);
+      camera.position.lerpVectors(camBody.pos, camFace.pos, k);
+      camera.lookAt(look.lerpVectors(camBody.look, camFace.look, k));
     }
     if (fig) {
       fig.root.rotation.y = yaw;
@@ -146,6 +168,9 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
       raf = 0;
       ro.disconnect();
       renderer.domElement.remove();
+    },
+    focus(mode) {
+      zoomTo = mode === 'face' ? 1 : 0;
     },
     celebrate() {
       celebrateUntil = clock.getElapsed() + 3.6;

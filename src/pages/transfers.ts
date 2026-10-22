@@ -2,7 +2,7 @@
 // and staff invite players straight from the list.
 import { POSITIONS, POSITION_NAMES } from '../../shared/attributes.ts';
 import { api } from '../api.ts';
-import { avatarSvg } from '../art.ts';
+import { avatar } from '../art.ts';
 import { badge, ovrChip, posChip } from '../components.ts';
 import { html, mount, type Raw } from '../dom.ts';
 import { icon } from '../icons.ts';
@@ -78,7 +78,7 @@ export async function transfersPage(el: HTMLElement) {
     const list = d.players.filter((p) => p.id !== me?.id && (pos === 'all' || p.position === pos));
     return html`${posFilter()}
       ${list.length ? html`<div class="card flush"><div class="list">${list.map((p) => html`<div class="list-item market-player">
-        <a href="/player/${p.id}">${avatarSvg(p.appearance, p.club?.colors, 44, p.club ? p.shirt : undefined, { eq: p.equipped })}</a>
+        <a href="/player/${p.id}">${avatar(p.appearance, p.club?.colors, 44, p.club ? p.shirt : undefined, { eq: p.equipped })}</a>
         <div class="grow" style="min-width:0"><a href="/player/${p.id}" class="ellipsis" style="font-weight:700;display:block">${p.name}</a>
           <div class="tiny muted ellipsis">${p.club ? html`${p.club.short} · open to offers` : 'Free agent'}${p.note ? ` · “${p.note}”` : ''}</div></div>
         ${posChip(p.position)}${ovrChip(p.ovr, true)}

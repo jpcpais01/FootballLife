@@ -7,6 +7,14 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-22T00:30:00Z',
+    entries: [
+      { title: 'Your real face, everywhere', body: 'Every portrait in the game is now a shot of your actual 3D player, in your club colours: the top bar, squad lists, the club chat, match line-ups and player pages. Change your look and every portrait follows.' },
+      { title: 'A new look studio', body: 'Creating a player and the Look tab in the locker share a new studio. Pick a category (Face, Eyes, Nose and mouth, Hair, Facial hair, Extras) and the camera moves in on your face, with every option shown as a 3D preview of you wearing it. Randomise rolls a whole new look.' },
+      { title: 'Many more options', body: 'Choose from 6 face shapes, 6 eye shapes, 6 eye colours, brows, noses, lips, freckles, moles and scars, 12 skin tones, 14 hair colours, 20 hairstyles (new: fade, slick back, side part, fringe, spiky, waves, dreads, cornrows, man bun and mullet) and 10 kinds of facial hair. Faces are rebuilt with real eyes, lids, ears and lips.' },
+    ],
+  },
+  {
     hour: '2026-10-22T00:00:00Z',
     entries: [
       { title: 'Emoji in the club chat', body: 'The club chat has an emoji button next to the message box. Pick from football, smileys, hands, hearts and flags, and the ones you use most wait for you under Recent. Send just one, two or three emoji on their own and they show up big.' },
