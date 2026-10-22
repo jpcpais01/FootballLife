@@ -3,7 +3,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { api, markTouched, newVisit, onStaleData } from './api.ts';
 import { avatar } from './art.ts';
 import { html, mount } from './dom.ts';
-import { icon } from './icons.ts';
+import { icon, navIcon } from './icons.ts';
 import { addRoute, match, navigate, runPage, startRouter } from './router.ts';
 import { refreshMe, state } from './state.ts';
 import { errorBox, relTime } from './ui.ts';
@@ -114,30 +114,30 @@ const NAV = [
 
 // The phone menu: a scrolling row of mini tiles, the same ones as the home screen rail.
 const DOCK = [
-  { href: '/', label: 'Home', icon: 'home', accent: '#c6ff3d' },
-  { href: '/club', label: 'My club', icon: 'shield', accent: '#3d6bff' },
-  { href: '/training', label: 'Training', icon: 'dumbbell', accent: '#3dd6ff' },
-  { href: '/league', label: 'League', icon: 'trophy', accent: '#ffcf3d' },
-  { href: '/shop', label: 'Shop', icon: 'bag', accent: '#ff4d9d' },
-  { href: '/house', label: 'My home', icon: 'sofa', accent: '#ff9a3d' },
-  { href: '/transfers', label: 'Transfers', icon: 'swap', accent: '#8a6bff' },
-  { href: '/clubs', label: 'Clubs', icon: 'users', accent: '#e3e8ee' },
-  { href: '/me', label: 'Profile', icon: 'user', accent: '#c6ff3d' },
+  { href: '/', label: 'Home', icon: 'home', accent: 'var(--lime)' },
+  { href: '/club', label: 'My club', icon: 'club', accent: '#3d6bff' },
+  { href: '/training', label: 'Training', icon: 'training', accent: '#3dd6ff' },
+  { href: '/league', label: 'League', icon: 'league', accent: '#ffcf3d' },
+  { href: '/shop', label: 'Shop', icon: 'shop', accent: '#ff4d9d' },
+  { href: '/house', label: 'My home', icon: 'house', accent: '#ff9a3d' },
+  { href: '/transfers', label: 'Transfers', icon: 'transfers', accent: '#8a6bff' },
+  { href: '/clubs', label: 'Clubs', icon: 'clubs', accent: '#4fe3b0' },
+  { href: '/me', label: 'Profile', icon: 'profile', accent: 'var(--lime)' },
 ];
 
 function dockHtml(path: string) {
   const items = [...DOCK];
   // Your live or next match leads the dock.
   const m = state.match;
-  if (m) items.splice(1, 0, { href: `/match/${m.id}`, label: m.live ? 'Live' : 'Match', icon: 'ball', accent: m.live ? '#ff3d5a' : '#e3e8ee' });
+  if (m) items.splice(1, 0, { href: `/match/${m.id}`, label: m.live ? 'Live' : 'Match', icon: 'match', accent: m.live ? '#ff3d5a' : '#e3e8ee' });
   return items.map((n, i) => {
     const badge = n.href === '/club' && state.invites ? html`<b class="nav-dot">${state.invites}</b>`
-      : n.icon === 'ball' && m?.live ? html`<b class="dk-live">LIVE</b>`
+      : n.icon === 'match' && m?.live ? html`<b class="dk-live">LIVE</b>`
       : n.href === '/training' && state.trainReady ? html`<b class="dk-dot"></b>`
       : '';
     const accent = n.href === '/club' && state.club ? state.club.colors.primary : n.accent;
     const active = n.href.startsWith('/match/') ? path === n.href : isActive(n.href, path);
-    return html`<a href="${navHref(n.href)}" class="dk ${active ? 'active' : ''}" style="--accent:${accent};--i:${i}" aria-label="${n.label}" title="${n.label}"><i class="dk-face">${icon(n.icon)}${badge}</i></a>`;
+    return html`<a href="${navHref(n.href)}" class="dk ${active ? 'active' : ''}" style="--accent:${accent};--i:${i}" aria-label="${n.label}" title="${n.label}"><i class="dk-face">${navIcon(n.icon)}${badge}</i></a>`;
   });
 }
 
