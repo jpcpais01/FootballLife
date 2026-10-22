@@ -938,6 +938,12 @@ export class Figure {
   private reachT = 0;
   private reachLead = 0;
   private reachOn = false;
+  /** Height the body rises to meet the ball (a keeper's dive or jump), metres. */
+  private reachY = 0;
+  /** Keeper saves keep their reach: he lands where he stretched to and walks back from there. */
+  private reachKeep = false;
+  /** A keeper with the ball in his hands. Set by the match viewer. */
+  hold = false;
 
   constructor(kit: Kit, look: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped, opts: { base?: boolean; number?: number; scale?: number } = {}) {
     loadMocap(`${import.meta.env.BASE_URL}anims/mocap.json`);
@@ -1052,9 +1058,13 @@ export class Figure {
     eff.multiplyScalar(s).applyQuaternion(tmpQ);
     this.reach.set(aim.ball.x - aim.x - eff.x, 0, aim.ball.z - aim.z - eff.z);
     // Only small corrections: a gap wider than a stride (a keeper's extra lunge) is the play's, not the animation's.
+    const save = KEEPER_SAVES.has(kind);
     const len = this.reach.length();
-    const most = kind === 'dive' ? 1.6 : 0.9;
+    const most = kind === 'dive' || kind === 'diveHigh' ? 1.6 : save ? 1.1 : 0.9;
     if (len > most) this.reach.multiplyScalar(most / len);
+    // Keepers also rise to a high ball (a spring in the dive, a jump for the catch), or get down to a low one.
+    this.reachY = save ? Math.max(-0.25, Math.min(0.75, aim.ball.y - (eff.y + this.lift * s))) : 0;
+    this.reachKeep = save;
     this.reachLead = Math.max(0.2, opts?.contactIn ?? 0.3);
     this.reachT = opts?.contactIn ?? 0;
     this.reachOn = true;
@@ -1084,6 +1094,18 @@ export class Figure {
       const k = Math.min(1, Math.max(0, this.poseK));
       scrub = { name, t: k < at ? (k / at) * c : c + ((k - at) / (1 - at)) * (dur - c), mirror: this.pose === 'dive' && this.poseSide < 0 };
     }
+    // Walking back after a dive: the body's way home drives the legs.
+    let fwd = this.fwd;
+    let side = this.side;
+    let speed2 = speed;
+    if (!this.anim.acting && this.carry.lengthSq() > 0.01) {
+      const vx = -this.carry.x / CARRY_T;
+      const vz = -this.carry.z / CARRY_T;
+      const h = this.root.rotation.y;
+      fwd += vx * Math.sin(h) + vz * Math.cos(h);
+      side += vx * Math.cos(h) - vz * Math.sin(h);
+      speed2 = Math.hypot(fwd, side);
+    }
     let cel: string | null = null;
     if (this.celebrate > 0) {
       const style = this.star && this.celStyle ? `cel_${this.celStyle}` : 'cel_cheer';
@@ -1091,15 +1113,16 @@ export class Figure {
     }
     this.root.getWorldScale(tmpScale);
     this.anim.update(dt, {
-      speed,
-      fwd: this.fwd,
-      side: this.side,
+      speed: speed2,
+      fwd,
+      side,
       scale: tmpScale.x,
       keeper: this.keeper,
       celebrate: cel,
       scrub,
       look: this.look,
       lift: this.lift,
+      hold: this.hold,
     });
     const sh = this.anim.shift;
     if (sh.lengthSq() > 0) {
@@ -1108,22 +1131,37 @@ export class Figure {
       this.carry.add(sh);
       sh.set(0, 0, 0);
     }
-    if (!this.anim.acting && this.carry.lengthSq() > 1e-6) this.carry.multiplyScalar(Math.exp(-dt / 0.45));
+    if (!this.anim.acting && this.carry.lengthSq() > 1e-6) this.carry.multiplyScalar(Math.exp(-dt / CARRY_T));
     tmpOff.copy(this.carry);
+    let up = 0;
     if (this.reachOn) {
       this.reachT -= dt;
-      // Step into it on the way to contact, then let go.
-      const w = this.reachT > 0 ? smoothstep(0, 1, 1 - this.reachT / this.reachLead) : 1 - smoothstep(0, 1, -this.reachT / 0.45);
+      // Step into it on the way to contact, then let go (a keeper keeps the ground he covered).
+      const into = smoothstep(0, 1, 1 - this.reachT / this.reachLead);
+      const out = 1 - smoothstep(0, 1, -this.reachT / 0.45);
+      if (this.reachT > 0) {
+        tmpOff.addScaledVector(this.reach, into);
+        up = this.reachY * into;
+      } else if (this.reachKeep) {
+        this.carry.add(this.reach);
+        tmpOff.add(this.reach);
+        this.reach.set(0, 0, 0);
+        this.reachKeep = false;
+      } else tmpOff.addScaledVector(this.reach, out);
+      if (this.reachT <= 0) up = this.reachY * out;
       if (this.reachT < -0.45) this.reachOn = false;
-      tmpOff.addScaledVector(this.reach, w);
     }
     // Into the root's own frame.
+    tmpOff.y = up;
     tmpOff.applyQuaternion(tmpQ.copy(this.root.quaternion).invert()).divideScalar(this.root.scale.x || 1);
-    this.body.position.set(tmpOff.x, this.lift, tmpOff.z);
+    this.body.position.set(tmpOff.x, this.lift + tmpOff.y, tmpOff.z);
   }
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
+/** Seconds for a keeper to walk back to his spot after a dive (time constant). */
+const CARRY_T = 0.8;
+const KEEPER_SAVES = new Set<ActionKind>(['dive', 'diveHigh', 'catch', 'keeperGather', 'keeperScoop', 'keeperHigh']);
 
 export const GK_KITS: Kit[] = [
   { primary: '#ffb020', secondary: '#1b1b1b' },

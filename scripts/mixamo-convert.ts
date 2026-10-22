@@ -56,9 +56,14 @@ const SPECS: Record<string, Spec> = {
   // A standing header; the jumping one stays hand-made.
   headerStand: { file: 'header soccerball', contact: 'head' },
   slide: { file: 'soccer tackle (2)', contact: 0.45 },
-  dive: { file: 'goalkeeper diving save', keepX: true, trim: [0, 2.2], contact: 'flight' },
-  dive_m: { file: 'goalkeeper diving save (2)', keepX: true, trim: [0, 2.2], contact: 'flight' },
-  catch: { file: 'goalkeeper catch (2)', contact: 'hands' },
+  // Keeper saves, all reaching to the keeper's left (mirrored for the right). Dives run
+  // through the landing and getting back up; contact is the full stretch in the air.
+  dive: { file: 'goalkeeper diving save', keepX: true, contact: 1.05 },
+  diveHigh: { file: 'goalkeeper diving save (2)', keepX: true, mirror: true, contact: 0.9 },
+  catch: { file: 'goalkeeper catch (2)', contact: 0.4 },
+  keeperGather: { file: 'goalkeeper catch', contact: 0.72 },
+  keeperScoop: { file: 'goalkeeper scoop', contact: 0.8 },
+  keeperHigh: { file: 'goalkeeper catch (4)', contact: 0.78 },
   fall: { file: 'soccer trip', contact: 'low' },
   getUp: { file: 'standing up' },
   throwIn: { file: 'throw in', contact: 'hands' },

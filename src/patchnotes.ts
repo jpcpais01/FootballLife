@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-22T02:45:00Z',
+    entries: [
+      { title: 'Goalkeepers rebuilt', body: 'Keepers now read the real flight of the ball. They scoop low shots, gather them at the waist, catch at the chest, jump for high balls and dive low or high to the right side, timed so their hands meet the ball instead of diving early at thin air. After a dive they land, get back up and walk back to their spot, and after a save the ball stays in their hands until they throw it, drop-kick it or put it down.' },
+    ],
+  },
+  {
     hour: '2026-10-22T02:30:00Z',
     entries: [
       { title: 'Real sizes, cleaner strikes', body: 'Players are now real size: about 1.8 m tall on a full 105 by 68 m pitch, next to 7.32 m goals and a proper 22 cm ball. Passes no longer look like shots: short passes get a compact pass with a proper wind-up, long balls and clearances a fuller kick, and chips, crosses and shots each have their own. Players step in and square up so the foot really meets the ball, first touches stop it with the sole, sliding tackles go in feet first, and every change of motion blends smoothly instead of snapping.' },

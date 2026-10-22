@@ -14,7 +14,8 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { sanitizeAppearance } from '../../shared/appearance.ts';
 import type { Tactics } from '../../shared/formations.ts';
 import type { MatchEvent } from '../../shared/sim/types.ts';
-import { type ActionKind, Figure, GK_KITS, type Kit } from './figures.ts';
+import { type ActAim, type ActionKind, Figure, GK_KITS, type Kit } from './figures.ts';
+import { B } from './rig/skeleton.ts';
 import { Playback } from './playback.ts';
 import type { Track } from '../../shared/sim/tracks.ts';
 import { buildStadium, PL, PW, type Stadium } from './stadium.ts';
@@ -403,6 +404,8 @@ export class MatchViewer {
       ringMat.opacity += ((i === fr.holder ? 0.9 : 0) - ringMat.opacity) * Math.min(1, realDt * 10);
     }
 
+    this.holdBall(fr, t);
+
     // Holder label.
     this.updateLabel(fr.holder);
     if (fr.holder >= 0) {
@@ -509,20 +512,23 @@ export class MatchViewer {
       const key = `a${at}:${i}:${kind}`;
       if (this.fired.has(key) || fr.sentOff[i]) continue;
       const f = this.figures[i];
-      const lead = (at - t) / Math.max(0.05, rate);
-      if (lead < -0.15) continue;
+      if ((at - t) / Math.max(0.05, rate) > 1.6) continue;
       const plan = this.planAct(i, kind, detail, at);
       if (!plan) {
         this.fired.add(key);
         continue;
       }
+      // A save meets the ball when it actually gets to him, which can differ from the engine's stamp.
+      const lead = (plan.at - t) / Math.max(0.05, rate);
+      if (lead < -0.15) continue;
       // Start so the clip reaches contact at its natural pace (a little quicker when the game asks).
       if (lead > Math.min(1, f.contactTime(plan.kind, plan.side) * 1.1) / Math.max(1, rate)) continue;
       this.fired.add(key);
       if (plan.face !== null) {
         f.faceTo = plan.face;
-        f.faceUntil = at + 0.3;
+        f.faceUntil = plan.at + (plan.save ? 0.8 : 0.3);
       }
+      if (plan.save) this.savedAt[i] = plan.at;
       f.act(plan.kind, { contactIn: Math.max(0, lead), side: plan.side }, plan.aim ?? undefined);
     }
   }
@@ -532,7 +538,8 @@ export class MatchViewer {
    * the clip (a short side-foot pass, a long ball, a chip, a shot…), the foot,
    * the facing at contact, and where the ball will be, so the foot meets it.
    */
-  private planAct(i: number, kind: string, detail: number, at: number) {
+  private planAct(i: number, kind: string, detail: number, at: number): ActPlan | null {
+    if (kind === 'dive' || kind === 'catch') return this.planSave(i, at);
     const rec = (dt: number) => this.playback.recorded(at + dt);
     const now = rec(0);
     if (!now) return null;
@@ -564,10 +571,6 @@ export class MatchViewer {
         act = kind;
         foot = true;
         break;
-      case 'keeperKick':
-        act = 'keeperKick';
-        foot = true;
-        break;
       case 'trap':
       case 'chest':
         act = kind === 'chest' || b0.z > 0.9 ? 'chest' : 'trap';
@@ -583,13 +586,13 @@ export class MatchViewer {
         act = kind;
         face = Math.atan2(b0.x - me.x, b0.y - me.y);
         break;
-      case 'dive':
-        act = 'dive';
-        side = detail >= 0 ? 1 : -1;
+      case 'keeperKick':
+        // Off the ground it's a goal kick; out of his hands, a drop kick.
+        act = b0.z < 0.45 && this.savedAt[i] < 0 ? 'passLong' : 'keeperKick';
+        foot = true;
         break;
-      case 'catch':
-        act = 'catch';
-        if (Math.hypot(inc.x, inc.y) > 0.3) face = Math.atan2(-inc.x, -inc.y);
+      case 'keeperSet':
+        act = 'keeperSet';
         break;
       case 'throw': // older recordings: keeper throws and throw-ins alike
         act = keeper ? 'keeperThrow' : 'throwIn';
@@ -618,7 +621,77 @@ export class MatchViewer {
     const aim = act === 'fall' || act === 'getUp' || act === 'throwIn' || act === 'keeperThrow'
       ? null
       : { ball: new THREE.Vector3(b0.x, b0.z, b0.y), x: me.x, z: me.y, heading };
-    return { kind: act, side, face, aim };
+    void detail;
+    return { kind: act, side, face, aim, at, save: false };
+  }
+
+  /**
+   * A keeper's save, read from where the ball really goes: the moment it
+   * reaches him, how far to his side and how high, so he sets, gathers,
+   * scoops, jumps or dives to the right side and meets it with his hands.
+   */
+  private planSave(i: number, at: number): ActPlan | null {
+    let best = Infinity;
+    let tc = at;
+    for (let dt = -0.5; dt <= 1.0; dt += 0.02) {
+      const r = this.playback.recorded(at + dt);
+      if (!r) continue;
+      const k = r.pos[i];
+      const d = Math.hypot(r.ball.x - k.x, r.ball.y - k.y);
+      if (d < best) {
+        best = d;
+        tc = at + dt;
+      }
+    }
+    const now = this.playback.recorded(tc);
+    // Never near him (blocked or cleared on the way): nothing to save.
+    if (!now || best > 4.8) return null;
+    const before = this.playback.recorded(tc - 0.15) ?? now;
+    const b = now.ball;
+    const me = now.pos[i];
+    const ix = b.x - before.ball.x;
+    const iy = b.y - before.ball.y;
+    // Square to the ball's line, or to the ball itself when it's barely moving.
+    const face = Math.hypot(ix, iy) > 0.3 ? Math.atan2(-ix, -iy) : Math.atan2(b.x - me.x, b.y - me.y);
+    const lateral = (b.x - me.x) * Math.cos(face) - (b.y - me.y) * Math.sin(face);
+    // Far wide or over: he watches it go.
+    if (Math.abs(lateral) > 4.6 || b.z > 3.1) return null;
+    const side: 1 | -1 = lateral >= 0 ? 1 : -1;
+    let kind: ActionKind;
+    if (Math.abs(lateral) < 0.75) kind = b.z < 0.45 ? 'keeperScoop' : b.z < 1 ? 'keeperGather' : b.z < 1.75 ? 'catch' : 'keeperHigh';
+    else kind = b.z > 1.25 ? 'diveHigh' : 'dive';
+    return { kind, side, face, aim: { ball: new THREE.Vector3(b.x, b.z, b.y), x: me.x, z: me.y, heading: face }, at: tc, save: true };
+  }
+
+  /** Keepers with the ball in their hands: since when (game time), or -1. */
+  private savedAt = Array.from({ length: 22 }, () => -1);
+  private lastHeld = new THREE.Vector2();
+
+  /** After a save the ball sits in the keeper's hands until he lets it go. */
+  private holdBall(fr: ReturnType<Playback['frame']>, t: number) {
+    for (const i of [0, 11]) {
+      const f = this.figures[i];
+      const since = this.savedAt[i];
+      let held = false;
+      if (since >= 0 && t >= since && fr.tracked) {
+        const near = Math.hypot(fr.ball.x - f.pos.x, fr.ball.y - f.pos.y) < 2.4 + Math.hypot(f.root.position.x - f.pos.x, f.root.position.z - f.pos.y);
+        const slow = Math.hypot(fr.ball.x - this.lastHeld.x, fr.ball.y - this.lastHeld.y) < 0.6;
+        held = near && (slow || t - since < 0.3);
+        if (!held && t - since > 0.3) this.savedAt[i] = -1;
+      } else if (since >= 0 && (t < since - 2 || !fr.tracked)) this.savedAt[i] = -1;
+      f.hold = held && !f.acting;
+      if (held) {
+        // Between the hands, just in front of them.
+        const l = f.bones[B.LeftHand].getWorldPosition(handL);
+        const r = f.bones[B.RightHand].getWorldPosition(handR);
+        this.ball.position.copy(l).add(r).multiplyScalar(0.5);
+        handL.set(Math.sin(f.heading), 0, Math.cos(f.heading));
+        this.ball.position.addScaledVector(handL, 0.09);
+        this.ball.position.y = Math.max(0.11, this.ball.position.y);
+        this.ballShadow.position.set(this.ball.position.x, 0.02, this.ball.position.z);
+      }
+    }
+    this.lastHeld.set(fr.ball.x, fr.ball.y);
   }
 
   /**
@@ -851,6 +924,19 @@ export class MatchViewer {
   }
 }
 
+interface ActPlan {
+  kind: ActionKind;
+  side: 1 | -1;
+  face: number | null;
+  aim: ActAim | null;
+  /** Game time of contact. */
+  at: number;
+  /** A keeper's save: he may keep the ball. */
+  save: boolean;
+}
+
+const handL = new THREE.Vector3();
+const handR = new THREE.Vector3();
 const rollAxis = new THREE.Vector3();
 const rollQ = new THREE.Quaternion();
 

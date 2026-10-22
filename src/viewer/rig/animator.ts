@@ -14,7 +14,7 @@ import { type Clip, Pose, accumulate, clearPose, duration, feetAt, fkFrame, mixP
 import { getClip, hasClip, libraryVersion } from './library.ts';
 import { ANKLE_Y, B, NB, REST } from './skeleton.ts';
 
-export type ActionKind = 'pass' | 'passLong' | 'shot' | 'chip' | 'cross' | 'trap' | 'chest' | 'header' | 'slide' | 'tackle' | 'keeperSet' | 'dive' | 'catch' | 'fall' | 'getUp' | 'throwIn' | 'keeperThrow' | 'keeperKick';
+export type ActionKind = 'pass' | 'passLong' | 'shot' | 'chip' | 'cross' | 'trap' | 'chest' | 'header' | 'slide' | 'tackle' | 'keeperSet' | 'dive' | 'diveHigh' | 'catch' | 'keeperGather' | 'keeperScoop' | 'keeperHigh' | 'fall' | 'getUp' | 'throwIn' | 'keeperThrow' | 'keeperKick';
 
 export interface ActOpts {
   /** Real seconds from now until the contact frame (foot on ball, hands on ball…). */
@@ -38,7 +38,12 @@ export interface AnimInput {
   look: THREE.Vector3 | null;
   /** Height of the body above the root (a display base). */
   lift: number;
+  /** A keeper holding the ball: arms gather it in front of the chest. */
+  hold?: boolean;
 }
+
+/** Bones that carry the ball in a keeper's hold. */
+const ARMS = [B.LeftShoulder, B.LeftArm, B.LeftForeArm, B.LeftHand, B.RightShoulder, B.RightArm, B.RightForeArm, B.RightHand];
 
 interface Running {
   clip: Clip;
@@ -60,7 +65,7 @@ const CLIP_OF: Partial<Record<ActionKind, string>> = { passLong: 'cross' };
 /** Which part of the body meets the ball in each action. */
 const EFFECTOR: Partial<Record<ActionKind, 'foot' | 'head' | 'chest' | 'hands'>> = {
   pass: 'foot', passLong: 'foot', shot: 'foot', chip: 'foot', cross: 'foot', trap: 'foot', slide: 'foot', tackle: 'foot', keeperKick: 'foot',
-  header: 'head', chest: 'chest', catch: 'hands', dive: 'hands',
+  header: 'head', chest: 'chest', catch: 'hands', dive: 'hands', diveHigh: 'hands', keeperGather: 'hands', keeperScoop: 'hands', keeperHigh: 'hands',
 };
 
 const fkPos = new Float32Array(NB * 3);
@@ -136,6 +141,7 @@ export class Animator {
   /** Smoothed local velocity (body units / s), so gait changes ease in. */
   private vF = 0;
   private vS = 0;
+  private holdW = 0;
 
   constructor(bones: THREE.Bone[], root: THREE.Object3D) {
     this.bones = bones;
@@ -356,6 +362,23 @@ export class Animator {
     }
     const actW = this.action && this.action.t >= 0 ? this.action.w : 0;
     const override = Math.max(actW, this.celW, this.scrubW);
+
+    // ---- Keeper's hold: arms only, under any action ----
+    this.holdW = inp.hold ? Math.min(1, this.holdW + dt * 5) : Math.max(0, this.holdW - dt * 5);
+    const hw = this.holdW * (1 - actW);
+    if (hw > 0) {
+      const c = this.clip('catch');
+      sample(c, Math.min(duration(c), 0.8), this.tmp);
+      for (const b of ARMS) {
+        const j = b * 4;
+        let x = this.tmp.q[j], y = this.tmp.q[j + 1], z = this.tmp.q[j + 2], w = this.tmp.q[j + 3];
+        if (x * pose.q[j] + y * pose.q[j + 1] + z * pose.q[j + 2] + w * pose.q[j + 3] < 0) { x = -x; y = -y; z = -z; w = -w; }
+        const ox = pose.q[j] + (x - pose.q[j]) * hw, oy = pose.q[j + 1] + (y - pose.q[j + 1]) * hw;
+        const oz = pose.q[j + 2] + (z - pose.q[j + 2]) * hw, ow = pose.q[j + 3] + (w - pose.q[j + 3]) * hw;
+        const n = 1 / Math.hypot(ox, oy, oz, ow);
+        pose.q[j] = ox * n; pose.q[j + 1] = oy * n; pose.q[j + 2] = oz * n; pose.q[j + 3] = ow * n;
+      }
+    }
 
     // ---- Blend out of a cut ----
     if (this.fromT < this.fromDur) {
