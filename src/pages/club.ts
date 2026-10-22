@@ -10,6 +10,7 @@ import { refreshMe, state } from '../state.ts';
 import { confirmModal, errorBox, promptModal, relTime, skeleton, toast } from '../ui.ts';
 import { TROPHY_KINDS, type TrophyKind } from '../../shared/achievements.ts';
 import { trophyArt } from '../gearArt.ts';
+import { EMOJI_SETS, jumboCount, recentEmoji, rememberEmoji } from '../emoji.ts';
 
 type Tab = 'squad' | 'chat' | 'tactics' | 'fixtures' | 'honours' | 'manage';
 
@@ -25,6 +26,7 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
   let chat: any[] = [];
   let chatTimer = 0;
   let chatBusy = false;
+  let emojiTab = recentEmoji().length ? 'recent' : 'football';
   let gone = false;
 
   const load = async (first = false) => {
@@ -137,13 +139,22 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
     const mineMsg = m.author?.id === state.player?.id;
     return html`<div class="chat-msg ${mineMsg ? 'me' : ''}">
       ${mineMsg ? '' : html`<a href="/player/${m.author.id}">${avatarSvg(m.author.appearance, d.club.colors, 32, undefined, { eq: m.author.equipped })}</a>`}
-      <div class="bubble">${mineMsg ? '' : html`<div class="who">${m.author.name}${m.author.role && m.author.role !== 'player' ? html` <span class="dim">· ${roleLabel(m.author.role)}</span>` : ''}</div>`}<div class="txt">${m.text}</div><div class="at">${relTime(m.at)}</div></div>
+      <div class="bubble ${jumboCount(m.text) ? `jumbo j${jumboCount(m.text)}` : ''}">${mineMsg ? '' : html`<div class="who">${m.author.name}${m.author.role && m.author.role !== 'player' ? html` <span class="dim">· ${roleLabel(m.author.role)}</span>` : ''}</div>`}<div class="txt">${m.text}</div><div class="at">${relTime(m.at)}</div></div>
     </div>`;
+  };
+
+  const emojiGrid = (): Raw => {
+    const list = emojiTab === 'recent' ? recentEmoji() : EMOJI_SETS.find((c) => c.id === emojiTab)?.list ?? [];
+    return list.length ? html`${list.map((e) => html`<button type="button" data-emoji="${e}">${e}</button>`)}` : html`<div class="empty small">Emoji you send show up here.</div>`;
   };
 
   const chatTab = (): Raw => html`<div class="card chat-card">
     <div class="chat-log" id="chatlog">${chat.length ? chat.map(chatLine) : html`<div class="empty small">No messages yet. Say hello to your teammates!</div>`}</div>
-    <form class="chat-form" id="chatform"><input class="input" id="chatin" maxlength="280" placeholder="Message ${d.club.name}…" autocomplete="off"><button class="btn primary" aria-label="Send">${icon('send', 18)}</button></form>
+    <div class="emoji-panel" id="emojipanel" hidden>
+      <div class="emoji-tabs">${[{ id: 'recent', label: 'Recent' }, ...EMOJI_SETS].map((c) => html`<button type="button" data-emoji-tab="${c.id}" aria-label="${c.label}" class="${c.id === emojiTab ? 'on' : ''}">${'tab' in c ? c.tab : icon('clock', 18)}</button>`)}</div>
+      <div class="emoji-grid" id="emojigrid">${emojiGrid()}</div>
+    </div>
+    <form class="chat-form" id="chatform"><button type="button" class="btn ghost emoji-btn" id="emojibtn" aria-label="Emoji">${icon('smile', 20)}</button><input class="input" id="chatin" maxlength="280" placeholder="Message ${d.club.name}…" autocomplete="off"><button class="btn primary" aria-label="Send">${icon('send', 18)}</button></form>
   </div>`;
 
   const honoursTab = (): Raw => html`<div class="dash">
@@ -239,6 +250,35 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
 
   el.addEventListener('click', async (e) => {
     const t = e.target as HTMLElement;
+    if (t.closest('#emojibtn')) {
+      const panel = el.querySelector<HTMLElement>('#emojipanel');
+      if (!panel) return;
+      panel.hidden = !panel.hidden;
+      el.querySelector('#emojibtn')!.classList.toggle('on', !panel.hidden);
+      if (!panel.hidden) (document.activeElement as HTMLElement | null)?.blur();
+      return scrollChat();
+    }
+    const etab = t.closest('[data-emoji-tab]') as HTMLElement | null;
+    if (etab) {
+      emojiTab = etab.dataset.emojiTab!;
+      el.querySelectorAll('[data-emoji-tab]').forEach((b) => b.classList.toggle('on', b === etab));
+      const grid = el.querySelector('#emojigrid')!;
+      grid.innerHTML = emojiGrid().html;
+      grid.scrollTop = 0;
+      return;
+    }
+    const emo = t.closest('[data-emoji]') as HTMLElement | null;
+    if (emo) {
+      const input = el.querySelector<HTMLInputElement>('#chatin');
+      const e2 = emo.dataset.emoji!;
+      if (!input || input.value.length + e2.length > input.maxLength) return;
+      const at = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? at;
+      input.value = input.value.slice(0, at) + e2 + input.value.slice(end);
+      input.setSelectionRange(at + e2.length, at + e2.length);
+      rememberEmoji(e2);
+      return;
+    }
     const tb = t.closest('[data-tab]') as HTMLElement | null;
     if (tb) { tab = tb.dataset.tab as Tab; selSlot = null; return render(); }
     const tr = t.closest('tr[data-href]') as HTMLElement | null;
@@ -346,6 +386,13 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
     if (t.dataset.role) {
       try { await api.post(`/api/clubs/${id}/role`, { playerId: t.dataset.role, role: t.value }); toast('Role updated', 'ok'); await load(); } catch (err) { toast((err as Error).message, 'err'); await load(); }
     }
+  });
+
+  // On phones the keyboard takes the emoji panel's place.
+  el.addEventListener('focusin', (e) => {
+    if ((e.target as HTMLElement).id !== 'chatin' || !matchMedia('(pointer: coarse)').matches) return;
+    const panel = el.querySelector<HTMLElement>('#emojipanel');
+    if (panel && !panel.hidden) { panel.hidden = true; el.querySelector('#emojibtn')?.classList.remove('on'); }
   });
 
   el.addEventListener('submit', async (e) => {
