@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-22T02:00:00Z',
+    entries: [
+      { title: 'Smarter defending', body: 'Teams now defend like a unit. The block drops deeper and slides across toward the ball, the second man shuts off the easiest pass while his team-mate presses, and anyone caught upfield sprints back goal-side instead of jogging. Wingers cut inside toward goal in the final third, and kick-offs line up properly.' },
+    ],
+  },
+  {
     hour: '2026-10-22T01:00:00Z',
     entries: [
       { title: 'A new match engine', body: 'Matches are now played out on a real pitch. All 22 players run with their own pace and acceleration, the ball rolls, flies and bounces, and every pass, dribble, tackle and shot is decided from where everyone actually is. Teams hold a back line, press the ball, track runners and attack the box for crosses.' },

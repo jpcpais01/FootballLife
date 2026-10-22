@@ -35,9 +35,9 @@ export function slotPosition(
     u = slot.x * 0.78 + ball.u * 0.42 - 0.08 + ment;
     v = slot.y * widthK * 0.92 + ball.v * 0.14;
   } else {
-    // Compact block that shifts toward the ball.
-    u = slot.x * 0.62 + ball.u * 0.34 - 0.02 + press + ment * 0.5;
-    v = slot.y * widthK * 0.7 + ball.v * 0.28;
+    // Compact block that drops off and slides across toward the ball.
+    u = slot.x * 0.52 + ball.u * 0.44 - 0.03 + press + ment * 0.5;
+    v = slot.y * widthK * 0.62 + ball.v * 0.36;
   }
   return { u: clamp(u, 0.06, 0.95), v: clamp(v, -0.96, 0.96) };
 }
