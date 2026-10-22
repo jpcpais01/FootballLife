@@ -496,8 +496,11 @@ export class MatchViewer {
   private trackedActions(fr: ReturnType<Playback['frame']>, t: number, rate: number) {
     if (rate > 3) return;
     const map: Partial<Record<string, ActionKind>> = {
-      pass: 'pass', drive: 'shot', shot: 'shot', cross: 'cross', header: 'header', trap: 'trap',
-      tackle: 'tackle', slide: 'slide', dive: 'dive', catch: 'catch', throw: 'keeperThrow', fall: 'fall',
+      pass: 'pass', chip: 'chip', cross: 'cross', shot: 'shot', header: 'header', trap: 'trap', chest: 'chest',
+      tackle: 'tackle', slide: 'slide', dive: 'dive', catch: 'catch', keeperKick: 'keeperKick', keeperThrow: 'keeperThrow',
+      throwIn: 'throwIn', fall: 'fall', getUp: 'getUp',
+      // Older recordings.
+      drive: 'shot', throw: 'keeperThrow',
     };
     for (const [at, i, kind, detail] of fr.acts) {
       const act = map[kind];
