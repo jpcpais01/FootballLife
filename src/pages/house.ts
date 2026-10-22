@@ -3,7 +3,7 @@
 import { TROPHY_KINDS, type TrophyKind } from '../../shared/achievements.ts';
 import { CAR_BY_ID, CAR_COLORS, CARS, FLOOR_STYLES, FURNITURE, FURNITURE_BY_ID, FURNITURE_LABELS, FURNITURE_SLOTS, HOUSE_BY_ID, HOUSES, RESPRAY_COST, WALL_COLORS, type FurnitureSlot, type Home } from '../../shared/life.ts';
 import { api } from '../api.ts';
-import { avatarSvg } from '../art.ts';
+import { avatar } from '../art.ts';
 import { badge } from '../components.ts';
 import { afterPaint, html, mount, type Raw } from '../dom.ts';
 import { trophyArt } from '../gearArt.ts';
@@ -156,7 +156,7 @@ export async function housePage(el: HTMLElement, params: string[]) {
   // The layout is drawn once; only the side panel and stage labels change, so
   // the 3D canvas never has to move.
   mount(el, html`
-    <div class="page-head"><div class="row" style="gap:12px">${avatarSvg(d.player.appearance, kit, 52, d.club ? d.player.shirt : undefined, { eq: d.player.equipped })}<div><div class="eyebrow">Off the pitch</div><div class="h1">${d.mine ? 'My home' : `${d.player.name}'s place`}</div></div></div>
+    <div class="page-head"><div class="row" style="gap:12px">${avatar(d.player.appearance, kit, 52, d.club ? d.player.shirt : undefined, { eq: d.player.equipped })}<div><div class="eyebrow">Off the pitch</div><div class="h1">${d.mine ? 'My home' : `${d.player.name}'s place`}</div></div></div>
       <div class="row" style="gap:10px">${d.club ? html`<a href="/club/${d.club.id}" class="chip">${badge(d.club as never, 18)} ${d.club.short}</a>` : ''}${!d.mine ? html`<a class="btn sm" href="/player/${d.player.id}">${icon('user', 14)} Profile</a>` : ''}${coinsPill()}</div></div>
     <div class="house-layout">
       <div class="house-stage card flush">

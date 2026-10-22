@@ -9,9 +9,7 @@ function metalGrad(id: string, base: string) {
   return `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset=".25" stop-color="${base}"/><stop offset=".6" stop-color="${base}"/><stop offset=".8" stop-color="#fff" stop-opacity=".7"/><stop offset="1" stop-color="${base}"/></linearGradient>`;
 }
 
-const fill = (it: Item, id: string) => (it.metal ? `url(#${id})` : esc(it.c1 ?? '#ccc'));
-
-/** Torso for an off-pitch outfit in the 100×100 portrait space (shoulders from y≈72). */
+/** Torso for an off-pitch outfit, drawn in the shop's item art (shoulders from y≈72). */
 export function outfitBody(it: Item, _id = ""): string {
   const c1 = esc(it.c1 ?? '#333');
   const c2 = esc(it.c2 ?? '#fff');
@@ -43,34 +41,6 @@ export function outfitBody(it: Item, _id = ""): string {
   }
 }
 
-/** Head, neck and wrist overlays drawn over a portrait. */
-export function portraitGear(g: Partial<Record<string, Item>>, id: string): { defs: string; under: string; over: string } {
-  let defs = '';
-  let over = '';
-  for (const k of ['head', 'neck', 'wrist']) {
-    const it = g[k];
-    if (it?.metal) defs += metalGrad(`${id}${k}`, it.c1 ?? '#ccc');
-  }
-  const h = g.head;
-  if (h) {
-    if (h.style === 'alice') over += `<path d="M33 35 C40 28 60 28 67 35" stroke="${fill(h, id + 'head')}" stroke-width="2.4" fill="none"/>`;
-    else {
-      over += `<path d="M33 36 C40 31 60 31 67 36 L67 40.5 C60 35.5 40 35.5 33 40.5 Z" fill="${fill(h, id + 'head')}"/>`;
-      if (h.c2) over += `<path d="M33 38.2 C40 33.4 60 33.4 67 38.2" stroke="${esc(h.c2)}" stroke-width="1.3" fill="none"/>`;
-    }
-  }
-  const n = g.neck;
-  if (n) {
-    if (n.style === 'snood') over += `<path d="M37 68 Q50 76 63 68 L64 76 Q50 84 36 76 Z" fill="${esc(n.c1 ?? '#111')}"/><path d="M37 72 Q50 79 63 72" stroke="rgba(255,255,255,.12)" stroke-width="1.2" fill="none"/>`;
-    else if (n.style === 'medal') over += `<path d="M41 70 L50 86 L59 70" stroke="${esc(n.c2 ?? '#c6ff3d')}" stroke-width="3.2" fill="none"/><circle cx="50" cy="89" r="5.5" fill="${fill(n, id + 'neck')}" stroke="rgba(0,0,0,.3)"/><path d="M50 86 L51.2 88.4 L53.8 88.6 L51.8 90.2 L52.4 92.8 L50 91.4 L47.6 92.8 L48.2 90.2 L46.2 88.6 L48.8 88.4 Z" fill="rgba(0,0,0,.25)"/>`;
-    else over += `<path d="M39 73 Q50 86 61 73" stroke="${fill(n, id + 'neck')}" stroke-width="2.2" stroke-dasharray="2.5 1.2" fill="none"/>`;
-  }
-  const w = g.wrist;
-  if (w) over += `<rect x="14" y="91" width="11" height="6.5" rx="2.2" fill="${fill(w, id + 'wrist')}"/><rect x="75" y="91" width="11" height="6.5" rx="2.2" fill="${fill(w, id + 'wrist')}" opacity=".9"/>`;
-  return { defs, under: '', over };
-}
-
-/** CSS background for a profile card item (or the default). */
 export function cardBackground(it?: Item): string {
   if (!it) return 'linear-gradient(160deg, #1c2228, #121518)';
   const a = it.c1!;

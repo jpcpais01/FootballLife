@@ -2,7 +2,7 @@ import { ACHIEVEMENTS, TIER_COLORS, TROPHY_KINDS, type TrophyKind } from '../../
 import { POSITION_NAMES } from '../../shared/attributes.ts';
 import { gear, RARITY_COLORS } from '../../shared/cosmetics.ts';
 import { api } from '../api.ts';
-import { avatarSvg } from '../art.ts';
+import { avatar } from '../art.ts';
 import { attrBars, badge, posChip, roleLabel } from '../components.ts';
 import { html, mount, type Raw } from '../dom.ts';
 import { cardBackground, trophyArt } from '../gearArt.ts';
@@ -48,7 +48,7 @@ export async function playerPage(el: HTMLElement, [id]: string[]) {
         <div class="pcard profile-card ${g.card?.style === 'holo' ? 'holo' : ''}" style="background:${cardBackground(g.card)}">
           <div class="row between" style="align-items:flex-start">
             <div><div class="big-ovr">${p.ovr}</div><div style="margin-top:6px">${posChip(p.position)}</div></div>
-            ${avatarSvg(p.appearance, kit, 128, d.club ? p.shirt : undefined, { eq: p.equipped, offPitch: !!g.outfit })}
+            ${avatar(p.appearance, kit, 128, d.club ? p.shirt : undefined, { eq: p.equipped, offPitch: !!g.outfit })}
           </div>
           <div class="pname" style="margin-top:12px">${p.name}</div>
           ${g.title ? html`<div class="title-tag" style="--rc:${RARITY_COLORS[g.title.rarity]}">${g.title.name}</div>` : ''}

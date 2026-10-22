@@ -1,7 +1,7 @@
 import { overall, type Position } from '../../shared/attributes.ts';
 import { FORMATION_KEYS, getFormation, roleFit, TACTIC_OPTIONS, type Tactics } from '../../shared/formations.ts';
 import { api } from '../api.ts';
-import { avatarSvg } from '../art.ts';
+import { avatar } from '../art.ts';
 import { badge, matchRow, ovrChip, posChip, roleLabel } from '../components.ts';
 import { html, mount, type Raw } from '../dom.ts';
 import { icon } from '../icons.ts';
@@ -41,7 +41,7 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
     <thead><tr><th class="c">#</th><th>Player</th><th>Pos</th><th class="c">OVR</th><th class="hide-sm">Role</th></tr></thead>
     <tbody>${d.members.map((m: any) => html`<tr class="click" data-href="/player/${m.id}">
       <td class="c dim" style="font-weight:800">${m.shirt}</td>
-      <td><div class="row" style="gap:10px">${avatarSvg(m.appearance, d.club.colors, 34)}<div class="grow"><div style="font-weight:600" class="ellipsis">${m.name}</div><div class="tiny ${m.isBot ? 'dim' : 'lime'}">${m.isBot ? 'AI player' : 'Human'}${d.lineup && Object.values(d.lineup).includes(m.id) ? ' · Starter' : ''}</div></div></div></td>
+      <td><div class="row" style="gap:10px">${avatar(m.appearance, d.club.colors, 34)}<div class="grow"><div style="font-weight:600" class="ellipsis">${m.name}</div><div class="tiny ${m.isBot ? 'dim' : 'lime'}">${m.isBot ? 'AI player' : 'Human'}${d.lineup && Object.values(d.lineup).includes(m.id) ? ' · Starter' : ''}</div></div></div></td>
       <td>${posChip(m.position)}</td>
       <td class="c">${ovrChip(m.ovr, true)}</td>
       <td class="hide-sm">${m.isBot ? html`<span class="dim small">—</span>` : html`<span class="chip ${m.role === 'founder' ? 'lime' : ''}">${roleLabel(m.role)}</span>`}</td>
@@ -103,7 +103,7 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
     const outgoing = d.invitesOut ?? [];
     return html`<div class="dash">
       ${perms.invite ? html`<div class="card span-12"><div class="card-head"><div class="h2">Join requests</div>${requests.length ? html`<span class="chip lime">${requests.length} waiting</span>` : ''}</div>
-        ${requests.length ? html`<div class="list">${requests.map((r: any) => html`<div class="list-item">${avatarSvg(r.player.appearance, undefined, 38, undefined, { eq: r.player.equipped })}
+        ${requests.length ? html`<div class="list">${requests.map((r: any) => html`<div class="list-item">${avatar(r.player.appearance, undefined, 38, undefined, { eq: r.player.equipped })}
           <div class="grow"><a href="/player/${r.player.id}" style="font-weight:700">${r.player.name}</a><div class="tiny muted">${r.player.position} · ${r.player.ovr} OVR · asked ${relTime(r.at)}</div></div>
           <button class="btn sm primary" data-respond="${r.id}" data-accept="1">${icon('check', 14)} Accept</button><button class="btn sm ghost" data-respond="${r.id}" data-accept="0">Decline</button></div>`)}</div>` : html`<div class="small dim">No pending requests.</div>`}
         <div class="divider"></div>
@@ -122,7 +122,7 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
       <div class="card span-7"><div class="card-head"><div class="h2">Members & roles</div></div>
         <div class="list">${humans.map((m: any) => {
           const editable = perms.roles && m.id !== state.player?.id && m.role !== 'founder' && !(d.me.role === 'president' && m.role === 'president');
-          return html`<div class="list-item">${avatarSvg(m.appearance, d.club.colors, 34)}<div class="grow"><div style="font-weight:600">${m.name}</div><div class="tiny muted">${m.position} · ${m.ovr} OVR</div></div>
+          return html`<div class="list-item">${avatar(m.appearance, d.club.colors, 34)}<div class="grow"><div style="font-weight:600">${m.name}</div><div class="tiny muted">${m.position} · ${m.ovr} OVR</div></div>
             ${editable ? html`<select class="input" style="width:auto;height:34px" data-role="${m.id}">${(d.me.role === 'founder' ? ['president', 'coach', 'captain', 'player'] : ['coach', 'captain', 'player']).map((r) => html`<option value="${r}" ${m.role === r ? 'selected' : ''}>${roleLabel(r)}</option>`)}</select>
               ${perms.kick ? html`<button class="btn sm ghost danger" data-kick="${m.id}" data-name="${m.name}">Remove</button>` : ''}` : html`<span class="chip ${m.role === 'founder' ? 'lime' : ''}">${roleLabel(m.role)}</span>`}
           </div>`;
@@ -138,7 +138,7 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
     }
     const mineMsg = m.author?.id === state.player?.id;
     return html`<div class="chat-msg ${mineMsg ? 'me' : ''}">
-      ${mineMsg ? '' : html`<a href="/player/${m.author.id}">${avatarSvg(m.author.appearance, d.club.colors, 32, undefined, { eq: m.author.equipped })}</a>`}
+      ${mineMsg ? '' : html`<a href="/player/${m.author.id}">${avatar(m.author.appearance, d.club.colors, 32, undefined, { eq: m.author.equipped })}</a>`}
       <div class="bubble ${jumboCount(m.text) ? `jumbo j${jumboCount(m.text)}` : ''}">${mineMsg ? '' : html`<div class="who">${m.author.name}${m.author.role && m.author.role !== 'player' ? html` <span class="dim">· ${roleLabel(m.author.role)}</span>` : ''}</div>`}<div class="txt">${m.text}</div><div class="at">${relTime(m.at)}</div></div>
     </div>`;
   };
@@ -430,7 +430,7 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
       try {
         const r = await api.get(`/api/free-agents?q=${encodeURIComponent(term)}`);
         if (my !== q) return;
-        res.innerHTML = r.players.length ? r.players.map((p: any) => html`<div class="list-item">${avatarSvg(p.appearance, undefined, 34, undefined, { eq: p.equipped })}<div class="grow"><div style="font-weight:700">${p.name}</div><div class="tiny muted">${p.position} · ${p.ovr} OVR</div></div><button class="btn sm primary" data-inv="${p.id}" data-name="${p.name}">Invite</button></div>`.html).join('') : html`<div class="empty small">No free agents found.</div>`.html;
+        res.innerHTML = r.players.length ? r.players.map((p: any) => html`<div class="list-item">${avatar(p.appearance, undefined, 34, undefined, { eq: p.equipped })}<div class="grow"><div style="font-weight:700">${p.name}</div><div class="tiny muted">${p.position} · ${p.ovr} OVR</div></div><button class="btn sm primary" data-inv="${p.id}" data-name="${p.name}">Invite</button></div>`.html).join('') : html`<div class="empty small">No free agents found.</div>`.html;
       } catch (err) {
         res.innerHTML = html`<div class="empty small">${(err as Error).message}</div>`.html;
       }

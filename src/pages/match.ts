@@ -5,7 +5,7 @@ import { minuteLabel } from '../../shared/config.ts';
 import type { MatchEvent, PlayerLine, TeamStats } from '../../shared/sim/types.ts';
 import { clockAt, rateAt, realAt, totalReal, type Segment } from '../../shared/timeline.ts';
 import { api } from '../api.ts';
-import { avatarSvg } from '../art.ts';
+import { avatar } from '../art.ts';
 import { badge, posChip, type MatchBrief } from '../components.ts';
 import { html, mount, type Raw } from '../dom.ts';
 import { icon } from '../icons.ts';
@@ -222,7 +222,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
     if (!box) return;
     if (shownRating < 0) {
       box.innerHTML = html`<div class="myrate">
-        <span class="mr-av">${avatarSvg(me.app as any, lineups[meSide].colors, 30, undefined, { eq: me.eq })}</span>
+        <span class="mr-av">${avatar(me.app as any, lineups[meSide].colors, 30, undefined, { eq: me.eq })}</span>
         <span class="mr-name"><b>${me.name.split(' ').slice(-1)[0]}</b><i>Rating</i></span>
         <span class="mr-val"></span><span class="mr-delta"></span>
       </div>`.html;
@@ -321,7 +321,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
           const line = done ? players![side * 11 + k] : null;
           return html`<a href="/player/${p.id}" class="row" style="gap:7px;padding:6px 2px;border-top:1px solid var(--line)">
             <span class="dim tiny" style="width:18px;text-align:right;font-weight:800">${p.number}</span>
-            ${avatarSvg(p.app as any, s.colors, 24, undefined, { eq: p.eq })}
+            ${avatar(p.app as any, s.colors, 24, undefined, { eq: p.eq })}
             <span class="grow small ellipsis" style="font-weight:600">${p.name.split(' ').slice(-1)[0]}${p.bot ? '' : html` <span class="lime">●</span>`}</span>
             ${line?.goals ? html`<span class="row" style="gap:1px">${Array.from({ length: Math.min(3, line.goals) }, () => evIcon('kickoff', 13))}</span>` : ''}
             ${line ? html`<span class="tiny" style="font-weight:800;color:${line.rating >= 7.5 ? 'var(--lime)' : 'var(--muted)'}">${line.rating.toFixed(1)}</span>${motm === side * 11 + k ? evIcon('star', 13) : ''}` : html`<span class="tiny dim">${p.role}</span>`}

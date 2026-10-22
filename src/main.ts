@@ -1,7 +1,7 @@
 import './styles/main.css';
 import { registerSW } from 'virtual:pwa-register';
 import { api, markTouched, newVisit, onStaleData } from './api.ts';
-import { avatarSvg } from './art.ts';
+import { avatar } from './art.ts';
 import { html, mount } from './dom.ts';
 import { icon } from './icons.ts';
 import { addRoute, match, navigate, runPage, startRouter } from './router.ts';
@@ -157,13 +157,13 @@ function meTop() {
   return html`<a href="/shop" class="coin-chip" aria-label="Coins">${icon('coin', 15)}<b>${p.coins.toLocaleString()}</b></a>
     <button class="top-icon" aria-label="Refresh the game" title="Refresh for updates" data-refresh>${icon('refresh', 18)}</button>
     <button class="top-icon ${state.unread ? 'has-dot' : ''}" aria-label="Inbox" data-inbox>${icon('bell', 19)}</button>
-    <button class="top-avatar" data-menu aria-label="Menu">${avatarSvg(p.appearance, state.club?.colors, 36, undefined, { eq: p.equipped })}</button>`;
+    <button class="top-avatar" data-menu aria-label="Menu">${avatar(p.appearance, state.club?.colors, 36, undefined, { eq: p.equipped })}</button>`;
 }
 
 function menu() {
   const p = state.player;
   return html`<div class="user-menu" id="user-menu" hidden>
-    ${p ? html`<a href="/player/${p.id}" class="um-head">${avatarSvg(p.appearance, state.club?.colors, 44, undefined, { eq: p.equipped })}<div class="grow"><div class="name ellipsis">${p.name}</div><div class="sub">${p.position} · ${p.ovr} OVR${state.club ? ` · ${state.club.short}` : ''}</div></div></a>` : ''}
+    ${p ? html`<a href="/player/${p.id}" class="um-head">${avatar(p.appearance, state.club?.colors, 44, undefined, { eq: p.equipped })}<div class="grow"><div class="name ellipsis">${p.name}</div><div class="sub">${p.position} · ${p.ovr} OVR${state.club ? ` · ${state.club.short}` : ''}</div></div></a>` : ''}
     <a href="${p ? `/player/${p.id}` : '/'}">${icon('user', 17)} Profile</a>
     <a href="/house">${icon('sofa', 17)} My home</a>
     <a href="/transfers">${icon('swap', 17)} Transfers</a>

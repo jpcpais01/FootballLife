@@ -3,11 +3,11 @@
 import { sanitizeAppearance, type Appearance } from '../../shared/appearance.ts';
 import { ITEM_BY_ID, ITEMS, RARITY_COLORS, SLOT_LABELS, SLOTS, gear, type Equipped, type Item, type Slot } from '../../shared/cosmetics.ts';
 import { api } from '../api.ts';
-import { avatarSvg } from '../art.ts';
+import { avatar } from '../art.ts';
 import { afterPaint, html, mount, type Raw } from '../dom.ts';
 import { cardBackground, itemArt } from '../gearArt.ts';
 import { icon } from '../icons.ts';
-import { lookClick, lookEditor } from '../lookEditor.ts';
+import { mountLookStudio } from '../lookEditor.ts';
 import { refreshMe, state } from '../state.ts';
 import { achievementToasts, confirmModal, errorBox, skeleton, toast } from '../ui.ts';
 import type { Turntable } from '../viewer/turntable.ts';
@@ -48,6 +48,7 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
   let tt: Turntable | null = null;
   let disposed = false;
   let rotTimer = 0;
+  let studio: { destroy(): void } | null = null;
 
   const owned = () => new Set(d.owned);
   const preview = (): Equipped => {
@@ -117,9 +118,8 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
     })}</div>`;
   };
 
-  const lookTab = (): Raw => html`<div class="card stack" style="gap:18px">
-    <div class="h2">Your look</div>
-    ${lookEditor(look)}
+  const lookTab = (): Raw => html`<div class="card stack look-card" style="gap:16px">
+    <div id="lk"></div>
     <div class="field"><label>Motto <span class="dim">(shown on your profile)</span></label><input class="input" id="motto" maxlength="80" placeholder="e.g. Never stop running." value="${motto}"></div>
     <button class="btn primary" id="savelook">Save look</button>
   </div>`;
@@ -127,7 +127,7 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
   const profilePreview = (): Raw => {
     const g = gear(preview());
     return html`<div class="mini-card" style="background:${cardBackground(g.card)}">
-      ${avatarSvg(look, d.kit, 64, undefined, { eq: preview(), offPitch: true })}
+      ${avatar(look, d.kit, 64, undefined, { eq: preview(), offPitch: true })}
       <div class="grow"><div style="font-weight:800" class="ellipsis">${me.name}</div>
         ${g.title ? html`<div class="title-tag" style="--rc:${RARITY_COLORS[g.title.rarity]}">${g.title.name}</div>` : html`<div class="tiny muted">${me.position} · ${me.ovr} OVR</div>`}</div>
     </div>`;
@@ -156,6 +156,17 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
           <div class="fade-in">${tab === 'shop' ? shopTab() : tab === 'locker' ? lockerTab() : lookTab()}</div>
         </div>
       </div>`);
+    studio?.destroy();
+    studio = null;
+    const lk = el.querySelector<HTMLElement>('#lk');
+    if (lk) {
+      studio = mountLookStudio(lk, look, {
+        kit: d.kit,
+        eq: preview(),
+        onChange: () => { lookDirty = true; refreshStage(); },
+        onFocus: (m) => tt?.focus(m),
+      });
+    } else tt?.focus('body');
     mountStage();
   };
 
@@ -173,6 +184,7 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
     if (tt) {
       tt.attach(host);
       tt.set(look, preview(), d.kit, me.position === 'GK');
+      tt.focus(tab === 'look' ? 'face' : 'body');
       return;
     }
     if (loading) return;
@@ -183,6 +195,7 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
       if (disposed) return;
       tt = createTurntable(el.querySelector<HTMLElement>('#tt') ?? host);
       tt.set(look, preview(), d.kit, me.position === 'GK');
+      tt.focus(tab === 'look' ? 'face' : 'body');
     } catch {
       host.innerHTML = html`<div class="empty small">3D preview is not available on this device.</div>`.html;
     }
@@ -273,7 +286,6 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
       return;
     }
     if (t.closest('#celebrate')) return tt?.celebrate();
-    if (tab === 'look' && lookClick(el, t, look)) { lookDirty = true; refreshStage(); return; }
     if (t.closest('#savelook')) {
       try {
         motto = (el.querySelector<HTMLInputElement>('#motto')?.value ?? '').trim();
@@ -291,6 +303,7 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
   render();
   return () => {
     disposed = true;
+    studio?.destroy();
     clearInterval(rotTimer);
     if (tt) { parkedTT?.dispose(); tt.park(); parkedTT = tt; }
     if (lookDirty) toast('Unsaved look changes were discarded');

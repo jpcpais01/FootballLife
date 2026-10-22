@@ -1,9 +1,9 @@
 // Vector art: club badges and player portraits, generated from data so every
-// club and player has a consistent look.
-import { ACCESSORIES, BOOT_COLORS, HAIR_COLORS, SKIN_TONES, type Appearance } from '../shared/appearance.ts';
+// club has a consistent look. Player portraits come from the 3D model.
+import { BOOT_COLORS, type Appearance } from '../shared/appearance.ts';
 import { esc, raw, type Raw } from './dom.ts';
-import { gear, type Equipped } from '../shared/cosmetics.ts';
-import { outfitBody, portraitGear } from './gearArt.ts';
+import type { Equipped } from '../shared/cosmetics.ts';
+import { portrait } from './portrait.ts';
 import { BADGE_ICONS, BADGE_SHAPES, fullBadge, type Badge } from '../shared/badge.ts';
 
 let uid = 0;
@@ -145,84 +145,12 @@ export function badgeSvg(colors: { primary: string; secondary: string }, badge: 
   </svg>`);
 }
 
-function shade(hex: string, k: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  const f = (c: number) => Math.max(0, Math.min(255, Math.round(c * k)));
-  return `#${((f(n >> 16) << 16) | (f((n >> 8) & 255) << 8) | f(n & 255)).toString(16).padStart(6, '0')}`;
-}
-
-function hairPath(style: number): string {
-  switch (style) {
-    case 0: return 'M33 40 C34 28 42 22 50 22 C58 22 66 28 67 40 C64 33 58 30 50 30 C42 30 36 33 33 40 Z'; // buzz
-    case 1: return 'M31 42 C30 26 40 18 51 18 C62 18 71 26 69 42 C66 32 60 28 50 28 C42 28 35 32 31 42 Z';
-    case 2: return 'M31 43 C29 24 41 16 52 17 C63 18 72 26 69 43 C68 34 63 27 54 27 C50 30 40 31 31 43 Z';
-    case 3: return 'M31 42 C29 24 38 13 54 12 C66 12 73 22 69 42 C67 32 62 26 52 27 C45 26 36 32 31 42 Z';
-    case 4: return 'M28 44 C22 34 28 18 40 16 C44 10 58 10 62 16 C74 18 78 34 72 44 C70 36 66 30 60 30 C56 26 44 26 40 30 C34 30 30 36 28 44 Z';
-    case 5: return 'M24 46 C14 30 24 6 50 6 C76 6 86 30 76 46 C74 36 68 30 62 29 C56 26 44 26 38 29 C32 30 26 36 24 46 Z';
-    case 6: return 'M29 66 C24 50 26 22 50 18 C74 22 76 50 71 66 C70 56 68 44 67 40 C64 32 58 28 50 28 C42 28 36 32 33 40 C32 44 30 56 29 66 Z';
-    case 7: return 'M31 42 C30 26 40 19 50 19 C60 19 70 26 69 42 C66 32 60 28 50 28 C40 28 34 32 31 42 Z M42 14 A8 8 0 1 1 58 14 A8 8 0 1 1 42 14 Z';
-    case 8: return 'M44 30 C44 18 47 8 50 6 C53 8 56 18 56 30 C54 28 46 28 44 30 Z';
-    default: return '';
-  }
-}
-
-function beardPath(b: number): string {
-  switch (b) {
-    case 1: return 'M35 52 C36 64 42 72 50 72 C58 72 64 64 65 52 C62 60 57 64 50 64 C43 64 38 60 35 52 Z';
-    case 2: return 'M44 62 C45 70 47 74 50 74 C53 74 55 70 56 62 C54 64 46 64 44 62 Z M43 59 C46 57 54 57 57 59 C54 60 46 60 43 59 Z';
-    case 3: return 'M34 48 C34 66 41 76 50 76 C59 76 66 66 66 48 C64 58 60 64 56 62 C53 60 47 60 44 62 C40 64 36 58 34 48 Z';
-    case 4: return 'M42 59 C45 56 55 56 58 59 C56 62 54 60 50 60 C46 60 44 62 42 59 Z';
-    default: return '';
-  }
-}
-
-/** Player portrait in club colours. */
-export function avatarSvg(a: Appearance, kit: { primary: string; secondary: string } = { primary: '#2a313a', secondary: '#c6ff3d' }, size = 48, number?: number, opts: { eq?: Equipped; offPitch?: boolean } = {}): Raw {
-  const id = `av${uid++}`;
-  const g = gear(opts.eq);
-  const outfit = opts.offPitch ? g.outfit : undefined;
-  const pg = portraitGear(g, id);
-  const skin = SKIN_TONES[a.skin] ?? SKIN_TONES[1];
-  const skinD = shade(skin, 0.82);
-  const hair = HAIR_COLORS[a.hairColor] ?? HAIR_COLORS[0];
-  const hp = hairPath(a.hair);
-  const bp = beardPath(a.beard);
-  const eyeY = 46;
-  const brow = a.face === 3 ? 'M39 41 L46 43 M61 41 L54 43' : a.face === 1 ? 'M39 42 L46 42 M54 42 L61 42' : 'M39 42 Q42.5 40 46 42 M54 42 Q57.5 40 61 42';
-  const mouth = a.face === 2 ? 'M44 57 Q50 62 56 57' : a.face === 3 ? 'M45 58 L55 58' : 'M45 57.5 Q50 59.5 55 57.5';
-  const acc = ACCESSORIES[a.accessory];
-  const p = esc(kit.primary);
-  const s = esc(kit.secondary);
-  return raw(`<svg class="avatar" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true">
-    <defs>
-      <radialGradient id="${id}bg" cx=".5" cy=".3" r=".8"><stop offset="0" stop-color="${shade(kit.primary, 1.15)}"/><stop offset="1" stop-color="${shade(kit.primary, 0.45)}"/></radialGradient>
-      <linearGradient id="${id}sk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${skin}"/><stop offset="1" stop-color="${skinD}"/></linearGradient>
-      ${pg.defs}
-    </defs>
-    <rect width="100" height="100" fill="url(#${id}bg)"/>
-    ${outfit ? `<rect x="43" y="60" width="14" height="14" rx="4" fill="${skinD}"/>${outfitBody(outfit, id + 'o')}` : `
-    <path d="M14 104 C16 80 30 72 50 72 C70 72 84 80 86 104 Z" fill="${p}"/>
-    <path d="M40 72 L50 84 L60 72" fill="none" stroke="${s}" stroke-width="4" stroke-linejoin="round"/>
-    <path d="M14 104 C16 86 22 80 30 77 L28 104 Z M86 104 C84 86 78 80 70 77 L72 104 Z" fill="${s}" opacity=".85"/>
-    ${number !== undefined ? `<text x="50" y="99" text-anchor="middle" font-family="Barlow Condensed, sans-serif" font-weight="800" font-size="14" fill="${s}">${number}</text>` : ''}
-    <rect x="43" y="60" width="14" height="14" rx="4" fill="${skinD}"/>`}
-    ${a.hair === 6 ? `<path d="${hp}" fill="${hair}"/>` : ''}
-    <ellipse cx="50" cy="46" rx="17" ry="20" fill="url(#${id}sk)"/>
-    <ellipse cx="33" cy="48" rx="3" ry="4.5" fill="${skinD}"/><ellipse cx="67" cy="48" rx="3" ry="4.5" fill="${skinD}"/>
-    ${bp ? `<path d="${bp}" fill="${hair}" opacity="${a.beard === 1 ? 0.45 : 0.95}"/>` : ''}
-    ${hp && a.hair !== 6 ? `<path d="${hp}" fill="${hair}"/>` : ''}
-    ${a.hair === 6 ? `<path d="M33 40 C36 32 42 28 50 28 C58 28 64 32 67 40 C62 34 56 32 50 32 C44 32 38 34 33 40 Z" fill="${hair}"/>` : ''}
-    <path d="${brow}" stroke="${shade(hair, 0.9)}" stroke-width="2.4" stroke-linecap="round" fill="none"/>
-    <ellipse cx="42.5" cy="${eyeY}" rx="2.3" ry="${a.face === 1 ? 1.6 : 2.4}" fill="#1a1410"/><ellipse cx="57.5" cy="${eyeY}" rx="2.3" ry="${a.face === 1 ? 1.6 : 2.4}" fill="#1a1410"/>
-    <circle cx="43.3" cy="${eyeY - 0.9}" r=".8" fill="#fff"/><circle cx="58.3" cy="${eyeY - 0.9}" r=".8" fill="#fff"/>
-    <path d="M50 47 L48 53 L51 53.5" stroke="${skinD}" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-    <path d="${mouth}" stroke="#7a3b2e" stroke-width="2" fill="none" stroke-linecap="round"/>
-    ${acc === 'Headband' ? `<path d="M33 36 C40 31 60 31 67 36 L67 40 C60 35 40 35 33 40 Z" fill="${s}"/>` : ''}
-    ${acc === 'Earring' ? '<circle cx="32.5" cy="53" r="1.8" fill="#ffd54a"/>' : ''}
-    ${acc === 'Gold chain' ? '<path d="M38 74 Q50 84 62 74" stroke="#ffd54a" stroke-width="2" fill="none"/>' : ''}
-    ${acc === 'Sweatband' && !g.wrist ? `<rect x="15" y="92" width="10" height="6" rx="2" fill="${s}"/>` : ''}
-    ${pg.over}
-  </svg>`);
+/**
+ * Player portrait: a shot of the 3D player in club colours. (`number` is kept
+ * for call sites that pass a shirt number; the kit itself shows it.)
+ */
+export function avatar(a: Appearance, kit?: { primary: string; secondary: string }, size = 48, _number?: number, opts: { eq?: Equipped; offPitch?: boolean } = {}): Raw {
+  return portrait(a, kit, size, { eq: opts.eq });
 }
 
 export function bootColor(a: Appearance) {
