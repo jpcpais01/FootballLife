@@ -9,6 +9,8 @@ export const PATCH_NOTES: PatchGroup[] = [
   {
     hour: '2026-10-22T02:00:00Z',
     entries: [
+      { title: 'True-to-life sizes', body: 'Players are now real size: about 1.8 m tall on a full 105 by 68 m pitch, next to 7.32 m goals and a proper 22 cm ball. The whole pitch finally looks like a real match from the broadcast camera, and the ball rolls by exactly the distance it travels.' },
+      { title: 'Cleaner strikes and touches', body: 'Passes no longer look like shots. Short passes use a compact pass with a proper wind-up, long balls and clearances a fuller kick, and chips, crosses and shots each have their own. The player steps in and squares up so the foot really meets the ball, first touches stop it with the sole, and sliding tackles go in feet first. Every change of motion now blends smoothly instead of snapping, and players turn at a believable speed.' },
       { title: 'Sharper match camera', body: 'The broadcast camera now leads the play like a real camera operator, drifting ahead in the direction the ball is travelling, and every highlight opens straight on the action instead of swooping in from across the pitch.' },
       { title: 'Smarter defending', body: 'Teams now defend like a unit. The block drops deeper and slides across toward the ball, the second man shuts off the easiest pass while his team-mate presses, and anyone caught upfield sprints back goal-side instead of jogging. Wingers cut inside toward goal in the final third, and kick-offs line up properly.' },
     ],

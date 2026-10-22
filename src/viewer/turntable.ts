@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { Appearance } from '../../shared/appearance.ts';
 import type { Equipped } from '../../shared/cosmetics.ts';
-import { Figure, GK_KITS, type Kit } from './figures.ts';
+import { Figure, GK_KITS, SHOWCASE_SCALE, type Kit } from './figures.ts';
 
 export interface Turntable {
   set(app: Appearance, eq: Equipped, kit: Kit, keeper?: boolean): void;
@@ -148,7 +148,7 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
     set(app, eq, kit, keeper = false) {
       if (fig) scene.remove(fig.root);
       fig = new Figure(kit, app, keeper, GK_KITS[0], eq);
-      fig.root.scale.setScalar(1.45);
+      fig.root.scale.setScalar(SHOWCASE_SCALE);
       fig.root.traverse((o) => {
         if ((o as THREE.Mesh).isMesh) o.castShadow = true;
       });
