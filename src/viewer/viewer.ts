@@ -16,6 +16,7 @@ import type { Tactics } from '../../shared/formations.ts';
 import type { MatchEvent } from '../../shared/sim/types.ts';
 import { Figure, GK_KITS, type Kit } from './figures.ts';
 import { Playback } from './playback.ts';
+import type { Track } from '../../shared/sim/tracks.ts';
 import { buildStadium, PL, PW, type Stadium } from './stadium.ts';
 
 export type CameraMode = 'broadcast' | 'tactical' | 'orbit';
@@ -236,6 +237,10 @@ export class MatchViewer {
     }
   }
 
+  setTracks(tracks: Track[]) {
+    this.playback.setTracks(tracks);
+  }
+
   setEvents(events: MatchEvent[]) {
     this.playback.setEvents(events);
     this.goals = events.filter((e) => e.k === 'goal');
@@ -336,8 +341,23 @@ export class MatchViewer {
       this.poses.clear();
       this.fired.clear();
     }
-    this.steer(fr, Math.max(0, gameDt), jumped, rate);
-    this.triggerPoses(fr, t);
+    if (fr.tracked && fr.vel) {
+      // Recorded motion: bodies are exactly where the engine had them.
+      for (let i = 0; i < 22; i++) {
+        const f = this.figures[i];
+        const v = fr.vel[i];
+        const ax = gameDt > 0 ? (v.x - f.vel.x) / Math.max(gameDt, 1e-3) : 0;
+        const ay = gameDt > 0 ? (v.y - f.vel.y) / Math.max(gameDt, 1e-3) : 0;
+        this.accel[i].x += (Math.max(-12, Math.min(12, ax)) - this.accel[i].x) * 0.2;
+        this.accel[i].y += (Math.max(-12, Math.min(12, ay)) - this.accel[i].y) * 0.2;
+        f.pos.set(fr.targets[i].x, fr.targets[i].y);
+        f.vel.set(v.x, v.y);
+      }
+      this.trackedPoses(fr, t);
+    } else {
+      this.steer(fr, Math.max(0, gameDt), jumped, rate);
+      this.triggerPoses(fr, t);
+    }
     for (let i = 0; i < 22; i++) {
       const f = this.figures[i];
       if (fr.sentOff[i]) {
@@ -482,6 +502,25 @@ export class MatchViewer {
         f.pos.x += f.vel.x * h;
         f.pos.y += f.vel.y * h;
       }
+    }
+  }
+
+  /** One-shot actions from the engine's recording, timed so contact lands on the recorded moment. */
+  private trackedPoses(fr: ReturnType<Playback['frame']>, t: number) {
+    for (const [at, i, kind, detail] of fr.acts) {
+      const key = `a${at}:${i}:${kind}`;
+      if (this.fired.has(key) || fr.sentOff[i]) continue;
+      // Pose, length, and how far into it the contact happens.
+      const spec: Partial<Record<string, [Figure['pose'], number, number]>> = {
+        pass: ['kick', 0.5, 0.45], drive: ['kick', 0.6, 0.45], shot: ['kick', 0.6, 0.45], cross: ['kick', 0.6, 0.45],
+        header: ['header', 0.65, 0.45], slide: ['slide', 0.9, 0.25], tackle: ['kick', 0.5, 0.45], dive: ['dive', 0.95, 0.35],
+      };
+      const sp = spec[kind];
+      if (!sp) continue;
+      const start = at - sp[1] * sp[2];
+      if (t < start || t > at + sp[1]) continue;
+      this.fired.add(key);
+      this.poses.set(i, { kind: sp[0], k: (t - start) / sp[1], dur: sp[1], side: kind === 'dive' ? (detail >= 0 ? 1 : -1) : 1 });
     }
   }
 

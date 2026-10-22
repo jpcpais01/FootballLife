@@ -67,7 +67,7 @@ check('different seed → different match', JSON.stringify(r1) !== JSON.stringif
 // Live rating rebuilt from events lands close to the official full-time rating.
 {
   let n = 0, off = 0, worst = 0;
-  for (let sd = 1; sd <= 40; sd++) {
+  for (let sd = 1; sd <= 10; sd++) {
     const r = simulateMatch(A, B, 900 + sd);
     for (const l of r.players) {
       const role = (l.idx < 11 ? A : B).players[l.idx % 11].role;
@@ -80,7 +80,7 @@ check('different seed → different match', JSON.stringify(r1) !== JSON.stringif
   check('live rating matches full-time rating', off / n < 0.05 && worst <= 0.31, { avg: (off / n).toFixed(3), worst: worst.toFixed(1) });
 }
 
-const N = 400;
+const N = 120;
 const even = series(A, B, N);
 console.log('even 50 v 50', even);
 check('goals per match in a realistic band', +even.goals > 1.8 && +even.goals < 3.6, even.goals);

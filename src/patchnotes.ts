@@ -9,6 +9,8 @@ export const PATCH_NOTES: PatchGroup[] = [
   {
     hour: '2026-10-22T01:00:00Z',
     entries: [
+      { title: 'A new match engine', body: 'Matches are now played out on a real pitch. All 22 players run with their own pace and acceleration, the ball rolls, flies and bounces, and every pass, dribble, tackle and shot is decided from where everyone actually is. Teams hold a back line, press the ball, track runners and attack the box for crosses.' },
+      { title: 'Highlights at true speed', body: 'When a big moment plays out live, it is now the real thing: you see exactly how the engine played it, at normal speed, with every player already in the right place. Strikes, headers, tackles and keeper dives are timed to the moment the ball is hit. Matches still last about ten and a half minutes, with the quiet spells fast-forwarded.' },
       { title: 'No more random flashing', body: 'Pages no longer flash or redraw themselves out of nowhere. The home screen, the top bar and the menu bar now only change when something actually changed, like a new result or more coins, and game updates install quietly while FootbalLife is in the background instead of reloading the screen while you play.' },
     ],
   },

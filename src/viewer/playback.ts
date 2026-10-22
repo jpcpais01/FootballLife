@@ -4,6 +4,7 @@ import { getFormation, type Slot, type Tactics } from '../../shared/formations.t
 import { fromAbs, slotPosition, toAbs } from '../../shared/shape.ts';
 import type { MatchEvent } from '../../shared/sim/types.ts';
 import { direct } from './director.ts';
+import type { Act, Track } from '../../shared/sim/tracks.ts';
 
 export interface TeamInfo {
   formation: string;
@@ -33,6 +34,12 @@ export interface Frame {
   aim: { x: number; y: number } | null;
   /** The restart being taken (free kick, corner, penalty…) until the ball is struck. */
   restart: MatchEvent | null;
+  /** True when positions come straight from the engine's recorded motion. */
+  tracked: boolean;
+  /** Recorded velocities (m/s) when tracked. */
+  vel: { x: number; y: number }[] | null;
+  /** Body actions from the recording around this moment. */
+  acts: Act[];
 }
 
 /** How far the taker backs off the ball before running up to strike it. */
@@ -54,6 +61,53 @@ export class Playback {
     this.slots = [getFormation(teams[0].formation).slots, getFormation(teams[1].formation).slots];
     this.tactics = [teams[0].tactics, teams[1].tactics];
     this.halftimeAt = halftimeAt;
+  }
+
+  private tracks: Track[] = [];
+
+  setTracks(tracks: Track[]) {
+    this.tracks = tracks.slice().sort((a, b) => a.t0 - b.t0);
+  }
+
+  trackAt(t: number): Track | null {
+    for (const tr of this.tracks) if (t >= tr.t0 && t <= tr.t1) return tr;
+    return null;
+  }
+
+  /** Positions, velocities and ball straight from a recorded window. */
+  private sample(tr: Track, t: number) {
+    const pos: { x: number; y: number }[] = [];
+    const vel: { x: number; y: number }[] = [];
+    const np = tr.p.length / 44;
+    const f = (t - tr.t0) * tr.hz;
+    const i1 = Math.max(0, Math.min(np - 1, Math.floor(f)));
+    const k = Math.max(0, Math.min(1, f - i1));
+    const i0 = Math.max(0, i1 - 1);
+    const i2 = Math.min(np - 1, i1 + 1);
+    const i3 = Math.min(np - 1, i1 + 2);
+    for (let j = 0; j < 22; j++) {
+      const c = (i: number, o: number) => tr.p[i * 44 + j * 2 + o];
+      const cr = (o: number) => catmull(c(i0, o), c(i1, o), c(i2, o), c(i3, o), k);
+      const dr = (o: number) => catmullD(c(i0, o), c(i1, o), c(i2, o), c(i3, o), k) * tr.hz;
+      pos.push({ x: cr(0), y: cr(1) });
+      vel.push({ x: dr(0), y: dr(1) });
+    }
+    const nb = tr.b.length / 3;
+    const bh = tr.hz * 2;
+    const g = (t - tr.t0) * bh;
+    const b1 = Math.max(0, Math.min(nb - 1, Math.floor(g)));
+    const bk = Math.max(0, Math.min(1, g - b1));
+    const b0 = Math.max(0, b1 - 1);
+    const b2 = Math.min(nb - 1, b1 + 1);
+    const b3 = Math.min(nb - 1, b1 + 2);
+    // Ball: smooth in the air, but never overshoot a sharp change (a strike or a bounce).
+    const bc = (o: number) => {
+      const lin = tr.b[b1 * 3 + o] + (tr.b[b2 * 3 + o] - tr.b[b1 * 3 + o]) * bk;
+      const cur = catmull(tr.b[b0 * 3 + o], tr.b[b1 * 3 + o], tr.b[b2 * 3 + o], tr.b[b3 * 3 + o], bk);
+      return Math.abs(cur - lin) > 0.4 ? lin : cur;
+    };
+    const ball = { x: bc(0), y: bc(1), z: Math.max(0.11, bc(2)) };
+    return { pos, vel, ball };
   }
 
   setEvents(events: MatchEvent[]) {
@@ -94,6 +148,25 @@ export class Playback {
   }
 
   frame(t: number): Frame {
+    const fr = this.frameFromEvents(t);
+    const tr = this.trackAt(t);
+    if (!tr) return fr;
+    const { pos, vel, ball } = this.sample(tr, t);
+    // Who has it: the closest player to a ball on the ground, if it's at his feet.
+    let holder = -1;
+    let bd = 1.3;
+    if (ball.z < 0.6) {
+      for (let i = 0; i < 22; i++) {
+        if (fr.sentOff[i]) continue;
+        const d = Math.hypot(pos[i].x - ball.x, pos[i].y - ball.y);
+        if (d < bd) { bd = d; holder = i; }
+      }
+    }
+    const acts = tr.acts.filter((a) => a[0] > t - 1.2 && a[0] < t + 1.2);
+    return { ...fr, ball, targets: pos, vel, tracked: true, acts, holder: fr.celebrating >= 0 ? -1 : holder, phase: holder >= 0 || fr.phase === 'dead' ? fr.phase : 'flight' };
+  }
+
+  private frameFromEvents(t: number): Frame {
     const ev = this.events;
     const i = this.indexAt(t);
     const prev = i >= 0 ? ev[i] : null;
@@ -238,11 +311,22 @@ export class Playback {
         if (idx === celebrating || k % 3 !== 0) targets[idx] = { x: corner.x - this.dir(side, t) * (d + 1), y: corner.y - Math.sign(corner.y) * (Math.abs(Math.sin(a)) * d + 1) };
       }
     }
-    return { ball, holder, poss, targets, sentOff, score: this.scoreBefore(i), index: i, celebrating, phase, kicker, kickAt, flightF, aim, restart };
+    return { ball, holder, poss, targets, sentOff, score: this.scoreBefore(i), index: i, celebrating, phase, kicker, kickAt, flightF, aim, restart, tracked: false, vel: null, acts: [] };
   }
 }
 
 const frac = (x: number) => x - Math.floor(x);
+
+function catmull(p0: number, p1: number, p2: number, p3: number, t: number) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+}
+
+function catmullD(p0: number, p1: number, p2: number, p3: number, t: number) {
+  const t2 = t * t;
+  return 0.5 * ((-p0 + p2) + 2 * (2 * p0 - 5 * p1 + 4 * p2 - p3) * t + 3 * (-p0 + 3 * p1 - 3 * p2 + p3) * t2);
+}
 const clampX = (x: number) => Math.max(-54.5, Math.min(54.5, x));
 const clampY = (y: number) => Math.max(-35.5, Math.min(35.5, y));
 

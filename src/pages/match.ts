@@ -3,6 +3,7 @@ import type { Equipped } from '../../shared/cosmetics.ts';
 import { commentary, type CommentaryLine } from '../../shared/commentary.ts';
 import { minuteLabel } from '../../shared/config.ts';
 import type { MatchEvent, PlayerLine, TeamStats } from '../../shared/sim/types.ts';
+import { decodeWindow, type Track } from '../../shared/sim/tracks.ts';
 import { clockAt, rateAt, realAt, totalReal, type Segment } from '../../shared/timeline.ts';
 import { api } from '../api.ts';
 import { avatar } from '../art.ts';
@@ -88,6 +89,8 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   const halftimeAt: number = data.halftimeAt;
   let events: MatchEvent[] = data.events;
   let revealed: number = data.revealed;
+  let tracks: Track[] = (data.tracks ?? []).map(decodeWindow);
+  let trackCount = tracks.length;
   let finished: boolean = data.finished;
   let stats: [TeamStats, TeamStats] | undefined = data.stats;
   let players: PlayerLine[] | undefined = data.players;
@@ -173,6 +176,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
     el.querySelector('#loading')!.innerHTML = html`<div class="muted">3D view unavailable on this device (${(e as Error).message}). Commentary and stats still update live.</div>`.html;
   }
   viewer?.setEvents(events);
+  viewer?.setTracks(tracks);
   el.querySelector('#loading')?.remove();
   el.querySelector('[data-q]')?.classList.toggle('on', viewer?.quality === 'high');
   let boardPref = true;
@@ -481,8 +485,13 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   if (!finished) {
     poll = window.setInterval(async () => {
       try {
-        const d = await api.get(`/api/matches/${id}?since=${revealed}`);
+        const d = await api.get(`/api/matches/${id}?since=${revealed}&tw=${trackCount}`);
         if (!alive) return;
+        if (d.tracks?.length) {
+          tracks = tracks.concat(d.tracks.map(decodeWindow));
+          trackCount += d.tracks.length;
+          viewer?.setTracks(tracks);
+        }
         if (d.events?.length) {
           events = events.concat(d.events);
           viewer?.setEvents(events);

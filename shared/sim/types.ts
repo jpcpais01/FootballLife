@@ -1,6 +1,7 @@
 import type { Attributes, Position } from '../attributes.ts';
 import type { Tactics } from '../formations.ts';
 import type { Segment } from '../timeline.ts';
+import type { TrackWindow } from './tracks.ts';
 
 export interface SimPlayer {
   id: string;
@@ -116,5 +117,7 @@ export interface MatchResult {
   /** Broadcast timeline: game clock ↔ real seconds after kickoff. */
   timeline: Segment[];
   /** Penalty shootout after a drawn cup tie. */
+  /** Recorded motion for the stretches shown at true speed (engine v3+). */
+  tracks?: TrackWindow[];
   pens?: { score: [number, number]; kicks: { s: 0 | 1; p: number; in: boolean }[] };
 }
