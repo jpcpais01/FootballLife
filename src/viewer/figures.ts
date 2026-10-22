@@ -1,10 +1,16 @@
-// Footballers: sculpted athletic figures in club kits. Each body part is one
-// mesh whose triangles index into a small per-player palette texture, so a
-// whole player shares one material and a handful of draw calls.
+// Footballers: athletic figures in club kits. The whole body is one skinned
+// mesh over a Mixamo-named skeleton (rig/skeleton.ts), its triangles indexing
+// into a small per-player palette texture, so a player is a single draw call
+// and one material. Motion comes from rig/animator.ts: mocap or hand-made
+// clips blended by velocity, timed actions, head tracking and foot IK.
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BOOT_COLORS, EYE_COLORS, HAIR_COLORS, SKIN_TONES, sanitizeAppearance, type Appearance } from '../../shared/appearance.ts';
 import { gear, type Equipped, type Item } from '../../shared/cosmetics.ts';
+import { type ActOpts, type ActionKind, type AnimInput, Animator } from './rig/animator.ts';
+import { duration } from './rig/clip.ts';
+import { getClip, hasClip, loadMocap } from './rig/library.ts';
+import { ARM_BIND, B, REST, makeBones, setBindPose } from './rig/skeleton.ts';
 
 export interface Kit {
   primary: string;
@@ -47,29 +53,6 @@ function paint(g: THREE.BufferGeometry, slot: Paint): THREE.BufferGeometry {
   return m;
 }
 
-/** A solid of revolution from [radius, y] pairs (bottom to top), seam at the back. */
-function lathe(profile: [number, number][], segs = 18): THREE.BufferGeometry {
-  // Faces point outward only when the profile runs bottom to top.
-  const pts = profile[0][1] > profile[profile.length - 1][1] ? [...profile].reverse() : profile;
-  return new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(Math.max(r, 0.0005), y)), segs, Math.PI, Math.PI * 2);
-}
-/**
- * A lathe painted quad by quad: `fn` gets each quad's centre angle (0 = front,
- * PI/2 = +x), its height and its segment, so panels and stripes follow the
- * mesh lines instead of zig-zagging across triangles.
- */
-function latheP(profile: [number, number][], segs: number, fn: (ang: number, y: number, seg: number) => number) {
-  if (profile[0][1] > profile[profile.length - 1][1]) profile = [...profile].reverse();
-  const rows = profile.length - 1;
-  const d = (Math.PI * 2) / segs;
-  return paint(lathe(profile, segs), (_c, tri) => {
-    const q = Math.floor(tri / 2);
-    const seg = Math.floor(q / rows);
-    const row = q % rows;
-    const phi = Math.PI + (seg + 0.5) * d;
-    return fn(Math.atan2(Math.sin(phi), Math.cos(phi)), (profile[row][1] + profile[row + 1][1]) / 2, seg);
-  });
-}
 function ball(r: number, w = 14, h = 10) {
   return new THREE.SphereGeometry(r, w, h);
 }
@@ -85,117 +68,6 @@ function cached(key: string, make: () => THREE.BufferGeometry) {
     geoCache.set(key, g);
   }
   return g;
-}
-
-// ---------- Body parts (metres in body space; the player is ~2.25 tall before scaling) ----------
-
-const HIP_Y = 1.04;
-const WAIST_Y = 1.18;
-const SHOULDER = { x: 0.245, y: 0.47 };
-const NECK_TOP = 0.68;
-const THIGH = 0.5;
-const SHIN = 0.54;
-const UPPER_ARM = 0.33;
-
-type Pattern = 'plain' | 'stripes' | 'hoops';
-
-function kitPattern(k: Kit): Pattern {
-  let h = 0;
-  for (const ch of k.primary + k.secondary) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  const r = h % 10;
-  return r < 6 ? 'plain' : r < 9 ? 'stripes' : 'hoops';
-}
-
-/** Hips and shorts, in body space. */
-function pelvisGeo() {
-  return cached('pelvis', () => {
-    const p = latheP([[0.06, 0.93], [0.15, 0.94], [0.185, 0.96], [0.192, 1.0], [0.188, 1.1], [0.17, 1.18], [0.1, 1.22]], 24, (a, y) =>
-      Math.abs(Math.sin(a)) > 0.97 && y > 0.92 ? S.Shirt : S.Shorts);
-    return p.scale(1.1, 1, 0.8);
-  });
-}
-
-/** Shirt, neck and collar, in waist space. */
-function torsoGeo(pattern: Pattern, keeper: boolean) {
-  return cached(`torso|${pattern}|${keeper}`, () => {
-    const sx = 1.28;
-    const sz = 0.82;
-    const prof: [number, number][] = [[0.16, -0.16], [0.196, -0.15], [0.194, -0.1], [0.186, -0.04], [0.18, 0.04], [0.184, 0.13], [0.198, 0.23], [0.215, 0.33], [0.225, 0.41], [0.222, 0.47], [0.2, 0.525], [0.15, 0.57], [0.098, 0.6], [0.078, 0.612]];
-    const torso = latheP(prof, 32, (ang, y, seg) => {
-      if (y > 0.59 || y < -0.135) return S.Trim;
-      const side = Math.abs(Math.sin(ang));
-      if (keeper) return Math.abs(y - 0.3) < 0.04 && Math.cos(ang) > 0.2 ? S.Trim : S.Shirt;
-      if (side > 0.97 && y < 0.47) return S.Trim;
-      if (pattern === 'stripes') return Math.floor(seg / 2) % 2 ? S.Trim : S.Shirt;
-      if (pattern === 'hoops') return Math.floor((y + 0.16) / 0.12) % 2 ? S.Trim : S.Shirt;
-      return S.Shirt;
-    }).scale(sx, 1, sz);
-    const neck = paint(at(lathe([[0.076, 0.5], [0.074, 0.6], [0.068, 0.68], [0.062, 0.72]], 16), 0, 0, 0.008), S.Skin);
-    const collar = paint(new THREE.TorusGeometry(0.085, 0.019, 8, 28).rotateX(Math.PI / 2), S.Trim);
-    at(collar, 0, 0.603, 0.004);
-    // Crest on the chest.
-    const crest = paint(ball(0.03, 10, 8).scale(1, 1.15, 0.35), S.Trim);
-    at(crest, 0.1, 0.43, 0.178);
-    return merge([torso, neck, collar, crest]);
-  });
-}
-
-/** Shoulder, sleeve and upper arm, hanging from the shoulder joint. */
-function upperArmGeo(keeper: boolean) {
-  return cached(`uarm|${keeper}`, () => {
-    const s = latheP([[0.0, 0.07], [0.035, 0.066], [0.06, 0.05], [0.075, 0.02], [0.079, -0.03], [0.075, -0.1], [0.071, -0.15], [0.07, -0.175]], 18, (_a, y) => (!keeper && y < -0.15 ? S.Trim : S.Shirt));
-    const arm = paint(lathe([[0.058, -0.12], [0.06, -0.18], [0.055, -0.26], [0.049, -0.32], [0.046, -0.35], [0.038, -0.375], [0.015, -0.385]], 16), keeper ? S.Shirt : S.Skin);
-    return merge([s, arm]);
-  });
-}
-
-/** Forearm and hand, hanging from the elbow. */
-function forearmGeo(keeper: boolean, band: boolean) {
-  return cached(`farm|${keeper}|${band}`, () => {
-    const fore = lathe([[0.015, 0.055], [0.036, 0.045], [0.046, 0.02], [0.051, -0.04], [0.052, -0.08], [0.045, -0.17], [0.037, -0.25], [0.035, -0.27]], 16);
-    const parts = [paint(fore, (c) => (keeper ? (c.y < -0.22 ? S.Trim : S.Shirt) : S.Skin))];
-    const hand = paint(ball(keeper ? 0.056 : 0.046, 12, 10).scale(0.62, 1, 0.9), keeper ? S.Glove : S.Skin);
-    parts.push(at(hand, 0, -0.32, 0.004));
-    const thumb = paint(ball(keeper ? 0.024 : 0.018, 8, 6).scale(1, 1.6, 1), keeper ? S.Glove : S.Skin);
-    parts.push(at(thumb, 0, -0.3, 0.035));
-    if (band && !keeper) parts.push(at(paint(new THREE.CylinderGeometry(0.044, 0.044, 0.06, 14), S.Wrist), 0, -0.235, 0));
-    return merge(parts);
-  });
-}
-
-/** Shorts leg and thigh, hanging from the hip joint. */
-function thighGeo(keeper: boolean) {
-  return cached(`thigh|${keeper}`, () => {
-    const shortsLeg = latheP([[0.1, 0.1], [0.126, 0.03], [0.13, -0.08], [0.13, -0.18], [0.127, -0.25], [0.12, -0.27]], 20, (_a, y) =>
-      !keeper && y < -0.24 ? S.Shirt : S.Shorts);
-    const thigh = paint(lathe([[0.1, -0.12], [0.102, -0.2], [0.094, -0.3], [0.078, -0.43], [0.068, -0.49], [0.06, -0.54], [0.025, -0.565]], 16), S.Skin);
-    thigh.scale(1, 1, 1.06);
-    return merge([shortsLeg, thigh]);
-  });
-}
-
-/** Knee, sock, shin pad bulge and boot, hanging from the knee joint. */
-function shinGeo() {
-  return cached('shin', () => {
-    const knee = paint(ball(0.05, 12, 10).scale(0.9, 1.2, 0.7), S.Skin);
-    at(knee, 0, -0.01, 0.025);
-    const shin = paint(lathe([[0.02, 0.06], [0.05, 0.05], [0.06, 0.02], [0.059, -0.04], [0.06, -0.1]], 14), S.Skin);
-    const sock = lathe([[0.062, -0.08], [0.068, -0.12], [0.073, -0.19], [0.066, -0.27], [0.054, -0.36], [0.05, -0.41]], 16);
-    const s = paint(sock, (c) => (c.y > -0.115 ? S.Trim : S.Sock));
-    s.scale(1, 1, 1.04);
-    const ankle = paint(lathe([[0.057, -0.37], [0.063, -0.41], [0.063, -0.46]], 16), S.Boot);
-    const shoe = (yMin: number, yMax: number, sx: number, sz: number) => {
-      const g = ball(0.07, 20, 14);
-      const bp = g.attributes.position;
-      for (let i = 0; i < bp.count; i++) bp.setXYZ(i, bp.getX(i) * sx, Math.min(yMax, Math.max(yMin, bp.getY(i) * 0.75)), bp.getZ(i) * sz);
-      return g;
-    };
-    // Upper, then a slightly wider sole plate following the same outline.
-    const boot = paint(shoe(-0.03, 1, 0.86, 1.95), S.Boot);
-    const sole = paint(shoe(-0.044, -0.026, 0.9, 2.0), S.Sole);
-    for (const g of [boot, sole]) at(g, 0, -SHIN + 0.044, 0.05);
-    return merge([knee, shin, s, ankle, boot, sole]);
-  });
 }
 
 // ---------- Head ----------
@@ -585,20 +457,6 @@ function headGeo(app: Appearance, band: '' | 'band' | 'alice', earring: boolean)
   });
 }
 
-function neckwearGeo(style: string) {
-  return cached(`neck|${style}`, () => {
-    if (style === 'snood') return paint(at(new THREE.CylinderGeometry(0.085, 0.1, 0.12, 20, 1, true), 0, 0.66, 0.004), S.Neck);
-    if (style === 'medal') {
-      const ribbon = paint(new THREE.TorusGeometry(0.11, 0.012, 6, 28).rotateX(Math.PI / 2 - 0.55).scale(1, 1.5, 1), S.Trim);
-      at(ribbon, 0, 0.56, 0.06);
-      const disc = paint(new THREE.CylinderGeometry(0.05, 0.05, 0.014, 20).rotateX(Math.PI / 2), S.Neck);
-      at(disc, 0, 0.42, 0.19);
-      return merge([ribbon, disc]);
-    }
-    return paint(at(new THREE.TorusGeometry(0.1, 0.011, 6, 30).rotateX(Math.PI / 2 - 0.5), 0, 0.585, 0.05), S.Neck);
-  });
-}
-
 const baseGeo = (() => {
   const base = paint(at(new THREE.CylinderGeometry(0.55, 0.62, 0.12, 36), 0, 0.06, 0), S.Base);
   return base;
@@ -670,33 +528,365 @@ function contrast(c: string) {
   return col.r * 0.3 + col.g * 0.59 + col.b * 0.11 > 0.5 ? '#141414' : '#f4f4f4';
 }
 
+// ---------- Body (one skinned mesh over the skeleton in rig/skeleton.ts) ----------
+
+type Pattern = 'plain' | 'stripes' | 'hoops';
+
+function kitPattern(k: Kit): Pattern {
+  let h = 0;
+  for (const ch of k.primary + k.secondary) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const r = h % 10;
+  return r < 6 ? 'plain' : r < 9 ? 'stripes' : 'hoops';
+}
+
+/** A cross-section: position along the axis, side radius, front and back depth, front offset. */
+interface Ring { at: number; r: number; f: number; b: number; c?: number }
+
+/**
+ * A smooth tube through elliptical rings, closed at both ends and painted
+ * quad by quad. Along y the section lies in x-z; along x (arms) it lies in
+ * y-z, running toward `dir`. Angle 0 is the front (+z).
+ */
+function loft(rings: Ring[], segs: number, axis: 'y' | 'x', o: [number, number, number], slot: (ang: number, at: number, seg: number) => number, dir = 1) {
+  const pos: number[] = [];
+  const slots: number[] = [];
+  const idx: number[] = [];
+  const point = (rg: Ring, ang: number) => {
+    const s = Math.sin(ang);
+    const c = Math.cos(ang);
+    const z = o[2] + (rg.c ?? 0) + c * (c > 0 ? rg.f : rg.b);
+    return axis === 'y' ? [o[0] + s * rg.r, o[1] + rg.at, z] : [o[0] + dir * rg.at, o[1] + s * rg.r, z];
+  };
+  rings.forEach((rg) => {
+    for (let k = 0; k < segs; k++) pos.push(...point(rg, (k / segs) * Math.PI * 2));
+  });
+  // Domed caps at each end.
+  const cap = (rg: Ring, out: number) => {
+    const p = point({ ...rg, r: 0, f: 0, b: 0 }, 0);
+    if (axis === 'y') p[1] += out;
+    else p[0] += dir * out;
+    pos.push(p[0], p[1], p[2] + ((rg.f - rg.b) * 0.5));
+    return pos.length / 3 - 1;
+  };
+  const first = rings[0];
+  const last = rings[rings.length - 1];
+  const c0 = cap(first, -Math.sign(last.at - first.at) * Math.min(first.r, first.f) * 0.45);
+  const c1 = cap(last, Math.sign(last.at - first.at) * Math.min(last.r, last.f) * 0.45);
+  const v = (ri: number, k: number) => ri * segs + (k % segs);
+  const tri = (a: number, b: number, c: number, sl: number) => {
+    idx.push(a, b, c);
+    slots.push(sl);
+  };
+  for (let ri = 0; ri < rings.length - 1; ri++) {
+    for (let k = 0; k < segs; k++) {
+      const ang = ((k + 0.5) / segs) * Math.PI * 2;
+      const sl = slot(Math.atan2(Math.sin(ang), Math.cos(ang)), (rings[ri].at + rings[ri + 1].at) / 2, k);
+      tri(v(ri, k), v(ri + 1, k), v(ri + 1, k + 1), sl);
+      tri(v(ri, k), v(ri + 1, k + 1), v(ri, k + 1), sl);
+    }
+  }
+  for (let k = 0; k < segs; k++) {
+    const ang = ((k + 0.5) / segs) * Math.PI * 2;
+    tri(c0, v(0, k + 1), v(0, k), slot(ang, first.at, k));
+    tri(c1, v(rings.length - 1, k), v(rings.length - 1, k + 1), slot(ang, last.at, k));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  // Wind outward whichever way the axis runs.
+  const probe = new THREE.Vector3().fromArray(pos, 0);
+  const a = new THREE.Vector3().fromArray(pos, idx[0] * 3);
+  const b = new THREE.Vector3().fromArray(pos, idx[1] * 3);
+  const c = new THREE.Vector3().fromArray(pos, idx[2] * 3);
+  const n = b.clone().sub(a).cross(c.clone().sub(a));
+  const centre = axis === 'y' ? new THREE.Vector3(o[0], probe.y, o[2] + (first.c ?? 0)) : new THREE.Vector3(probe.x, o[1], o[2] + (first.c ?? 0));
+  if (n.dot(a.clone().sub(centre)) < 0) for (let i = 0; i < idx.length; i += 3) [idx[i + 1], idx[i + 2]] = [idx[i + 2], idx[i + 1]];
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const m = g.toNonIndexed();
+  const uv = new Float32Array(m.attributes.position.count * 2);
+  for (let t = 0; t < slots.length; t++) for (let k = 0; k < 3; k++) {
+    uv[(t * 3 + k) * 2] = uvOf(slots[t]);
+    uv[(t * 3 + k) * 2 + 1] = 0.5;
+  }
+  m.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return m;
+}
+
+/** Blends bones along a coordinate: [bone, where it starts], ascending, with soft joints. */
+function chain(t: number, joints: [number, number][], blend: number): [number, number][] {
+  const out: [number, number][] = [];
+  const u = (j: number) => (j === 0 ? 1 : j >= joints.length ? 0 : smoothstep(joints[j][1] - blend, joints[j][1] + blend, t));
+  for (let j = 0; j < joints.length; j++) {
+    const w = u(j) * (1 - u(j + 1));
+    if (w > 1e-3) out.push([joints[j][0], w]);
+  }
+  return out;
+}
+const smoothstep = (a: number, b: number, x: number) => {
+  const k = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return k * k * (3 - 2 * k);
+};
+
+type Weigh = (p: THREE.Vector3) => [number, number][];
+
+/** Writes skin indices and weights (up to four bones) onto a part. */
+function skin(g: THREE.BufferGeometry, weigh: Weigh) {
+  const pos = g.attributes.position;
+  const si = new Uint16Array(pos.count * 4);
+  const sw = new Float32Array(pos.count * 4);
+  const p = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    p.fromBufferAttribute(pos, i);
+    const ws = weigh(p).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    const tot = ws.reduce((s, w) => s + w[1], 0) || 1;
+    ws.forEach(([bone, w], k) => {
+      si[i * 4 + k] = bone;
+      sw[i * 4 + k] = w / tot;
+    });
+    if (!ws.length) sw[i * 4] = 1;
+  }
+  g.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
+  g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+  return g;
+}
+
+const rigid = (bone: number): Weigh => () => [[bone, 1]];
+
+// Torso cross-sections, crotch to collar.
+const TORSO: Ring[] = [
+  { at: 0.98, r: 0.085, f: 0.07, b: 0.075 },
+  { at: 1.03, r: 0.158, f: 0.105, b: 0.125 },
+  { at: 1.09, r: 0.186, f: 0.114, b: 0.136 },
+  { at: 1.15, r: 0.187, f: 0.113, b: 0.12 },
+  { at: 1.22, r: 0.172, f: 0.11, b: 0.106 },
+  { at: 1.32, r: 0.178, f: 0.118, b: 0.108 },
+  { at: 1.42, r: 0.198, f: 0.13, b: 0.114, c: 0.004 },
+  { at: 1.52, r: 0.214, f: 0.138, b: 0.118, c: 0.008 },
+  { at: 1.6, r: 0.222, f: 0.128, b: 0.116, c: 0.006 },
+  { at: 1.67, r: 0.216, f: 0.114, b: 0.108 },
+  { at: 1.725, r: 0.19, f: 0.1, b: 0.098 },
+  { at: 1.77, r: 0.13, f: 0.088, b: 0.088 },
+  { at: 1.8, r: 0.088, f: 0.078, b: 0.08 },
+];
+const SHORTS_TOP = 1.14;
+
+/** The torso's front (+1) or back (-1) surface depth at (x, y), for things worn on it. */
+function torsoZ(x: number, y: number, side: 1 | -1) {
+  let i = 0;
+  while (i < TORSO.length - 2 && TORSO[i + 1].at < y) i++;
+  const a = TORSO[i];
+  const b = TORSO[i + 1];
+  const k = Math.min(1, Math.max(0, (y - a.at) / (b.at - a.at)));
+  const L = (p: number, q: number) => p + (q - p) * k;
+  const r = L(a.r, b.r);
+  const d = side > 0 ? L(a.f, b.f) : L(a.b, b.b);
+  return L(a.c ?? 0, b.c ?? 0) + side * d * Math.sqrt(Math.max(0, 1 - (x / r) ** 2));
+}
+
+function torsoPart(pattern: Pattern, keeper: boolean) {
+  const g = loft(TORSO, 36, 'y', [0, 0, -0.01], (ang, y, seg) => {
+    if (y < SHORTS_TOP) return S.Shorts;
+    if (y > 1.785 || y < SHORTS_TOP + 0.025) return S.Trim;
+    const side = Math.abs(Math.sin(ang));
+    if (keeper) return Math.abs(y - 1.5) < 0.04 && Math.cos(ang) > 0.2 ? S.Trim : S.Shirt;
+    if (side > 0.97 && y < 1.6) return S.Trim;
+    if (pattern === 'stripes') return Math.floor(seg / 3) % 2 ? S.Trim : S.Shirt;
+    if (pattern === 'hoops') return Math.floor((y - SHORTS_TOP) / 0.11) % 2 ? S.Trim : S.Shirt;
+    return S.Shirt;
+  });
+  return skin(g, (p) => {
+    const w = chain(p.y, [[B.Hips, 0], [B.Spine, 1.24], [B.Spine1, 1.37], [B.Spine2, 1.49], [B.Neck, 1.79]], 0.04);
+    // The outer shoulders ride on the collarbones.
+    const sh = smoothstep(0.13, 0.21, Math.abs(p.x)) * smoothstep(1.56, 1.66, p.y) * 0.7;
+    if (sh > 0) {
+      w.forEach((x) => (x[1] *= 1 - sh));
+      w.push([p.x > 0 ? B.LeftShoulder : B.RightShoulder, sh]);
+    }
+    return w;
+  });
+}
+
+function neckPart() {
+  const g = loft([{ at: 1.72, r: 0.086, f: 0.084, b: 0.086 }, { at: 1.82, r: 0.08, f: 0.077, b: 0.08 }, { at: 1.9, r: 0.072, f: 0.068, b: 0.074 }, { at: 1.96, r: 0.066, f: 0.062, b: 0.064 }], 18, 'y', [0, 0, 0.004], () => S.Skin);
+  return skin(g, (p) => chain(p.y, [[B.Spine2, 0], [B.Neck, 1.79], [B.Head, 1.9]], 0.035));
+}
+
+function legPart(side: 1 | -1, keeper: boolean) {
+  const x = REST[B.LeftUpLeg][0] * side;
+  const rings: Ring[] = [
+    { at: 1.17, r: 0.11, f: 0.1, b: 0.11 },
+    { at: 1.08, r: 0.132, f: 0.122, b: 0.132 },
+    { at: 0.95, r: 0.132, f: 0.12, b: 0.125 },
+    { at: 0.815, r: 0.127, f: 0.116, b: 0.118 },
+    { at: 0.8, r: 0.105, f: 0.1, b: 0.1 },
+    { at: 0.71, r: 0.1, f: 0.1, b: 0.094 },
+    { at: 0.63, r: 0.082, f: 0.086, b: 0.076 },
+    { at: 0.575, r: 0.072, f: 0.08, b: 0.07, c: 0.004 },
+    { at: 0.51, r: 0.07, f: 0.07, b: 0.084 },
+    { at: 0.41, r: 0.074, f: 0.068, b: 0.094 },
+    { at: 0.29, r: 0.062, f: 0.06, b: 0.074 },
+    { at: 0.19, r: 0.051, f: 0.052, b: 0.056 },
+    { at: 0.12, r: 0.048, f: 0.05, b: 0.05 },
+    { at: 0.07, r: 0.044, f: 0.044, b: 0.044 },
+  ];
+  // The shorts leg tilts out a touch, like the cut of real shorts.
+  const g = loft(rings, 20, 'y', [x, 0, 0], (_a, y) => {
+    if (y > 0.81) return S.Shorts;
+    if (y > 0.795) return keeper ? S.Shorts : S.Shirt;
+    if (y > 0.52) return S.Skin;
+    if (y > 0.48) return S.Trim;
+    if (y > 0.11) return S.Sock;
+    return S.Boot;
+  });
+  const up = side > 0 ? B.LeftUpLeg : B.RightUpLeg;
+  const kn = side > 0 ? B.LeftLeg : B.RightLeg;
+  const ft = side > 0 ? B.LeftFoot : B.RightFoot;
+  return skin(g, (p) => chain(-p.y, [[B.Hips, -9], [up, -1.1], [kn, -0.585], [ft, -0.115]], 0.05));
+}
+
+function bootPart(side: 1 | -1) {
+  const x = REST[B.LeftFoot][0] * side;
+  const shoe = (yMin: number, yMax: number, sx: number, sz: number) => {
+    const g = ball(0.07, 20, 14);
+    const bp = g.attributes.position;
+    for (let i = 0; i < bp.count; i++) bp.setXYZ(i, bp.getX(i) * sx, Math.min(yMax, Math.max(yMin, bp.getY(i) * 0.75)), bp.getZ(i) * sz);
+    return g;
+  };
+  // Upper, then a slightly wider sole plate following the same outline.
+  const boot = paint(shoe(-0.03, 1, 0.86, 1.95), S.Boot);
+  const sole = paint(shoe(-0.044, -0.026, 0.9, 2.0), S.Sole);
+  const stripe = paint(new THREE.TorusGeometry(0.058, 0.007, 4, 18, Math.PI * 0.7).rotateY(Math.PI / 2).rotateX(-0.2), S.BootAccent);
+  at(stripe, side * 0.05, 0.02, 0.04);
+  const g = merge([boot, sole, stripe]);
+  at(g, x, 0.044, 0.045);
+  const ft = side > 0 ? B.LeftFoot : B.RightFoot;
+  const toe = side > 0 ? B.LeftToeBase : B.RightToeBase;
+  return skin(g, (p) => chain(p.z, [[ft, -9], [toe, 0.11]], 0.04));
+}
+
+/** Arm from the shoulder to the wrist, built in the T-pose along ±x. */
+function armPart(side: 1 | -1, keeper: boolean, band: boolean) {
+  const o = REST[B.LeftArm];
+  const rings: Ring[] = [
+    { at: -0.03, r: 0.06, f: 0.062, b: 0.062 },
+    { at: 0.0, r: 0.084, f: 0.082, b: 0.084 },
+    { at: 0.06, r: 0.08, f: 0.077, b: 0.079 },
+    { at: 0.135, r: 0.071, f: 0.068, b: 0.07 },
+    { at: 0.15, r: 0.07, f: 0.067, b: 0.069 },
+    { at: 0.155, r: 0.058, f: 0.056, b: 0.058 },
+    { at: 0.22, r: 0.057, f: 0.058, b: 0.054 },
+    { at: 0.29, r: 0.048, f: 0.046, b: 0.048 },
+    { at: 0.31, r: 0.046, f: 0.045, b: 0.047 },
+    { at: 0.37, r: 0.05, f: 0.05, b: 0.048 },
+    { at: 0.46, r: 0.042, f: 0.041, b: 0.04 },
+    { at: 0.545, r: 0.034, f: 0.034, b: 0.032 },
+    { at: 0.585, r: 0.031, f: 0.031, b: 0.03 },
+  ];
+  const g = loft(rings, 18, 'x', [o[0] * side, o[1], o[2]], (_a, s) => {
+    if (keeper) return s > 0.53 ? S.Trim : S.Shirt;
+    if (s < 0.13) return S.Shirt;
+    if (s < 0.155) return S.Trim;
+    if (band && s > 0.47 && s < 0.53) return S.Wrist;
+    return S.Skin;
+  }, side);
+  const [sh, arm, fore, hand] = side > 0 ? [B.LeftShoulder, B.LeftArm, B.LeftForeArm, B.LeftHand] : [B.RightShoulder, B.RightArm, B.RightForeArm, B.RightHand];
+  skin(g, (p) => chain((p.x * side) - o[0], [[sh, -9], [arm, -0.005], [fore, 0.31], [hand, 0.57]], 0.04));
+  if (band && !keeper) {
+    const wb = paint(new THREE.CylinderGeometry(0.046, 0.046, 0.06, 16).rotateZ(Math.PI / 2), S.Wrist);
+    at(wb, side * (o[0] + 0.5), o[1], o[2]);
+    return [g, skin(wb, rigid(fore))];
+  }
+  return [g];
+}
+
+function handPart(side: 1 | -1, keeper: boolean) {
+  const o = REST[B.LeftHand];
+  const k = keeper ? 1.2 : 1;
+  const palm = paint(ball(0.046 * k, 12, 10).scale(1.15, 0.62, 0.9), keeper ? S.Glove : S.Skin);
+  at(palm, side * (o[0] + 0.062), o[1] - 0.004, o[2] + 0.004);
+  const thumb = paint(ball(0.018 * k, 8, 6).scale(1.6, 1, 1), keeper ? S.Glove : S.Skin);
+  at(thumb, side * (o[0] + 0.03), o[1] - 0.01, o[2] + 0.036);
+  const hand = side > 0 ? B.LeftHand : B.RightHand;
+  return [skin(palm, rigid(hand)), skin(thumb, rigid(hand))];
+}
+
+/** Rotates a T-pose arm part down into the skinning pose. */
+function lower(g: THREE.BufferGeometry, side: 1 | -1) {
+  const o = REST[B.LeftArm];
+  const m = new THREE.Matrix4().makeTranslation(side * o[0], o[1], o[2])
+    .multiply(new THREE.Matrix4().makeRotationZ(-side * ARM_BIND))
+    .multiply(new THREE.Matrix4().makeTranslation(-side * o[0], -o[1], -o[2]));
+  return g.applyMatrix4(m);
+}
+
+const HEAD_K = 0.94;
+
+/** Head and face, carried by the head bone. */
+function headPart(app: Appearance, band: '' | 'band' | 'alice', earring: boolean) {
+  const g = headGeo(app, band, earring).clone();
+  // Slightly smaller than the old figure's head: athletic proportions, same face.
+  g.translate(-HEAD_C.x, -HEAD_C.y, -HEAD_C.z).scale(HEAD_K, HEAD_K, HEAD_K).translate(HEAD_C.x, HEAD_C.y, HEAD_C.z);
+  g.translate(...REST[B.Head]);
+  return skin(g, rigid(B.Head));
+}
+
+function neckwearPart(style: string) {
+  let g: THREE.BufferGeometry;
+  if (style === 'snood') g = paint(at(new THREE.CylinderGeometry(0.09, 0.104, 0.12, 20, 1, true), 0, 1.85, 0.004), S.Neck);
+  else if (style === 'medal') {
+    const ribbon = paint(new THREE.TorusGeometry(0.105, 0.012, 6, 28).rotateX(Math.PI / 2 - 0.6).scale(1, 1.5, 1), S.Trim);
+    at(ribbon, 0, 1.75, 0.05);
+    const disc = paint(new THREE.CylinderGeometry(0.05, 0.05, 0.014, 20).rotateX(Math.PI / 2), S.Neck);
+    at(disc, 0, 1.6, torsoZ(0, 1.6, 1) + 0.01);
+    g = merge([ribbon, disc]);
+  } else g = paint(at(new THREE.TorusGeometry(0.096, 0.011, 6, 30).rotateX(Math.PI / 2 - 0.5), 0, 1.785, 0.05), S.Neck);
+  return skin(g, (p) => (p.y > 1.8 ? [[B.Neck, 1]] : [[B.Spine2, 1]]));
+}
+
+function crestPart() {
+  const crest = paint(ball(0.03, 10, 8).scale(1, 1.15, 0.35), S.Trim);
+  at(crest, 0.095, 1.565, torsoZ(0.095, 1.565, 1) - 0.004);
+  return skin(crest, rigid(B.Spine2));
+}
+
+/** The whole body as one geometry, cached per look. */
+function bodyGeo(app: Appearance, pattern: Pattern, keeper: boolean, band: boolean, bandKind: '' | 'band' | 'alice', earring: boolean, neck: string) {
+  const key = `body|${pattern}|${keeper}|${band}|${bandKind}|${earring}|${neck}|${app.hair}|${app.beard}|${app.face}|${app.faceShape}|${app.eyes}|${app.brows}|${app.nose}|${app.mouth}|${app.marks}`;
+  return cached(key, () => {
+    const parts = [torsoPart(pattern, keeper), neckPart(), headPart(app, bandKind, earring), crestPart()];
+    for (const s of [1, -1] as const) {
+      parts.push(legPart(s, keeper), bootPart(s));
+      for (const g of [...armPart(s, keeper, band), ...handPart(s, keeper)]) parts.push(lower(g, s));
+    }
+    if (neck) parts.push(neckwearPart(neck));
+    return merge(parts);
+  });
+}
+
 const geo = { ring: new THREE.RingGeometry(0.72, 0.9, 40).rotateX(-Math.PI / 2) };
-const numberPlane = new THREE.PlaneGeometry(0.21, 0.21);
+const numberPlane = new THREE.PlaneGeometry(0.2, 0.2);
+
+/**
+ * Training pose names → clip, and where in the 0..1 progress the contact sits.
+ * The drill dive stays hand-made: it springs back to the spot where the drill expects the keeper.
+ */
+const SCRUB: Record<string, [string, number]> = { kick: ['shot', 0.45], slide: ['slide', 0.3], dive: ['ph:dive', 0.45], header: ['header', 0.5] };
+
+const tmpScale = new THREE.Vector3();
+
+export type { ActionKind, ActOpts };
 
 export class Figure {
   root = new THREE.Group();
+  /** Holds the skinned body; leans with acceleration. */
   body = new THREE.Group();
-  /** Chest, arms and head: twists against the hips when running. */
-  private upper = new THREE.Group();
-  private head = new THREE.Group();
-  private legL: THREE.Group;
-  private legR: THREE.Group;
-  private kneeL: THREE.Group;
-  private kneeR: THREE.Group;
-  private elbowL: THREE.Group;
-  private elbowR: THREE.Group;
-  /** Body height above the root: on a base, or standing on the grass. */
-  private lift: number;
-  /** Local velocity (m/s): forward and sideways. Set by the match viewer for backpedals and side-steps. */
+  /** Local velocity (m/s): forward and to the player's left. Set by the match viewer. */
   fwd = 0;
   side = 0;
   /** Lean from acceleration (radians), forward and into turns. */
   leanX = 0;
   leanZ = 0;
-  private armL: THREE.Group;
-  private armR: THREE.Group;
   ring: THREE.Mesh;
-  phase = Math.random() * 10;
   pos = new THREE.Vector2();
   vel = new THREE.Vector2();
   heading = 0;
@@ -705,22 +895,30 @@ export class Figure {
   celStyle = '';
   /** True for the goalscorer, who does their own celebration. */
   star = false;
-  private celT = 0;
-  /** One-shot training pose layered over the run cycle; `poseK` is its 0..1 progress. */
+  /** One-shot training pose held at progress `poseK` (0..1; juggling counts beats). */
   pose: '' | 'kick' | 'juggle' | 'slide' | 'dive' | 'header' = '';
   poseK = 0;
   poseSide = 1;
+  /** A world point the head and chest turn toward (usually the ball). */
+  look: THREE.Vector3 | null = null;
+  readonly keeper: boolean;
+  readonly bones: THREE.Bone[];
+  private anim: Animator;
+  /** Body height above the root: on a base, or standing on the grass. */
+  private lift: number;
 
   constructor(kit: Kit, look: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped, opts: { base?: boolean; number?: number } = {}) {
+    loadMocap(`${import.meta.env.BASE_URL}anims/mocap.json`);
     // Older and bot looks may lack newer features; fill them in consistently.
     const app = sanitizeAppearance(look);
     const withBase = opts.base !== false;
+    this.keeper = isKeeper;
     this.lift = withBase ? 0.12 : 0;
     const g = gear(eq);
     this.celStyle = g.celebration?.style ?? '';
     const k = isKeeper ? gkKit : kit;
     // Deeper tones lose their warmth under the lights; lift them so they read as rich browns.
-    const skin = lift(SKIN_TONES[app.skin] ?? SKIN_TONES[1], 0.7);
+    const skinTone = lift(SKIN_TONES[app.skin] ?? SKIN_TONES[1], 0.7);
     const hair = lift(HAIR_COLORS[app.hairColor] ?? HAIR_COLORS[0], 0.85);
     const boot = g.boots?.c1 ?? BOOT_COLORS[app.boots] ?? BOOT_COLORS[0];
     const fabric = (color: string, rough = 0.78): SlotLook => ({ color, rough, coat: 0.04 });
@@ -729,69 +927,62 @@ export class Figure {
     looks[S.Trim] = fabric(k.secondary);
     looks[S.Shorts] = isKeeper ? fabric('#1b1d21', 0.7) : fabric(k.secondary, 0.7);
     looks[S.Sock] = fabric(k.primary, 0.85);
-    looks[S.Skin] = { color: skin, rough: 0.6, coat: 0.04 };
+    looks[S.Skin] = { color: skinTone, rough: 0.6, coat: 0.04 };
     looks[S.Hair] = { color: hair, rough: 0.68, coat: 0.08 };
     looks[S.Boot] = g.boots?.metal ? { color: boot, rough: 0.2, metal: 1, coat: 0.8 } : { color: boot, rough: 0.28, coat: 0.85 };
     looks[S.BootAccent] = { color: g.boots?.c2 ?? contrast(boot), rough: 0.35, coat: 0.6 };
     looks[S.Dark] = { color: '#17110d', rough: 0.15, coat: 1 };
     looks[S.EyeWhite] = { color: '#f2eee8', rough: 0.2, coat: 0.9 };
-    looks[S.Lip] = { color: mix(skin, '#6b2a22', 0.38), rough: 0.45, coat: 0.2 };
+    looks[S.Lip] = { color: mix(skinTone, '#6b2a22', 0.38), rough: 0.45, coat: 0.2 };
     looks[S.Glove] = { color: '#eef2f4', rough: 0.55, coat: 0.2 };
     looks[S.Wrist] = gearLook(g.wrist, k.secondary);
     looks[S.Band] = gearLook(g.head, k.secondary);
     looks[S.Neck] = gearLook(g.neck, '#ffcf3d');
     if (!g.neck) Object.assign(looks[S.Neck], { rough: 0.25, metal: 1, coat: 0.6 });
     looks[S.Gold] = { color: '#ffcf3d', rough: 0.2, metal: 1, coat: 0.6 };
-    looks[S.Stubble] = { color: mix(skin, hair, 0.42), rough: 0.85 };
-    looks[S.StubbleDark] = { color: mix(skin, hair, 0.68), rough: 0.9 };
+    looks[S.Stubble] = { color: mix(skinTone, hair, 0.42), rough: 0.85 };
+    looks[S.StubbleDark] = { color: mix(skinTone, hair, 0.68), rough: 0.9 };
     looks[S.Iris] = { color: EYE_COLORS[app.eyeColor] ?? EYE_COLORS[0], rough: 0.15, coat: 1 };
     looks[S.Brow] = { color: mix(hair, '#120c08', 0.25), rough: 0.8 };
-    looks[S.Socket] = { color: mix(skin, '#3a1d12', 0.16), rough: 0.6 };
+    looks[S.Socket] = { color: mix(skinTone, '#3a1d12', 0.16), rough: 0.6 };
     looks[S.Teeth] = { color: '#f4efe6', rough: 0.3, coat: 0.6 };
-    looks[S.Mark] = { color: mix(skin, '#5a2e18', 0.45), rough: 0.6 };
-    looks[S.Scar] = { color: mix(skin, '#f0c9bd', 0.55), rough: 0.4, coat: 0.3 };
-    looks[S.Blush] = { color: mix(skin, '#e0605a', 0.3), rough: 0.55 };
+    looks[S.Mark] = { color: mix(skinTone, '#5a2e18', 0.45), rough: 0.6 };
+    looks[S.Scar] = { color: mix(skinTone, '#f0c9bd', 0.55), rough: 0.4, coat: 0.3 };
+    looks[S.Blush] = { color: mix(skinTone, '#e0605a', 0.3), rough: 0.55 };
     looks[S.Base] = { color: k.secondary, rough: 0.35, coat: 0.8 };
     looks[S.Sole] = { color: g.boots?.c2 ?? mix(boot, '#101010', 0.55), rough: 0.5, coat: 0.3 };
     const mat = paletteMaterial(looks);
 
-    const mesh = (geom: THREE.BufferGeometry, parent: THREE.Object3D, shadow = true) => {
-      const x = new THREE.Mesh(geom, mat);
-      x.castShadow = shadow;
-      parent.add(x);
-      return x;
-    };
-
     // Base (team-coloured puck) and a selection ring.
-    if (withBase) mesh(baseGeo, this.root).receiveShadow = true;
+    if (withBase) {
+      const base = new THREE.Mesh(baseGeo, mat);
+      base.castShadow = base.receiveShadow = true;
+      this.root.add(base);
+    }
     this.ring = new THREE.Mesh(geo.ring, new THREE.MeshBasicMaterial({ color: 0xc6ff3d, transparent: true, opacity: 0, depthWrite: false }));
     this.ring.position.y = 0.03;
     this.root.add(this.ring);
 
+    // One skinned mesh for the whole player, bound with the arms lowered.
+    const headIt = g.head;
+    const bandKind = headIt ? (headIt.style === 'alice' ? 'alice' : 'band') : app.accessory === 1 ? 'band' : '';
+    const neck = g.neck ? g.neck.style ?? 'chain' : app.accessory === 4 ? 'chain' : '';
+    const geom = bodyGeo(app, isKeeper ? 'plain' : kitPattern(kit), isKeeper, !!g.wrist || app.accessory === 3, bandKind, app.accessory === 2, neck);
+    this.bones = makeBones();
+    setBindPose(this.bones);
+    const mesh = new THREE.SkinnedMesh(geom, mat);
+    mesh.add(this.bones[0]);
+    mesh.updateMatrixWorld(true);
+    mesh.bind(new THREE.Skeleton(this.bones));
+    // Dives and slides reach well beyond the standing pose.
+    mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1.1, 0), 2.6);
+    mesh.castShadow = true;
     this.body.position.y = this.lift;
+    this.body.add(mesh);
     this.root.add(this.body);
-    mesh(pelvisGeo(), this.body);
 
-    const mkLeg = (side: number) => {
-      const hip = new THREE.Group();
-      hip.position.set(side * 0.105, HIP_Y, 0);
-      mesh(thighGeo(isKeeper), hip);
-      const knee = new THREE.Group();
-      knee.position.y = -THIGH;
-      mesh(shinGeo(), knee);
-      hip.add(knee);
-      this.body.add(hip);
-      return [hip, knee] as const;
-    };
-    [this.legL, this.kneeL] = mkLeg(-1);
-    [this.legR, this.kneeR] = mkLeg(1);
-
-    this.upper.position.y = WAIST_Y;
-    this.body.add(this.upper);
-    mesh(torsoGeo(isKeeper ? 'plain' : kitPattern(kit), isKeeper), this.upper);
-    if (g.neck || app.accessory === 4) mesh(neckwearGeo(g.neck?.style ?? 'chain'), this.upper);
     if (opts.number !== undefined) {
-      // Shirt number on the back.
+      // Shirt number on the back, riding on the upper spine.
       const c = document.createElement('canvas');
       c.width = c.height = 128;
       const g2 = c.getContext('2d')!;
@@ -806,222 +997,68 @@ export class Figure {
       const tex = new THREE.CanvasTexture(c);
       tex.colorSpace = THREE.SRGBColorSpace;
       const num = new THREE.Mesh(numberPlane, new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -2 }));
-      num.position.set(0, 0.32, -0.181);
-      num.rotation.y = Math.PI;
-      this.upper.add(num);
+      const s2 = REST[B.Spine2];
+      num.position.set(0, 1.47 - s2[1], torsoZ(0, 1.47, -1) - 0.006 - s2[2]);
+      num.rotation.set(-0.08, Math.PI, 0);
+      this.bones[B.Spine2].add(num);
     }
-
-    const band = !!g.wrist || app.accessory === 3;
-    const mkArm = (side: number) => {
-      const sh = new THREE.Group();
-      sh.position.set(side * SHOULDER.x, SHOULDER.y, 0);
-      mesh(upperArmGeo(isKeeper), sh);
-      const elbow = new THREE.Group();
-      elbow.position.y = -UPPER_ARM;
-      mesh(forearmGeo(isKeeper, band), elbow);
-      sh.add(elbow);
-      sh.rotation.z = side * 0.1;
-      this.upper.add(sh);
-      return [sh, elbow] as const;
-    };
-    [this.armL, this.elbowL] = mkArm(-1);
-    [this.armR, this.elbowR] = mkArm(1);
-
-    this.head.position.y = NECK_TOP;
-    const headIt = g.head;
-    const bandKind = headIt ? (headIt.style === 'alice' ? 'alice' : 'band') : app.accessory === 1 ? 'band' : '';
-    mesh(headGeo(app, bandKind, app.accessory === 2), this.head);
-    this.upper.add(this.head);
+    this.anim = new Animator(this.bones, this.root);
     this.root.scale.setScalar(SCALE);
   }
 
-  /** Advances the run cycle. `speed` in m/s. */
-  animate(dt: number, speed: number, time: number) {
-    const run = Math.min(1, speed / 7);
-    // Strides lengthen with speed; cadence rises more slowly. Standing still the legs settle.
-    const moving = speed > 0.25 ? 1 : 0;
-    this.phase += dt * (speed > 0.25 ? 5.2 + speed * 0.95 : 0);
-    const shuffle = Math.abs(this.side) > Math.abs(this.fwd) * 1.3 && speed < 4.5 && speed > 0.25;
-    const back = !shuffle && this.fwd < -0.4;
-    const amp = (0.12 + run * 0.95) * moving * (back ? 0.6 : 1) * (shuffle ? 0.25 : 1);
-    const sp = Math.sin(this.phase);
-    const cp = Math.cos(this.phase);
-    const sw = sp * amp * (back ? -1 : 1);
-    const b = this.body;
-    this.legL.rotation.set(sw, 0, 0);
-    this.legR.rotation.set(-sw, 0, 0);
-    // Knees fold as each leg swings through: deep at a sprint, soft at a jog.
-    const flex = (0.2 + run * 1.35) * moving;
-    const fl = back ? Math.max(0, cp) : Math.max(0, -cp);
-    const fr = back ? Math.max(0, -cp) : Math.max(0, cp);
-    this.kneeL.rotation.x = 0.06 + flex * fl * fl;
-    this.kneeR.rotation.x = 0.06 + flex * fr * fr;
-    if (shuffle) {
-      // Side-step: legs open and close, a little hop.
-      const open = Math.abs(sp) * 0.32;
-      const sgn = Math.sign(this.side);
-      this.legL.rotation.z = -open * (sgn > 0 ? 0.6 : 1);
-      this.legR.rotation.z = open * (sgn > 0 ? 1 : 0.6);
-    }
-    this.armL.rotation.set(-sw * 0.85, 0, -0.1 - run * 0.08);
-    this.armR.rotation.set(sw * 0.85, 0, 0.1 + run * 0.08);
-    // Elbows bend more the faster they pump; shoulders counter-rotate against the hips.
-    const elbow = -(0.28 + run * 1.0) * (shuffle ? 0.8 : 1) - (moving ? 0 : 0.05);
-    this.elbowL.rotation.set(elbow + Math.max(0, sw) * 0.25, 0, 0);
-    this.elbowR.rotation.set(elbow + Math.max(0, -sw) * 0.25, 0, 0);
-    this.upper.rotation.set(0, sw * 0.16 * (back ? -1 : 1), 0);
-    this.head.rotation.set(0, -sw * 0.12, 0);
-    const bounce = shuffle ? Math.abs(sp) * 0.06 : Math.abs(cp) * (0.025 + run * 0.06) * moving;
-    b.position.set(0, this.lift + bounce, 0);
-    b.rotation.set((back ? -0.06 : run * 0.2) + this.leanX, 0, this.leanZ);
-    // Eyes stay on the play: the head counters most of the body lean.
-    this.head.rotation.x = -b.rotation.x * 0.65;
-    if (this.celebrate <= 0) {
-      this.celT = 0;
-      // Idle breathing.
-      if (speed < 0.25) b.rotation.z = Math.sin(time * 1.7 + this.phase) * 0.015;
-      this.applyPose();
-      return;
-    }
-    this.celT += dt;
-    const t = this.celT;
-    switch (this.star ? this.celStyle : '') {
-      case 'plane': {
-        // Arms out, banking left and right.
-        this.armL.rotation.set(0, 0, -1.5);
-        this.armR.rotation.set(0, 0, 1.5);
-        this.elbowL.rotation.x = this.elbowR.rotation.x = -0.05;
-        b.rotation.z = Math.sin(t * 2.2) * 0.38;
-        b.rotation.x = 0.22;
-        break;
-      }
-      case 'slide': {
-        // Drop to the knees, lean back, arms wide.
-        const k = Math.min(1, t / 0.35);
-        b.position.y = this.lift - 0.42 * k;
-        b.rotation.x = -0.32 * k;
-        this.legL.rotation.x = 1.45 * k;
-        this.legR.rotation.x = 1.45 * k;
-        this.armL.rotation.set(-0.6, 0, -2.3 * k);
-        this.armR.rotation.set(-0.6, 0, 2.3 * k);
-        this.kneeL.rotation.x = this.kneeR.rotation.x = 1.5 * k;
-        this.elbowL.rotation.x = this.elbowR.rotation.x = -0.3;
-        break;
-      }
-      case 'spin': {
-        const u = (t % 1.3) / 1.3;
-        const hop = Math.sin(Math.min(1, u / 0.7) * Math.PI);
-        b.position.y = this.lift + hop * 0.65;
-        b.rotation.y = u < 0.7 ? (u / 0.7) * Math.PI * 2 : 0;
-        this.armL.rotation.set(0, 0, -1.2 - hop);
-        this.armR.rotation.set(0, 0, 1.2 + hop);
-        this.elbowL.rotation.x = this.elbowR.rotation.x = -0.2;
-        break;
-      }
-      case 'flip': {
-        // A backflip every 1.8s, rotating around the hips.
-        const u = (t % 1.8) / 1.8;
-        const air = Math.min(1, Math.max(0, (u - 0.1) / 0.5));
-        const th = -air * Math.PI * 2;
-        const h = Math.sin(air * Math.PI) * 1.1;
-        const c = 0.95;
-        b.rotation.set(th, 0, 0);
-        b.position.set(0, this.lift + h + c - c * Math.cos(th), -c * Math.sin(th));
-        const tuck = Math.sin(air * Math.PI);
-        this.legL.rotation.x = -1.2 * tuck;
-        this.legR.rotation.x = -1.2 * tuck;
-        this.armL.rotation.set(-2.6 + tuck * 1.4, 0, -0.3);
-        this.armR.rotation.set(-2.6 + tuck * 1.4, 0, 0.3);
-        if (u > 0.6) {
-          this.armL.rotation.set(-2.8, 0, -0.4);
-          this.armR.rotation.set(-2.8, 0, 0.4);
-        }
-        break;
-      }
-      default: {
-        // Arms up, fists pumping, little hops.
-        this.armL.rotation.x = -2.6 + Math.sin(time * 9) * 0.25;
-        this.armR.rotation.x = -2.6 + Math.cos(time * 9) * 0.25;
-        this.elbowL.rotation.x = -0.5 - Math.max(0, Math.sin(time * 9)) * 0.6;
-        this.elbowR.rotation.x = -0.5 - Math.max(0, Math.cos(time * 9)) * 0.6;
-        this.upper.rotation.y = 0;
-        b.position.y = this.lift + Math.abs(Math.sin(time * 7 + this.phase)) * 0.25;
-      }
-    }
+  /**
+   * Plays a one-shot action (kick, trap, header, tackle, keeper set, dive,
+   * catch…), warped so its contact lands `contactIn` real seconds from now.
+   * `side` -1 is the left foot, or a dive to the player's right.
+   */
+  act(kind: ActionKind, opts?: ActOpts) {
+    this.anim.act(kind, opts);
   }
 
-  private applyPose() {
-    const k = this.poseK;
-    const b = this.body;
-    switch (this.pose) {
-      case 'kick': {
-        // Wind up, strike through the ball, follow through.
-        const th = k < 0.35 ? 0.9 * (k / 0.35) : k < 0.55 ? 0.9 - 2.3 * ((k - 0.35) / 0.2) : -1.4 * (1 - (k - 0.55) / 0.45);
-        this.legR.rotation.x = th;
-        this.legL.rotation.x = 0.1;
-        this.kneeR.rotation.x = k < 0.4 ? 1.3 * (k / 0.4) : Math.max(0.05, 1.3 * (1 - (k - 0.4) / 0.15));
-        this.kneeL.rotation.x = 0.2;
-        this.armL.rotation.z = -0.75;
-        this.armR.rotation.z = 0.5;
-        this.elbowL.rotation.x = -0.35;
-        this.elbowR.rotation.x = -0.5;
-        this.upper.rotation.y = k < 0.45 ? 0.25 * (k / 0.45) : 0.25 - 0.55 * Math.min(1, (k - 0.45) / 0.3);
-        b.rotation.x = k > 0.35 && k < 0.75 ? -0.12 : 0.04;
-        break;
-      }
-      case 'juggle': {
-        // Foot up as the ball drops to it on each whole beat, alternating feet.
-        const s = Math.pow(Math.max(0, Math.cos(k * Math.PI * 2)), 2);
-        const right = Math.floor(k + 0.5) % 2 === 0;
-        this.legR.rotation.x = right ? -0.85 * s : 0;
-        this.legL.rotation.x = right ? 0 : -0.85 * s;
-        this.armL.rotation.z = -0.45;
-        this.armR.rotation.z = 0.45;
-        break;
-      }
-      case 'slide': {
-        const d = Math.min(1, k * 3) * (k > 0.8 ? (1 - k) / 0.2 : 1);
-        b.position.y = this.lift - 0.45 * d;
-        b.rotation.x = -0.75 * d;
-        this.legR.rotation.x = -1.45 * d;
-        this.legL.rotation.x = -0.9 * d;
-        this.kneeR.rotation.x = 0.05;
-        this.kneeL.rotation.x = 0.9 * d;
-        this.armL.rotation.set(0.6 * d, 0, -1.2 * d);
-        this.armR.rotation.set(0.6 * d, 0, 1.0 * d);
-        this.elbowL.rotation.x = this.elbowR.rotation.x = -0.2;
-        this.upper.rotation.y = 0;
-        break;
-      }
-      case 'header': {
-        // Leap, arch back, snap the head through the ball.
-        const j = Math.sin(Math.min(1, k) * Math.PI);
-        b.position.y = this.lift + j * 0.75;
-        b.rotation.x = k < 0.45 ? -0.35 * (k / 0.45) : -0.35 + 0.75 * Math.min(1, (k - 0.45) / 0.2);
-        this.legL.rotation.x = 0.3 * j;
-        this.legR.rotation.x = -0.2 * j;
-        this.kneeL.rotation.x = 1.1 * j;
-        this.kneeR.rotation.x = 0.7 * j;
-        this.armL.rotation.set(-1.2 * j, 0, -0.9 * j);
-        this.armR.rotation.set(-1.2 * j, 0, 0.9 * j);
-        this.elbowL.rotation.x = this.elbowR.rotation.x = -1.1 * j;
-        this.upper.rotation.y = 0;
-        this.head.rotation.x = b.rotation.x < 0 ? 0.2 : -0.35;
-        break;
-      }
-      case 'dive': {
-        const d = Math.sin((Math.min(1, k * 1.4) * Math.PI) / 2) * (k > 0.85 ? (1 - k) / 0.15 : 1);
-        const s = this.poseSide;
-        b.rotation.z = -s * 1.35 * d;
-        b.position.set(s * 1.1 * d, this.lift + 0.45 * Math.sin(Math.min(1, k * 1.6) * Math.PI), 0);
-        this.armL.rotation.set(0, 0, -2.8 * d);
-        this.armR.rotation.set(0, 0, 2.8 * d);
-        this.elbowL.rotation.x = this.elbowR.rotation.x = -0.1;
-        this.upper.rotation.y = 0;
-        this.kneeL.rotation.x = 0.5 * d;
-        this.kneeR.rotation.x = 0.2 * d;
-        break;
-      }
+  get acting() {
+    return this.anim.acting;
+  }
+
+  /** Advances the animation. `speed` in m/s. */
+  animate(dt: number, speed: number, _time = 0) {
+    this.body.position.y = this.lift;
+    this.body.rotation.set(this.leanX, 0, this.leanZ);
+    let scrub: AnimInput['scrub'] = null;
+    if (this.pose === 'juggle') {
+      scrub = { name: 'juggle', t: (((this.poseK / 2) % 1) + 1) % 1, mirror: false };
+    } else if (this.pose) {
+      const [name, at] = SCRUB[this.pose];
+      const clip = getClip(name, this.pose === 'dive' && this.poseSide < 0);
+      const dur = duration(clip);
+      const c = clip.contact ?? dur * 0.4;
+      const k = Math.min(1, Math.max(0, this.poseK));
+      scrub = { name, t: k < at ? (k / at) * c : c + ((k - at) / (1 - at)) * (dur - c), mirror: this.pose === 'dive' && this.poseSide < 0 };
+    }
+    let cel: string | null = null;
+    if (this.celebrate > 0) {
+      const style = this.star && this.celStyle ? `cel_${this.celStyle}` : 'cel_cheer';
+      cel = hasClip(style) ? style : 'cel_cheer';
+    }
+    this.root.getWorldScale(tmpScale);
+    this.anim.update(dt, {
+      speed,
+      fwd: this.fwd,
+      side: this.side,
+      scale: tmpScale.x,
+      keeper: this.keeper,
+      celebrate: cel,
+      scrub,
+      look: this.look,
+      lift: this.lift,
+    });
+    const sh = this.anim.shift;
+    if (sh.lengthSq() > 0) {
+      // Hand an action's travel (a dive) to the root, so the body stays where it landed.
+      sh.applyQuaternion(this.root.quaternion).multiplyScalar(this.root.scale.x);
+      this.root.position.add(sh);
+      this.pos.x += sh.x;
+      this.pos.y += sh.z;
+      sh.set(0, 0, 0);
     }
   }
 }
