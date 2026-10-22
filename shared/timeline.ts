@@ -12,24 +12,28 @@ import type { MatchEvent } from './sim/types.ts';
  */
 export type Segment = [number, number, number, number];
 
-const SLOW_RATE = 1.7; // game seconds per real second inside highlights
+const SLOW_RATE = 1; // highlights play at true speed
 const MIN_FAST = 6;
 const MAX_FAST = 70;
+/** Share of the broadcast that highlights may fill; the rest fast-forwards. */
+const SLOW_SHARE = 0.6;
 
-function isHighlight(e: MatchEvent): [number, number] | null {
-  if (e.k === 'goal') return [e.t - 16, e.t + 9];
-  if (e.k === 'penalty') return [e.t - 6, e.t + 14];
-  if (e.k === 'shot') return [e.t - 12, e.t + 3];
-  if (e.k === 'card' && e.o !== 'yellow') return [e.t - 6, e.t + 4];
-  if (e.k === 'freekick' && e.o === 'direct') return [e.t - 3, e.t + 4];
-  if (e.k === 'corner') return [e.t - 2, e.t + 6];
-  if (e.k === 'kickoff') return [e.t - 1, e.t + 6];
+/** A highlight window around an event, and how much it matters. */
+function isHighlight(e: MatchEvent): [number, number, number] | null {
+  if (e.k === 'goal') return [e.t - 14, e.t + 8, 10];
+  if (e.k === 'penalty') return [e.t - 4, e.t + 14, 8];
+  if (e.k === 'shot') return [e.t - 10, e.t + 3, 3 + (e.xg ?? 0) * 10];
+  if (e.k === 'card' && e.o !== 'yellow') return [e.t - 6, e.t + 4, 6];
+  if (e.k === 'freekick' && e.o === 'direct') return [e.t - 3, e.t + 4, 2];
+  if (e.k === 'corner') return [e.t - 2, e.t + 6, 1];
+  if (e.k === 'kickoff') return [e.t - 1, e.t + 6, e.t < 10 ? 5 : 0.5];
   return null;
 }
 
 export function buildTimeline(events: MatchEvent[], halftimeAt: number, duration: number): Segment[] {
-  // 1. Highlight windows, merged.
-  const wins: [number, number][] = [];
+  const budget = duration / LIVE_RATE;
+  // 1. Highlight windows, most important first, until the slow-motion budget is spent.
+  const cands: [number, number, number][] = [];
   for (const e of events) {
     const w = isHighlight(e);
     if (!w) continue;
@@ -41,14 +45,32 @@ export function buildTimeline(events: MatchEvent[], halftimeAt: number, duration
     }
     a = Math.max(0, a);
     b = Math.min(duration, b);
-    if (b <= a) continue;
+    if (b > a) cands.push([a, b, w[2]]);
+  }
+  cands.sort((x, y) => y[2] - x[2] || x[0] - y[0]);
+  const chosen: [number, number][] = [];
+  let used = 0;
+  const cover = (a: number, b: number) => {
+    // Extra slow time this window adds on top of the ones already chosen.
+    let extra = b - a;
+    for (const [c, d] of chosen) extra -= Math.max(0, Math.min(b, d) - Math.max(a, c));
+    return Math.max(0, extra);
+  };
+  for (const [a, b] of cands) {
+    const add = cover(a, b);
+    if (used + add > budget * SLOW_SHARE) continue;
+    chosen.push([a, b]);
+    used += add;
+  }
+  chosen.sort((x, y) => x[0] - y[0]);
+  const wins: [number, number][] = [];
+  for (const [a, b] of chosen) {
     const last = wins[wins.length - 1];
-    if (last && a <= last[1] + 2) last[1] = Math.max(last[1], b);
+    if (last && a <= last[1] + 2 && !(last[1] <= halftimeAt && a >= halftimeAt)) last[1] = Math.max(last[1], b);
     else wins.push([a, b]);
   }
   const slow = wins.reduce((s, [a, b]) => s + (b - a), 0);
   const fast = Math.max(1, duration - slow);
-  const budget = duration / LIVE_RATE;
   const fastReal = Math.max(budget - slow / SLOW_RATE, fast / MAX_FAST);
   const fastRate = Math.min(MAX_FAST, Math.max(MIN_FAST, fast / fastReal));
 

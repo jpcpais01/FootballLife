@@ -16,6 +16,7 @@ import type { Tactics } from '../../shared/formations.ts';
 import type { MatchEvent } from '../../shared/sim/types.ts';
 import { type ActionKind, Figure, GK_KITS, type Kit } from './figures.ts';
 import { Playback } from './playback.ts';
+import type { Track } from '../../shared/sim/tracks.ts';
 import { buildStadium, PL, PW, type Stadium } from './stadium.ts';
 
 export type CameraMode = 'broadcast' | 'tactical' | 'orbit';
@@ -236,6 +237,10 @@ export class MatchViewer {
     }
   }
 
+  setTracks(tracks: Track[]) {
+    this.playback.setTracks(tracks);
+  }
+
   setEvents(events: MatchEvent[]) {
     this.playback.setEvents(events);
     this.goals = events.filter((e) => e.k === 'goal');
@@ -333,8 +338,23 @@ export class MatchViewer {
 
     // Players: steered bodies with acceleration limits, arrival, separation and ball-watching.
     if (jumped) this.fired.clear();
-    this.steer(fr, Math.max(0, gameDt), jumped, rate);
-    this.triggerActions(fr, t, rate);
+    if (fr.tracked && fr.vel) {
+      // Recorded motion: bodies are exactly where the engine had them.
+      for (let i = 0; i < 22; i++) {
+        const f = this.figures[i];
+        const v = fr.vel[i];
+        const ax = gameDt > 0 ? (v.x - f.vel.x) / Math.max(gameDt, 1e-3) : 0;
+        const ay = gameDt > 0 ? (v.y - f.vel.y) / Math.max(gameDt, 1e-3) : 0;
+        this.accel[i].x += (Math.max(-12, Math.min(12, ax)) - this.accel[i].x) * 0.2;
+        this.accel[i].y += (Math.max(-12, Math.min(12, ay)) - this.accel[i].y) * 0.2;
+        f.pos.set(fr.targets[i].x, fr.targets[i].y);
+        f.vel.set(v.x, v.y);
+      }
+      this.trackedActions(fr, t, rate);
+    } else {
+      this.steer(fr, Math.max(0, gameDt), jumped, rate);
+      this.triggerActions(fr, t, rate);
+    }
     for (let i = 0; i < 22; i++) {
       const f = this.figures[i];
       if (fr.sentOff[i]) {
@@ -469,6 +489,27 @@ export class MatchViewer {
         f.pos.x += f.vel.x * h;
         f.pos.y += f.vel.y * h;
       }
+    }
+  }
+
+  /** One-shot actions from the engine's recording, warped so contact lands on the recorded moment. */
+  private trackedActions(fr: ReturnType<Playback['frame']>, t: number, rate: number) {
+    if (rate > 3) return;
+    const map: Partial<Record<string, ActionKind>> = {
+      pass: 'pass', drive: 'shot', shot: 'shot', cross: 'cross', header: 'header', trap: 'trap',
+      tackle: 'tackle', slide: 'slide', dive: 'dive', catch: 'catch', throw: 'keeperThrow', fall: 'fall',
+    };
+    for (const [at, i, kind, detail] of fr.acts) {
+      const act = map[kind];
+      const key = `a${at}:${i}:${kind}`;
+      if (!act || this.fired.has(key) || fr.sentOff[i]) continue;
+      // Start about half a second of real time ahead of the contact.
+      const lead = (at - t) / Math.max(0.05, rate);
+      if (lead > 0.5 || lead < -0.15) continue;
+      this.fired.add(key);
+      // Dives carry their side; strikes use the left foot now and then.
+      const side: 1 | -1 = kind === 'dive' ? (detail >= 0 ? 1 : -1) : i % 5 === 3 ? -1 : 1;
+      this.figures[i].act(act, { contactIn: Math.max(0, lead), side });
     }
   }
 
