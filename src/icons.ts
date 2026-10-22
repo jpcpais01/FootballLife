@@ -37,6 +37,7 @@ const P: Record<string, string> = {
   shirt: '<path d="M8 3 3 6l2 4 2-1v12h10V9l2 1 2-4-5-3a4 4 0 0 1-8 0z"/>',
   swap: '<path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4"/>',
   sofa: '<path d="M4 11V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3M3 11h18v6H3zM5 17v2M19 17v2"/>',
+  pencil: '<path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/>',
   paint: '<path d="M4 4h13v5H4zM17 6.5h3v5h-8.5V15M10 15h3v6h-3z"/>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.6-4.5M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5M20 20v-4h-4"/>',
   whistle: '<path d="M3 11a5 5 0 1 0 10 0l8-3V5l-9 3.2A5 5 0 0 0 3 11z"/>',

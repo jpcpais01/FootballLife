@@ -7,6 +7,13 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-22T00:00:00Z',
+    entries: [
+      { title: 'Club badge studio', body: 'Club badges get a full editor. Pick from 16 shapes, 32 emblems (including a monogram of your short name), 16 patterns like stripes, hoops, checks and sunburst, and 6 border styles. Choose your own colour for the field, pattern, emblem, border, stars and text, resize, move and tilt the emblem, add up to five stars, and put your club name or founding year on a band, an arc or a ribbon. Shuffle gives you a random design to start from.' },
+      { title: 'Edit your club any time', body: 'The founder and president can now change the badge, club name, short name and kit colours whenever they like, from Edit club on the club page or the Manage tab. The club chat lets everyone know when the name or badge changes.' },
+    ],
+  },
+  {
     hour: '2026-10-21T23:30:00Z',
     entries: [
       { title: 'A cleaner top bar', body: 'The big header is gone. Your coins, the refresh button, the inbox bell and your avatar now sit together in one floating glass pill in the corner, and pages you open from another page get a floating back button.' },

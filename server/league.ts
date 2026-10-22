@@ -1,3 +1,4 @@
+import type { Badge } from '../shared/badge.ts';
 import { overall, type Attr, type Position } from '../shared/attributes.ts';
 import { KICKOFF_HOURS_UTC, LEAGUE_SIZE, MATCH_COINS, POINTS } from '../shared/config.ts';
 import { totalReal } from '../shared/timeline.ts';
@@ -265,7 +266,7 @@ export interface LineupSnapshot {
   name: string;
   short: string;
   colors: { primary: string; secondary: string };
-  badge: { shape: number; icon: number };
+  badge: Badge;
   formation: string;
   tactics: Tactics;
   players: { id: string; name: string; number: number; pos: Position; role: Position; slot: string; ovr: number; bot: boolean; app: Record<string, number>; eq?: Equipped }[];
@@ -555,7 +556,7 @@ export interface StandingRow {
   name: string;
   short: string;
   colors: { primary: string; secondary: string };
-  badge: { shape: number; icon: number };
+  badge: Badge;
   isBot: boolean;
   played: number;
   won: number;

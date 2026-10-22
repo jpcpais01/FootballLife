@@ -16,6 +16,7 @@ addRoute('/login', () => import('./pages/auth.ts').then((m) => m.authPage), fals
 addRoute('/create', () => import('./pages/create.ts').then((m) => m.createPage), false);
 addRoute('/clubs/new', () => import('./pages/clubs.ts').then((m) => m.newClubPage));
 addRoute('/clubs', () => import('./pages/clubs.ts').then((m) => m.clubsPage));
+addRoute('/club/:id/edit', () => import('./pages/clubs.ts').then((m) => m.editClubPage));
 addRoute('/club/:id', () => import('./pages/club.ts').then((m) => m.clubPage));
 addRoute('/league', () => import('./pages/league.ts').then((m) => m.leaguePage));
 addRoute('/match/:id', () => import('./pages/match.ts').then((m) => m.matchPage));

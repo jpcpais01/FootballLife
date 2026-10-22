@@ -114,6 +114,9 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
         <div class="row"><div class="input row" style="font-family:var(--display);font-weight:800;font-size:24px;letter-spacing:3px;justify-content:center">${d.club.inviteCode}</div><button class="btn" data-copy="${d.club.inviteCode}">${icon('copy')}</button></div>
         ${perms.settings ? html`<div class="row wrap"><div class="seg">${['open', 'invite'].map((m) => html`<button class="${d.club.joinMode === m ? 'on' : ''}" data-joinmode="${m}">${m === 'open' ? 'Anyone' : 'Invite only'}</button>`)}</div><button class="btn sm ghost" id="newcode">New code</button></div>` : ''}
       </div>` : ''}
+      ${perms.settings ? html`<div class="card span-12 row wrap" style="gap:16px">${badge(d.club, 64)}
+        <div class="grow"><div class="h3">Club identity</div><div class="tiny muted">Change the badge, name, short name and kit colours whenever you like.</div></div>
+        <a class="btn primary" href="/club/${d.club.id}/edit">${icon('pencil', 16)} Edit badge & name</a></div>` : ''}
       <div class="card span-7"><div class="card-head"><div class="h2">Members & roles</div></div>
         <div class="list">${humans.map((m: any) => {
           const editable = perms.roles && m.id !== state.player?.id && m.role !== 'founder' && !(d.me.role === 'president' && m.role === 'president');
@@ -173,6 +176,7 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
             </div>
           </div>
           <div class="row wrap">
+            ${me.perms?.settings ? html`<a class="btn" href="/club/${c.id}/edit">${icon('pencil', 16)} Edit club</a>` : ''}
             ${me.perms?.friendly ? html`<button class="btn primary" id="friendly">${icon('play')} Friendly</button>` : ''}
             ${me.inClub ? html`<button class="btn ghost" id="leave">Leave</button>` : ''}
             ${!me.hasClub && !c.isBot ? joinButton() : ''}

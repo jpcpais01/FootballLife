@@ -1,5 +1,5 @@
 import { api } from '../api.ts';
-import { BADGE_ICONS, BADGE_SHAPES, badgeSvg } from '../art.ts';
+import { mountBadgeEditor, type ClubDraft } from '../badgeEditor.ts';
 import { badge } from '../components.ts';
 import { html, mount } from '../dom.ts';
 import { icon } from '../icons.ts';
@@ -55,80 +55,71 @@ export async function clubsPage(el: HTMLElement) {
   });
 }
 
-const PALETTE = ['#c6ff3d', '#1e6bff', '#d7263d', '#16a34a', '#facc15', '#ff7a1a', '#7a1fd1', '#0ea5e9', '#111111', '#f5f5f5', '#7f1d1d', '#065f46', '#e11d48', '#334155'];
-
 export async function newClubPage(el: HTMLElement) {
   if (state.player?.clubId) return navigate(`/club/${state.player.clubId}`, true);
-  const f = { name: '', short: '', primary: '#c6ff3d', secondary: '#111111', shape: 0, icon: 0, joinMode: 'open' };
+  const d: ClubDraft = { name: '', short: '', primary: '#c6ff3d', secondary: '#111111', badge: { shape: 0, icon: 0 } };
+  let joinMode = 'open';
   mount(el, html`
-    <div class="page-head"><div><div class="eyebrow">Found a club</div><div class="h1" style="margin-top:6px">Create your club</div></div></div>
-    <div class="dash">
-      <div class="span-5"><div class="card hero-card" style="padding:30px;display:flex;flex-direction:column;align-items:center;gap:14px;position:sticky;top:20px">
-        <div id="prev"></div><div class="h1" id="pname" style="font-size:36px;text-align:center">Your club</div><span class="chip" id="pshort">---</span>
-        <p class="small muted" style="text-align:center;margin:0">You'll be the founder. AI players fill your squad until friends join, and your club takes an AI club's place in the current league season.</p>
-      </div></div>
-      <form class="span-7 stack" id="form" style="gap:16px">
-        <div class="card grid cols-2">
-          <div class="field"><label>Club name</label><input class="input" name="name" maxlength="24" required placeholder="e.g. Lime Rockets"></div>
-          <div class="field"><label>Short name</label><input class="input" name="short" maxlength="4" required placeholder="LRK" style="text-transform:uppercase"></div>
-        </div>
-        <div class="card stack" style="gap:14px">
-          <div class="field"><label>Primary colour</label><div class="swatches">${PALETTE.map((c) => html`<button type="button" class="swatch ${c === f.primary ? 'on' : ''}" data-c="primary" data-v="${c}" style="background:${c}"></button>`)}<input type="color" data-ci="primary" value="${f.primary}" style="width:34px;height:34px;border:0;background:none;padding:0"></div></div>
-          <div class="field"><label>Secondary colour</label><div class="swatches">${PALETTE.map((c) => html`<button type="button" class="swatch ${c === f.secondary ? 'on' : ''}" data-c="secondary" data-v="${c}" style="background:${c}"></button>`)}<input type="color" data-ci="secondary" value="${f.secondary}" style="width:34px;height:34px;border:0;background:none;padding:0"></div></div>
-          <div class="field"><label>Badge shape</label><div class="badge-picker" id="shapes"></div></div>
-          <div class="field"><label>Emblem</label><div class="badge-picker" id="icons"></div></div>
-        </div>
-        <div class="card stack" style="gap:10px"><div class="label">Who can join?</div>
-          <div class="seg" id="mode"><button type="button" class="on" data-m="open">Anyone</button><button type="button" data-m="invite">Invite code only</button></div></div>
-        <div class="small" id="err" style="color:var(--red);min-height:18px"></div>
-        <button class="btn primary block" style="height:52px;font-size:16px">Create club</button>
-      </form>
-    </div>`);
-  const update = () => {
-    const colors = { primary: f.primary, secondary: f.secondary };
-    el.querySelector('#prev')!.innerHTML = badgeSvg(colors, f, 150, f.short).html;
-    el.querySelector('#pname')!.textContent = f.name || 'Your club';
-    el.querySelector('#pshort')!.textContent = (f.short || '---').toUpperCase();
-    el.querySelector('#shapes')!.innerHTML = BADGE_SHAPES.map((n, i) => `<button type="button" title="${n}" data-shape="${i}" class="${i === f.shape ? 'on' : ''}">${badgeSvg(colors, { shape: i, icon: f.icon }, 44).html}</button>`).join('');
-    el.querySelector('#icons')!.innerHTML = BADGE_ICONS.map((n, i) => `<button type="button" title="${n}" data-icon="${i}" class="${i === f.icon ? 'on' : ''}">${badgeSvg(colors, { shape: f.shape, icon: i }, 44).html}</button>`).join('');
-  };
-  update();
-  el.addEventListener('input', (e) => {
-    const t = e.target as HTMLInputElement;
-    if (t.name === 'name') f.name = t.value;
-    if (t.name === 'short') f.short = t.value.toUpperCase();
-    if (t.dataset.ci) (f as any)[t.dataset.ci] = t.value;
-    update();
+    <div class="page-head"><div><div class="eyebrow">Found a club</div><div class="h1" style="margin-top:6px">Create your club</div></div>
+      <button class="btn primary" id="create">${icon('check')} Create club</button></div>
+    <div id="editor"></div>
+    <div class="card row wrap between" style="margin-top:16px;gap:12px">
+      <div><div class="h3">Who can join?</div><div class="tiny muted">You'll be the founder. AI players fill the squad until friends join, and you can change all of this later.</div></div>
+      <div class="seg" id="mode"><button type="button" class="on" data-m="open">Anyone</button><button type="button" data-m="invite">Invite code only</button></div>
+    </div>
+    <div class="small" id="err" style="color:var(--red);min-height:18px;margin-top:10px"></div>`);
+  mountBadgeEditor(el.querySelector('#editor')!, d);
+  el.querySelector('#mode')!.addEventListener('click', (e) => {
+    const m = (e.target as HTMLElement).closest('[data-m]') as HTMLElement | null;
+    if (!m) return;
+    joinMode = m.dataset.m!;
+    el.querySelectorAll('[data-m]').forEach((b) => b.classList.toggle('on', b === m));
   });
-  el.addEventListener('click', (e) => {
-    const t = e.target as HTMLElement;
-    const c = t.closest('[data-c]') as HTMLElement | null;
-    if (c) {
-      (f as any)[c.dataset.c!] = c.dataset.v;
-      c.parentElement!.querySelectorAll('.swatch').forEach((s) => s.classList.toggle('on', s === c));
-      update();
-    }
-    const s = t.closest('[data-shape]') as HTMLElement | null;
-    if (s) { f.shape = Number(s.dataset.shape); update(); }
-    const i = t.closest('[data-icon]') as HTMLElement | null;
-    if (i) { f.icon = Number(i.dataset.icon); update(); }
-    const m = t.closest('[data-m]') as HTMLElement | null;
-    if (m) {
-      f.joinMode = m.dataset.m!;
-      el.querySelectorAll('[data-m]').forEach((b) => b.classList.toggle('on', b === m));
-    }
-  });
-  el.querySelector('#form')!.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = (e.target as HTMLFormElement).querySelector('button:last-child') as HTMLButtonElement;
+  const btn = el.querySelector('#create') as HTMLButtonElement;
+  btn.addEventListener('click', async () => {
     btn.disabled = true;
     try {
-      const r = await api.post('/api/clubs', f);
+      const r = await api.post('/api/clubs', { name: d.name, short: d.short, primary: d.primary, secondary: d.secondary, badge: d.badge, joinMode });
       await refreshMe();
       toast(r.placement === 'joined' ? 'Club founded — you took a place in this season\'s league!' : 'Club founded — you join the league next season.', 'ok');
       navigate(`/club/${r.id}`, true);
     } catch (err) {
       el.querySelector('#err')!.textContent = (err as Error).message;
+      toast((err as Error).message, 'err');
+      btn.disabled = false;
+    }
+  });
+}
+
+/** Club identity editor for staff: badge, name and kit, any time. */
+export async function editClubPage(el: HTMLElement, [id]: string[]) {
+  mount(el, html`${skeleton(120, 3)}`);
+  let data: any;
+  try {
+    data = await api.get(`/api/clubs/${id}`);
+  } catch (e) {
+    return mount(el, errorBox((e as Error).message));
+  }
+  const c = data.club;
+  if (!data.me?.perms?.settings) {
+    return mount(el, html`<div class="empty"><div class="h3">Only the founder or president can edit ${c.name}</div><a class="btn" href="/club/${c.id}" style="margin-top:12px">Back to club</a></div>`);
+  }
+  const d: ClubDraft = { name: c.name, short: c.short, primary: c.colors.primary, secondary: c.colors.secondary, badge: structuredClone(c.badge) };
+  mount(el, html`
+    <div class="page-head"><div><div class="eyebrow">Club identity</div><div class="h1" style="margin-top:6px">Edit ${c.name}</div></div>
+      <div class="row" style="gap:8px"><a class="btn ghost" href="/club/${c.id}">Cancel</a><button class="btn primary" id="save">${icon('check')} Save</button></div></div>
+    <div id="editor"></div>`);
+  mountBadgeEditor(el.querySelector('#editor')!, d);
+  const btn = el.querySelector('#save') as HTMLButtonElement;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      await api.post(`/api/clubs/${c.id}/settings`, { name: d.name, short: d.short, primary: d.primary, secondary: d.secondary, badge: d.badge });
+      await Promise.all([refreshMe(), api.get(`/api/clubs/${c.id}`).catch(() => {})]);
+      toast('Club updated', 'ok');
+      navigate(`/club/${c.id}`, true);
+    } catch (err) {
+      toast((err as Error).message, 'err');
       btn.disabled = false;
     }
   });

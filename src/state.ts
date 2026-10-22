@@ -1,3 +1,4 @@
+import type { Badge } from '../shared/badge.ts';
 import { api } from './api.ts';
 import type { Appearance } from '../shared/appearance.ts';
 import type { Equipped } from '../shared/cosmetics.ts';
@@ -18,7 +19,7 @@ export interface MePlayer {
   motto: string;
 }
 
-export interface MeClub { id: string; name: string; short: string; colors: { primary: string; secondary: string }; badge: { shape: number; icon: number }; isBot: boolean }
+export interface MeClub { id: string; name: string; short: string; colors: { primary: string; secondary: string }; badge: Badge; isBot: boolean }
 
 export const state: { user: { id: string; username: string } | null; player: MePlayer | null; club: MeClub | null; loaded: boolean; invites: number; unread: number; match: { id: string; live: boolean; kickoffAt: string } | null; trainReady: boolean } = {
   match: null,

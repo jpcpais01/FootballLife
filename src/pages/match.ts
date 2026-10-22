@@ -1,3 +1,4 @@
+import type { Badge } from '../../shared/badge.ts';
 import type { Equipped } from '../../shared/cosmetics.ts';
 import { commentary, type CommentaryLine } from '../../shared/commentary.ts';
 import { minuteLabel } from '../../shared/config.ts';
@@ -21,7 +22,7 @@ interface Snap {
   name: string;
   short: string;
   colors: { primary: string; secondary: string };
-  badge: { shape: number; icon: number };
+  badge: Badge;
   formation: string;
   tactics: any;
   players: { id: string; name: string; number: number; pos: string; role: string; ovr: number; bot: boolean; app: Record<string, number>; eq?: Equipped }[];

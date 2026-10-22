@@ -1,3 +1,4 @@
+import type { Badge } from '../shared/badge.ts';
 import { ATTR_GROUPS, ATTR_LABELS, KEY_ATTRS, overall, POSITION_NAMES, type Attributes, type Position } from '../shared/attributes.ts';
 import { badgeSvg } from './art.ts';
 import { html, raw, type Raw } from './dom.ts';
@@ -8,7 +9,7 @@ export interface ClubBrief {
   name: string;
   short: string;
   colors: { primary: string; secondary: string };
-  badge: { shape: number; icon: number };
+  badge: Badge;
   isBot?: boolean;
 }
 
@@ -51,7 +52,7 @@ export interface StandingRow {
   name: string;
   short: string;
   colors: { primary: string; secondary: string };
-  badge: { shape: number; icon: number };
+  badge: Badge;
   isBot: boolean;
   played: number;
   won: number;
