@@ -400,7 +400,7 @@ export class MatchViewer {
       this.labelSprite.position.set(f.pos.x, 3.6, f.pos.y);
     }
 
-    this.updateCamera(fr, realDt, rate);
+    this.updateCamera(fr, realDt, rate, jumped);
     this.excitement = Math.max(0, this.excitement - realDt * 0.12);
     if (this.excitement < 0.05) this.stadium.setCheer(-1);
     this.stadium.update(this.elapsed, this.excitement);
@@ -619,9 +619,22 @@ export class MatchViewer {
     (this.labelSprite.material as THREE.SpriteMaterial).map!.needsUpdate = true;
   }
 
-  private updateCamera(fr: ReturnType<Playback['frame']>, dt: number, rate: number) {
-    let bx = fr.ball.x;
-    let by = fr.ball.y;
+  private camBall = new THREE.Vector2();
+  private camLead = new THREE.Vector2();
+
+  private updateCamera(fr: ReturnType<Playback['frame']>, dt: number, rate: number, cut = false) {
+    // Like a camera operator, lead the play a little in the direction the ball is going.
+    if (cut || dt <= 0) this.camLead.set(0, 0);
+    else if (rate < 4) {
+      const vx = (fr.ball.x - this.camBall.x) / dt / Math.max(1, rate);
+      const vy = (fr.ball.y - this.camBall.y) / dt / Math.max(1, rate);
+      const k = Math.min(1, dt * 1.5);
+      this.camLead.x += (Math.max(-8, Math.min(8, vx * 0.45)) - this.camLead.x) * k;
+      this.camLead.y += (Math.max(-5, Math.min(5, vy * 0.3)) - this.camLead.y) * k;
+    } else this.camLead.multiplyScalar(0.9);
+    this.camBall.set(fr.ball.x, fr.ball.y);
+    let bx = fr.ball.x + this.camLead.x;
+    let by = fr.ball.y + this.camLead.y;
     // Dangerous set pieces: frame the ball and the goal together.
     const sp = fr.restart;
     if (sp && (sp.k === 'penalty' || sp.k === 'corner' || (sp.k === 'freekick' && (sp.o === 'direct' || sp.o === 'cross')))) {
@@ -668,8 +681,15 @@ export class MatchViewer {
       if (slow && attacking) fov *= 0.92;
     }
     const k = Math.min(1, dt * (this.mode === 'tactical' ? 3 : 1.6));
-    this.camPos.lerp(pos, k);
-    this.camTarget.lerp(look, Math.min(1, dt * 2.4));
+    if (cut) {
+      // A cut into a highlight: start on the action, don't swoop in from wherever we were.
+      this.camPos.copy(pos);
+      this.camTarget.copy(look);
+      this.camera.fov = fov;
+    } else {
+      this.camPos.lerp(pos, k);
+      this.camTarget.lerp(look, Math.min(1, dt * 2.4));
+    }
     this.camera.position.copy(this.camPos);
     if (this.shake > 0) {
       this.camera.position.x += (Math.random() - 0.5) * this.shake;

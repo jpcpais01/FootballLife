@@ -9,6 +9,7 @@ export const PATCH_NOTES: PatchGroup[] = [
   {
     hour: '2026-10-22T02:00:00Z',
     entries: [
+      { title: 'Sharper match camera', body: 'The broadcast camera now leads the play like a real camera operator, drifting ahead in the direction the ball is travelling, and every highlight opens straight on the action instead of swooping in from across the pitch.' },
       { title: 'Smarter defending', body: 'Teams now defend like a unit. The block drops deeper and slides across toward the ball, the second man shuts off the easiest pass while his team-mate presses, and anyone caught upfield sprints back goal-side instead of jogging. Wingers cut inside toward goal in the final third, and kick-offs line up properly.' },
     ],
   },
