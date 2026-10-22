@@ -226,7 +226,13 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       taken.add(press);
       const cover = defenders[1];
       if (cover !== undefined) {
-        setAbs(cover, tx[cover] * 0.4 + (w.bx + (gx / gl) * 7.5) * 0.6, ty[cover] * 0.4 + (w.by + (gy / gl) * 7.5) * 0.6, 0.6);
+        // The second man shuts off the easiest pass: he stands in the lane to the nearest team-mate.
+        const mate = outfield(A)
+          .filter((i) => i !== w.owner)
+          .sort((a, b) => d2(a, w.bx, w.by) - d2(b, w.bx, w.by))[0];
+        if (pressK >= 1 && mate !== undefined && d2(mate, w.bx, w.by) < 18) {
+          setAbs(cover, w.bx + (w.px[mate] - w.bx) * 0.6, w.by + (w.py[mate] - w.by) * 0.6, 0.7);
+        } else setAbs(cover, tx[cover] * 0.4 + (w.bx + (gx / gl) * 7.5) * 0.6, ty[cover] * 0.4 + (w.by + (gy / gl) * 7.5) * 0.6, 0.6);
         taken.add(cover);
       }
     }
@@ -266,6 +272,13 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       setAbs(i, tx[i] * 0.5 + mx * 0.5, ty[i] * 0.5 + my * 0.5, 0.3);
     }
   }
+  // Anyone caught upfield of the ball sprints back goal-side.
+  const ballD = frame(w.bx, w.by, D).u;
+  for (const i of outfield(D)) {
+    if (taken.has(i) || w.chase.includes(i)) continue;
+    const u = frame(w.px[i], w.py[i], D).u;
+    if (u > ballD + 0.03 && frame(tx[i], ty[i], D).u < u - 0.05) urg[i] = Math.max(urg[i], 0.8);
+  }
   // Interceptor or second-ball racers go for the ball.
   for (const i of w.chase) {
     if (sentOff[i]) continue;
@@ -301,7 +314,7 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
     for (let i = 0; i < 22; i++) urg[i] = urgAll;
     if (e.k === 'kickoff') {
       if (taker >= 0) setAbs(taker, e.x - w.dir[S] * 0.4, e.y, 0.5);
-      const mate = outfield(S).filter((i) => i !== taker).sort((a, b) => d2(a, 0, 0) - d2(b, 0, 0))[0];
+      const mate = outfield(S).filter((i) => i !== taker).sort((a, b) => hyp(tx[a], ty[a]) - hyp(tx[b], ty[b]))[0];
       if (mate !== undefined) setAbs(mate, -w.dir[S] * 0.6, 2.2, 0.5);
       return;
     }

@@ -574,13 +574,16 @@ class Engine {
     let best = 0;
     let bs = -Infinity;
     const yBias = -this.by / 34;
+    // In the final third, wide players cut inside toward goal.
+    const f = this.fr(this.px[i], this.py[i], side);
+    const inside = f.u > 0.68 ? -Math.sign(f.v) * Math.min(1, Math.abs(f.v) * 1.5) * this.dir(side) : 0;
     for (let k = -3; k <= 3; k++) {
       const ang = k * 0.38 + this.rng.range(-0.1, 0.1);
       const x = this.px[i] + Math.cos(ang) * len * d;
       const y = this.py[i] + Math.sin(ang) * len + yBias * 1.5;
       if (Math.abs(y) > 32 || Math.abs(x) > 51) continue;
       const space = Math.min(10, this.nearest(D, x, y).d);
-      const s = space - Math.abs(k) * 0.6;
+      const s = space - Math.abs(k) * 0.6 + inside * Math.sin(ang) * d * 2.5;
       if (s > bs) {
         bs = s;
         best = ang;
@@ -601,7 +604,7 @@ class Engine {
     // A defender who gets tight can win it before the attacker plays.
     if (this.role(h) !== 'GK' && press.d < 1.4 && this.t - this.ownerSince > 0.45 && this.busy[press.idx] <= this.t) {
       const pressK = this.tactics[D].pressing === 'high' ? 1.25 : this.tactics[D].pressing === 'low' ? 0.8 : 1;
-      if (this.rng.chance(DT * 0.3 * pressK * (0.6 + this.a(press.idx, 'tackling') / 100))) {
+      if (this.rng.chance(DT * 0.2 * pressK * (0.6 + this.a(press.idx, 'tackling') / 100))) {
         this.duel(press.idx, false);
         return;
       }
@@ -634,7 +637,7 @@ class Engine {
     const ment = tac.mentality === 'attacking' ? 1.05 : tac.mentality === 'defensive' ? 0.96 : 1;
     const shootQ = (this.a(h, 'shooting') + this.a(h, 'finishing')) / 200;
     let shootW = 0;
-    if (u > 0.72) shootW = (u - 0.72) * 0.5 * (1 - cv * 0.7) * (0.5 + shootQ) * ment;
+    if (u > 0.72) shootW = (u - 0.72) * 0.6 * (1 - cv * 0.7) * (0.5 + shootQ) * ment;
     if (inBox) shootW *= 2.3;
     if (role === 'CB' || role === 'DM') shootW *= 0.5;
 
@@ -891,6 +894,14 @@ class Engine {
     this.emit('tackle', D, this.bx, this.by, { p: defender, q: h });
     this.busy[h] = this.t + 0.5;
     this.lastTouch = D;
+    if (Math.abs(this.by) > 27 && this.rng.chance(0.45)) {
+      // Nicked off his toes and over the touchline.
+      this.owner = -1;
+      this.loose = true;
+      this.bvx = 0;
+      this.bvy = Math.sign(this.by) * 9;
+      return;
+    }
     if (this.rng.chance(0.3)) {
       // Poked loose: a scramble for it.
       const a = this.rng.range(0, Math.PI * 2);
@@ -1261,7 +1272,8 @@ class Engine {
       const dd = hyp(gx - this.bx, y - this.by);
       // Times the dive to meet the ball.
       const tAt = this.t + Math.max(0, dd / speed - 0.45);
-      const sideSign = Math.sign(dy) * this.dir(D);
+      // Local side for the figure: +1 is the keeper's own left as he faces the play.
+      const sideSign = -Math.sign(dy) * this.dir(D);
       if (Math.abs(dy) > 0.8 || z > 1.9) this.acts.push([r1(tAt), gk, 'dive', sideSign]);
       else if (save) this.acts.push([r1(tAt + 0.2), gk, 'catch', 0]);
     };
