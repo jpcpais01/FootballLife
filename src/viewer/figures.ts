@@ -1051,9 +1051,10 @@ export class Figure {
     tmpQ.setFromAxisAngle(UP, aim.heading);
     eff.multiplyScalar(s).applyQuaternion(tmpQ);
     this.reach.set(aim.ball.x - aim.x - eff.x, 0, aim.ball.z - aim.z - eff.z);
-    // Only small corrections: a gap wider than a stride is the play's, not the animation's.
+    // Only small corrections: a gap wider than a stride (a keeper's extra lunge) is the play's, not the animation's.
     const len = this.reach.length();
-    if (len > 0.9) this.reach.multiplyScalar(0.9 / len);
+    const most = kind === 'dive' ? 1.6 : 0.9;
+    if (len > most) this.reach.multiplyScalar(most / len);
     this.reachLead = Math.max(0.2, opts?.contactIn ?? 0.3);
     this.reachT = opts?.contactIn ?? 0;
     this.reachOn = true;
