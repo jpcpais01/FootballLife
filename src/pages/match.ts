@@ -16,6 +16,7 @@ import { evIcon } from '../eventIcons.ts';
 import { liveRating } from '../../shared/sim/rating.ts';
 import type { Position } from '../../shared/attributes.ts';
 import { state } from '../state.ts';
+import { roar } from '../audio.ts';
 
 interface Snap {
   clubId: string;
@@ -438,6 +439,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
       if (goals > lastGoals && idx - from < 30) {
         const g = events.slice(0, idx + 1).filter((e) => e.k === 'goal').pop()!;
         viewer?.goal(g.s);
+        roar();
         const scorer = lineups[g.s].players[(g.p ?? 0) % 11];
         el.querySelector('#flash')!.innerHTML = html`<div class="goal-flash"><div class="txt">GOAL!</div><div class="sub">${scorer?.name ?? ''} · ${lineups[g.s].short}</div></div>`.html;
         setTimeout(() => { const f = el.querySelector('#flash'); if (f) f.innerHTML = ''; }, 2700);

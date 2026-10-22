@@ -12,6 +12,7 @@ export const PATCH_NOTES: PatchGroup[] = [
       { title: 'Your real face, everywhere', body: 'Every portrait in the game is now a shot of your actual 3D player, in your club colours: the top bar, squad lists, the club chat, match line-ups and player pages. Change your look and every portrait follows.' },
       { title: 'A new look studio', body: 'Creating a player and the Look tab in the locker share a new studio. Pick a category (Face, Eyes, Nose and mouth, Hair, Facial hair, Extras) and the camera moves in on your face, with every option shown as a 3D preview of you wearing it. Randomise rolls a whole new look.' },
       { title: 'Many more options', body: 'Choose from 6 face shapes, 6 eye shapes, 6 eye colours, brows, noses, lips, freckles, moles and scars, 12 skin tones, 14 hair colours, 20 hairstyles (new: fade, slick back, side part, fringe, spiky, waves, dreads, cornrows, man bun and mullet) and 10 kinds of facial hair. Faces are rebuilt with real eyes, lids, ears and lips.' },
+      { title: 'Music and crowd sound', body: 'FootbalLife now has its own soundtrack. The menus play a calm, endless lo-fi loop with warm pads, electric piano, soft bass and brushed drums that never repeats exactly the same way. Open a match and the music fades into a stadium crowd that murmurs, rises at big moments, claps along and roars when a goal goes in. Sound starts on your first tap. Turn the music or the crowd off, or change the volume, from the menu under your avatar.' },
     ],
   },
   {
