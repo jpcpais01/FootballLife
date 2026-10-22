@@ -11,6 +11,7 @@ export const PATCH_NOTES: PatchGroup[] = [
     entries: [
       { title: 'Shots that look like shots', body: 'Strikers now pick their shot: a side-foot finish into the far corner, a driven strike across the keeper, a curler that starts outside the post and bends in, a dipping free kick over the wall, or a chip when the keeper rushes out. The ball rises and dips with real weight, misses go just wide of the post or over the bar instead of miles off, and players only shoot when they can actually see the goal.' },
       { title: 'Clean first touches', body: 'Passes are now hit to where the team-mate can actually get to, and he runs onto the ball before taking his touch, so the ball never jumps to a player\'s feet. Every touch uses the right move: side-foot passes, chips, long balls, chest control, headers, keeper throws and kicks, throw-ins, and fouled players go down and get back up.' },
+      { title: 'Headers at head height', body: 'Crosses now meet attackers and defenders right at head height, so headers connect cleanly instead of flying over the player.' },
       { title: 'See the build-up', body: 'Every live highlight now starts ten seconds before the big moment, so you see the move that led to the goal, the chance, the card or the corner.' },
     ],
   },
