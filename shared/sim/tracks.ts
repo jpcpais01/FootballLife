@@ -16,7 +16,8 @@ export type ActKind =
   | 'chest' // first touch on the chest
   | 'tackle' // standing tackle / block (or a missed one)
   | 'slide'
-  | 'dive' // keeper dive; detail is the keeper's local side (+1 = his own left)
+  | 'keeperSet' // keeper sets himself as a shot is struck
+  | 'dive' // keeper dive or smother; detail is the keeper's local side (+1 = his own left)
   | 'catch'
   | 'keeperKick' // goal kick or punt
   | 'keeperThrow'
