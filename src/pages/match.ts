@@ -340,7 +340,8 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   const renderControls = () => {
     const c = el.querySelector('#controls')!;
     if (!finished || catchup) {
-      c.innerHTML = html`<div class="row between small muted" style="margin-top:10px"><span class="row" style="gap:6px"><span class="chip live">LIVE</span> Everyone watching sees the same moment.</span><span id="ff"></span></div>`.html;
+      // Live: nothing to control, and the scorebug carries the live dot.
+      c.innerHTML = '';
       return;
     }
     const marks = events.map((e) => {
@@ -359,6 +360,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
 
   const setStatus = () => {
     const st = el.querySelector('#status')!;
+    el.querySelector('.scorebug')!.classList.toggle('live', !finished || catchup);
     if (!finished || catchup) st.outerHTML = html`<span class="chip live" id="status">LIVE</span>`.html;
     else st.outerHTML = html`<span class="chip" id="status">Full-time · Replay</span>`.html;
   };

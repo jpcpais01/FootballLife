@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-22T03:00:00Z',
+    entries: [
+      { title: 'A cleaner fast-forward screen', body: 'The data screen you see while quiet spells are fast-forwarded has been redesigned for phones held sideways. The mini pitch and the key numbers (possession, shots and xG) are bigger and easier to read, the momentum strip now zooms to the match so far instead of sitting mostly empty, and only the data-screen switch stays on screen. Live matches lose the line of text under the pitch, so the stage fills the whole height, with a pulsing live dot on the match clock instead. Commentary beside the pitch wraps far less.' },
+    ],
+  },
+  {
     hour: '2026-10-22T02:30:00Z',
     entries: [
       { title: 'Real sizes, cleaner strikes', body: 'Players are now real size: about 1.8 m tall on a full 105 by 68 m pitch, next to 7.32 m goals and a proper 22 cm ball. Passes no longer look like shots: short passes get a compact pass with a proper wind-up, long balls and clearances a fuller kick, and chips, crosses and shots each have their own. Players step in and square up so the foot really meets the ball, first touches stop it with the sole, sliding tackles go in feet first, and every change of motion blends smoothly instead of snapping.' },

@@ -92,18 +92,16 @@ export function createBoard(stage: HTMLElement, ctx: BoardContext) {
         <span class="ffb-tag" id="ffb-tag"><i class="ffb-chev">${icon('fast', 14)}</i><span id="ffb-title">Fast-forward</span></span>
         <span class="ffb-skip"><span id="ffb-range"></span><i class="ffb-prog"><b id="ffb-prog"></b></i><span class="ffb-rate" id="ffb-rate"></span></span>
       </div>
+      <div class="ffb-pitch">
+        <svg viewBox="-3 -3 111 74" id="ffb-pitch"></svg>
+        <div class="ffb-tilt"><span class="k">Field tilt</span><b class="v" id="ffb-tilt-h"></b><i><b id="ffb-tilt-b"></b></i><b class="v" id="ffb-tilt-a"></b></div>
+      </div>
+      <div class="ffb-tiles" id="ffb-tiles"></div>
       <div class="ffb-graph">
-        <div class="ffb-lbl"><span style="color:${colors[0]}">${ctx.teams[0].short}</span><span class="dim">Attack momentum</span><span style="color:${colors[1]}">${ctx.teams[1].short}</span></div>
-        <svg viewBox="0 0 960 200" preserveAspectRatio="none" id="ffb-mom"></svg>
+        <div class="ffb-lbl"><span style="color:${colors[0]}">${ctx.teams[0].short}</span><span class="dim">Momentum</span><span style="color:${colors[1]}">${ctx.teams[1].short}</span></div>
+        <svg preserveAspectRatio="none" id="ffb-mom"></svg>
       </div>
-      <div class="ffb-low">
-        <div class="ffb-pitch">
-          <svg viewBox="-3 -3 111 74" id="ffb-pitch"></svg>
-          <div class="ffb-tilt"><span id="ffb-tilt-h"></span><i><b id="ffb-tilt-b"></b></i><span id="ffb-tilt-a"></span></div>
-        </div>
-        <div class="ffb-tiles" id="ffb-tiles"></div>
-        <div class="ffb-feed" id="ffb-feed"></div>
-      </div>
+      <div class="ffb-feed" id="ffb-feed"></div>
     </div>`.html;
   stage.appendChild(el);
   const $ = (id: string) => el.querySelector('#' + id) as HTMLElement;
@@ -141,6 +139,8 @@ export function createBoard(stage: HTMLElement, ctx: BoardContext) {
   let lastDraw = 0;
   let lastIdx = -2;
   let lastHalf = 0;
+  let lastFeed = '';
+  let seen = new Set<number>();
   const tween = new Map<string, number>();
 
   const dirAt = (side: 0 | 1, t: number) => (t <= ctx.halftimeAt ? 1 : -1) * (side === 0 ? 1 : -1);
@@ -148,7 +148,9 @@ export function createBoard(stage: HTMLElement, ctx: BoardContext) {
   const drawMomentum = (t: number, idx: number) => {
     const evs = ctx.events();
     const lastT = evs.length ? evs[evs.length - 1].t : 0;
-    const span = Math.max(95 * 60, lastT + 60, ctx.halftimeAt * 2 + 120);
+    // The axis grows with the match, so the strip is never mostly empty.
+    const full = Math.max(95 * 60, lastT + 60, ctx.halftimeAt * 2 + 120);
+    const span = Math.min(full, Math.max(15 * 60, t + 4 * 60));
     const bins = Math.ceil(span / 60);
     const raw = [new Float32Array(bins), new Float32Array(bins)];
     const goals: { m: number; s: 0 | 1 }[] = [];
@@ -168,41 +170,48 @@ export function createBoard(stage: HTMLElement, ctx: BoardContext) {
       b = b * 0.55 + raw[1][m];
       vals.push(Math.max(-1, Math.min(1, (a - b) / 9)));
     }
-    const W = 960;
+    // Scale to the biggest swing so far, so a quiet spell still has shape.
+    const peak = Math.max(0.4, ...vals.map(Math.abs));
+    for (let m = 0; m < vals.length; m++) vals[m] = (vals[m] / peak) * 0.92;
+    // Draw in real pixels so goal markers stay round.
+    const W = Math.max(120, Math.round(momSvg.clientWidth || 960));
+    const H = Math.max(40, Math.round(momSvg.clientHeight || 200));
+    const mid = H / 2;
+    const amp = mid - 3;
+    momSvg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     const x = (m: number) => (m / bins) * W;
-    const bw = (W / bins) * 0.62;
+    const bw = Math.min(14, (W / bins) * 0.62);
     const bars = vals
       .map((v, m) => {
-        const h = Math.abs(v) * 86;
-        const y = v >= 0 ? 100 - h : 100;
+        const h = Math.abs(v) * amp;
+        const y = v >= 0 ? mid - h : mid;
         return `<rect x="${(x(m + 0.5) - bw / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1.5, h).toFixed(1)}" rx="2" fill="${v >= 0 ? colors[0] : colors[1]}" opacity="${(0.28 + Math.abs(v) * 0.5).toFixed(2)}"/>`;
       })
       .join('');
     // Smooth area along the bars.
-    let path = `M${x(0.5).toFixed(1)},100`;
-    vals.forEach((v, m) => (path += ` L${x(m + 0.5).toFixed(1)},${(100 - v * 86).toFixed(1)}`));
-    path += ` L${x(vals.length - 0.5).toFixed(1)},100 Z`;
+    let path = `M${x(0.5).toFixed(1)},${mid}`;
+    vals.forEach((v, m) => (path += ` L${x(m + 0.5).toFixed(1)},${(mid - v * amp).toFixed(1)}`));
+    path += ` L${x(vals.length - 0.5).toFixed(1)},${mid} Z`;
     const ht = x(ctx.halftimeAt / 60);
     const cur = x(Math.min(bins, t / 60));
     const goalMarks = goals
-      .map((g) => `<g transform="translate(${x(g.m).toFixed(1)},${g.s === 0 ? 14 : 186})"><circle r="9" fill="#0b0d10" stroke="${colors[g.s]}" stroke-width="2.5"/><circle r="3.6" fill="#fff"/></g>`)
+      .map((g) => `<g transform="translate(${x(g.m).toFixed(1)},${g.s === 0 ? 8 : H - 8})"><circle r="6" fill="#0b0d10" stroke="${colors[g.s]}" stroke-width="2"/><circle r="2.4" fill="#fff"/></g>`)
       .join('');
     momSvg.innerHTML = `
       <defs>
-        <linearGradient id="ffbArea" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="200">
+        <linearGradient id="ffbArea" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="${H}">
           <stop offset="0" stop-color="${colors[0]}" stop-opacity="0.75"/><stop offset="0.5" stop-color="${colors[0]}" stop-opacity="0.05"/>
           <stop offset="0.5" stop-color="${colors[1]}" stop-opacity="0.05"/><stop offset="1" stop-color="${colors[1]}" stop-opacity="0.75"/>
         </linearGradient>
-        <linearGradient id="ffbCur" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#c6ff3d" stop-opacity="0"/><stop offset="0.5" stop-color="#c6ff3d"/><stop offset="1" stop-color="#c6ff3d" stop-opacity="0"/></linearGradient>
+        <linearGradient id="ffbCur" x1="0" x2="0" y1="0" y2="1"><stop offset="0" style="stop-color:var(--lime)" stop-opacity="0"/><stop offset="0.5" style="stop-color:var(--lime)"/><stop offset="1" style="stop-color:var(--lime)" stop-opacity="0"/></linearGradient>
       </defs>
-      <rect x="0" y="0" width="${W}" height="200" fill="rgba(255,255,255,0.015)"/>
-      ${[15, 30, 60, 75].map((mm) => `<line x1="${x(mm)}" y1="8" x2="${x(mm)}" y2="192" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`).join('')}
-      <line x1="${ht}" y1="4" x2="${ht}" y2="196" stroke="rgba(255,255,255,0.22)" stroke-width="1.5" stroke-dasharray="5 5"/>
-      <line x1="0" y1="100" x2="${W}" y2="100" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+      ${[15, 30, 60, 75].filter((mm) => mm * 60 < span).map((mm) => `<line x1="${x(mm)}" y1="4" x2="${x(mm)}" y2="${H - 4}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`).join('')}
+      ${ctx.halftimeAt < span ? `<line x1="${ht}" y1="2" x2="${ht}" y2="${H - 2}" stroke="rgba(255,255,255,0.22)" stroke-width="1" stroke-dasharray="3 4"/>` : ''}
+      <line x1="0" y1="${mid}" x2="${W}" y2="${mid}" stroke="rgba(255,255,255,0.16)" stroke-width="1"/>
       ${bars}
       <path d="${path}" fill="url(#ffbArea)" stroke="none"/>
       ${goalMarks}
-      <rect x="${(cur - 1.5).toFixed(1)}" y="0" width="3" height="200" fill="url(#ffbCur)" class="ffb-cur"/>`;
+      <rect x="${(cur - 1).toFixed(1)}" y="0" width="2" height="${H}" fill="url(#ffbCur)" class="ffb-cur"/>`;
   };
 
   const drawPitch = (t: number, idx: number) => {
@@ -294,8 +303,8 @@ export function createBoard(stage: HTMLElement, ctx: BoardContext) {
     };
     $('ffb-tiles').innerHTML = html`
       ${tile('poss', 'Possession', poss, 100 - poss, (v) => `${Math.round(v)}%`)}
-      ${tile('xg', 'xG', s[0].xg, s[1].xg, fx)}
       ${tile('shots', 'Shots', s[0].shots, s[1].shots, undefined, [`${s[0].on} on target`, `${s[1].on} on target`])}
+      ${tile('xg', 'xG', s[0].xg, s[1].xg, fx)}
       ${tile('pass', 'Passes', s[0].passes, s[1].passes)}
       ${tile('corn', 'Corners', s[0].corners, s[1].corners)}`.html;
   };
@@ -305,12 +314,17 @@ export function createBoard(stage: HTMLElement, ctx: BoardContext) {
     const evs = ctx.events();
     const ls = ctx.lines();
     const items: string[] = [];
+    const shownNow = new Set<number>();
     for (let k = idx; k >= 0 && items.length < 4; k--) {
       const l = ls[k];
       if (!l || !(l.big || ['save', 'chance', 'card', 'post'].includes(l.kind))) continue;
-      items.push(html`<div class="ffb-ev"><span class="m">${minuteLabel(evs[k].t, ctx.halftimeAt)}</span><span>${evIcon(l.icon, 16)}</span><span class="tx">${l.text}</span></div>`.html);
+      shownNow.add(k);
+      items.push(html`<div class="ffb-ev${seen.has(k) ? '' : ' new'}"><span class="m">${minuteLabel(evs[k].t, ctx.halftimeAt)}</span><span>${evIcon(l.icon, 16)}</span><span class="tx">${l.text}</span></div>`.html);
     }
-    $('ffb-feed').innerHTML = items.length ? items.join('') : html`<div class="ffb-ev dim"><span class="tx">Quiet spell. Both sides probing.</span></div>`.html;
+    const next = items.length ? items.join('') : html`<div class="ffb-ev dim"><span class="tx">Quiet spell. Both sides probing.</span></div>`.html;
+    // Only touch the DOM when a line arrives, and only new lines fade in.
+    if (next !== lastFeed) $('ffb-feed').innerHTML = lastFeed = next;
+    seen = shownNow;
   };
 
   return {
