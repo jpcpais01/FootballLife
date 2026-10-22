@@ -48,3 +48,42 @@ const P: Record<string, string> = {
 export function icon(name: string, size = 20): Raw {
   return raw(`<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] ?? ''}</svg>`);
 }
+
+// The menu set: duotone glyphs drawn for the dock. Each has a soft fill (.d),
+// a crisp outline, and one accent detail (.k) that picks up the tile colour.
+const N: Record<string, string> = {
+  home: '<path class="d" d="M5 10 12 4.2 19 10v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19z"/>'
+    + '<path d="M3 11.2 12 3.6l9 7.6M5 9.6V19a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V9.6"/>'
+    + '<path class="k" d="M10 20.5v-3.8a2 2 0 0 1 4 0v3.8"/>',
+  club: '<path class="d" d="M12 3 5 5.6v5.9c0 4.6 3 7.9 7 9.5 4-1.6 7-4.9 7-9.5V5.6z"/>'
+    + '<path d="M12 3 5 5.6v5.9c0 4.6 3 7.9 7 9.5 4-1.6 7-4.9 7-9.5V5.6z"/>'
+    + '<path class="k f" d="M12 7.8 12.85 10.03 15.23 10.15 13.38 11.65 14 13.95 12 12.65 10 13.95 10.62 11.65 8.77 10.15 11.15 10.03z"/>',
+  match: '<circle class="d" cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="8.5"/>'
+    + '<path d="M12.00 8.70L12.00 5.90M12.00 5.90L8.53 4.24M12.00 5.90L15.47 4.24M15.14 10.98L17.80 10.11M17.80 10.11L18.31 6.31M17.80 10.11L20.45 12.90M13.94 14.67L15.59 16.94M15.59 16.94L19.37 16.24M15.59 16.94L13.76 20.32M10.06 14.67L8.41 16.94M8.41 16.94L10.24 20.32M8.41 16.94L4.63 16.24M8.86 10.98L6.20 10.11M6.20 10.11L3.55 12.90M6.20 10.11L5.69 6.31"/>'
+    + '<path class="k f" d="M12 8.7 15.14 10.98 13.94 14.67H10.06L8.86 10.98z"/>',
+  training: '<path class="d" d="M10.4 4h3.2l4.6 15.5H5.8z"/>'
+    + '<path d="M10.4 4h3.2l4.6 15.5H5.8zM3.5 20h17"/>'
+    + '<path class="k" d="M8.9 9.6h6.2M7.6 14.2h8.8"/>',
+  league: '<path class="d" d="M7.5 3.8h9v5.7a4.5 4.5 0 0 1-9 0z"/>'
+    + '<path d="M7.5 3.8h9v5.7a4.5 4.5 0 0 1-9 0zM7.5 5.8h-3v1a3.4 3.4 0 0 0 3.2 3.4M16.5 5.8h3v1a3.4 3.4 0 0 1-3.2 3.4M12 14v3.2M8.5 17.2h7v3.3h-7z"/>'
+    + '<path class="k f" d="M12 6.1 12.53 7.47 14 7.55 12.86 8.48 13.23 9.9 12 9.1 10.77 9.9 11.14 8.48 10 7.55 11.47 7.47z"/>',
+  shop: '<path class="d" d="M8.6 3.6 4 6.2l-1.6 4.4 3.3 1.3L7 10.4v10.1h10V10.4l1.3 1.5 3.3-1.3L20 6.2l-4.6-2.6a3.4 3.4 0 0 1-6.8 0z"/>'
+    + '<path d="M8.6 3.6 4 6.2l-1.6 4.4 3.3 1.3L7 10.4v10.1h10V10.4l1.3 1.5 3.3-1.3L20 6.2l-4.6-2.6"/>'
+    + '<path class="k" d="M8.6 3.6a3.4 3.4 0 0 0 6.8 0M10 14.5h4"/>',
+  house: '<path class="d" d="M3 12.6a1.6 1.6 0 0 1 3.2 0V14h11.6v-1.4a1.6 1.6 0 0 1 3.2 0V18H3z"/>'
+    + '<path d="M5.2 11V8.6A2.6 2.6 0 0 1 7.8 6h8.4a2.6 2.6 0 0 1 2.6 2.6V11M3 12.6a1.6 1.6 0 0 1 3.2 0V14h11.6v-1.4a1.6 1.6 0 0 1 3.2 0V18H3zM5.5 18v2M18.5 18v2"/>'
+    + '<path class="k" d="M12 6.6V13.6"/>',
+  transfers: '<circle class="d" cx="12" cy="12" r="7.5"/>'
+    + '<path d="M4.6 10.4A7.6 7.6 0 0 1 18 6.8M18.8 3.3v3.9h-3.9M19.4 13.6A7.6 7.6 0 0 1 6 17.2M5.2 20.7v-3.9h3.9"/>'
+    + '<circle class="k f" cx="12" cy="12" r="2.3"/>',
+  clubs: '<path class="d" d="M10 6.2 4 8.4v4.5c0 3.9 2.6 6.6 6 8 3.4-1.4 6-4.1 6-8V8.4z"/>'
+    + '<path d="M10 6.2 4 8.4v4.5c0 3.9 2.6 6.6 6 8 3.4-1.4 6-4.1 6-8V8.4zM13.4 4.7 15 4.1l5 1.9v4.5c0 3-1.6 5.3-4 6.8"/>'
+    + '<path class="k" d="m7.4 12.4 2.6 1.9 2.6-1.9"/>',
+  profile: '<path class="d" d="M4.5 20.5c.5-3.9 3.6-6.6 7.5-6.6s7 2.7 7.5 6.6z"/>'
+    + '<circle cx="12" cy="7.8" r="3.7"/><path d="M4.5 20.5c.5-3.9 3.6-6.6 7.5-6.6s7 2.7 7.5 6.6z"/>'
+    + '<path class="k" d="M10 14.2 12 17l2-2.8"/>',
+};
+
+export function navIcon(name: string, size = 24): Raw {
+  return raw(`<svg class="nv" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${N[name] ?? ''}</svg>`);
+}
