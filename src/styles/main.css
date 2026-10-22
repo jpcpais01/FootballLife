@@ -1088,6 +1088,8 @@ a.bk-tie:hover { border-color: var(--line-2); }
   /* Home: the spotlight fills the screen; activity sits below. */
   /* The top pill floats over the home screen, so the greeting shares its row and the spotlight fills the rest. */
   .app.at-home .topnav { position: fixed; top: 0; right: 0; left: auto; height: 56px; }
+  /* Other dock pages have no top bar at all; sub-pages keep just the back button. */
+  .app:not(.at-home):not(.is-sub) .topnav { display: none; }
   .app.at-home:not(.at-match) main { padding-top: 6px; }
   .home-top { margin: 0 0 8px; align-items: center; min-height: 52px; padding-right: 230px; }
   .home-name { font-size: 30px; margin: 0; }
@@ -1318,3 +1320,6 @@ a.bk-tie:hover { border-color: var(--line-2); }
   .be-body { padding: 14px; }
   .be-grid { grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); }
 }
+
+/* The top pill (coins, refresh, inbox, profile) lives on the home screen only. */
+.app:not(.at-home) .topnav-right { display: none; }

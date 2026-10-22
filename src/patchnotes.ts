@@ -13,6 +13,7 @@ export const PATCH_NOTES: PatchGroup[] = [
       { title: 'Club badge studio', body: 'Club badges get a full editor. Pick from 16 shapes, 32 emblems (including a monogram of your short name), 16 patterns like stripes, hoops, checks and sunburst, and 6 border styles. Choose your own colour for the field, pattern, emblem, border, stars and text, resize, move and tilt the emblem, add up to five stars, and put your club name or founding year on a band, an arc or a ribbon. Shuffle gives you a random design to start from.' },
       { title: 'Edit your club any time', body: 'The founder and president can now change the badge, club name, short name and kit colours whenever they like, from Edit club on the club page or the Manage tab. The club chat lets everyone know when the name or badge changes.' },
       { title: 'Home fits the screen', body: 'On a sideways phone the home screen no longer starts with empty space at the top. Your name now sits beside the top pill, and the spotlight card fills the rest of the screen when you open the game.' },
+      { title: 'Top pill on home only', body: 'Your coins, refresh, inbox and profile pill now only appear on the home screen, so every other page gets the full screen. Pages you open from another page still have their back button.' },
     ],
   },
   {
