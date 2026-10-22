@@ -15,6 +15,7 @@ const P: Record<string, string> = {
   top: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v16M4 12h4M16 12h4"/><circle cx="12" cy="12" r="2.5"/>',
   fast: '<path d="M4 6v12l8-6zM12 6v12l8-6z"/>',
   sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+  music: '<path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/>',
   coin: '<circle cx="12" cy="12" r="8.5"/><path d="M14.5 9.2c-.6-.8-1.5-1.2-2.5-1.2-1.6 0-2.8.9-2.8 2 0 2.6 5.6 1.4 5.6 4 0 1.1-1.2 2-2.8 2-1.1 0-2.1-.5-2.6-1.3M12 6.5V8M12 16v1.5"/>',
   logout: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',

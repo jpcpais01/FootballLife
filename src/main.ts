@@ -8,6 +8,7 @@ import { addRoute, match, navigate, runPage, startRouter } from './router.ts';
 import { refreshMe, state } from './state.ts';
 import { errorBox, relTime } from './ui.ts';
 import { fullscreenOnFirstTap } from './fullscreen.ts';
+import { initSound, setScene, setSoundPrefs, soundPrefs } from './audio.ts';
 
 registerSW({ immediate: true });
 
@@ -170,9 +171,35 @@ function menu() {
     <a href="/clubs">${icon('users', 17)} Clubs</a>
     <a href="/patch-notes">${icon('notes', 17)} Patch notes</a>
     <div class="um-themes"><div class="label">Theme</div><div class="theme-row">${THEMES.map((t) => html`<button type="button" class="theme-sw ${t.id === theme() ? 'on' : ''}" data-theme-pick="${t.id}" style="--sw-acc:${t.accent}"><i style="background:${t.swatch}"></i>${t.name}</button>`)}</div></div>
+    ${soundMenu()}
     <button data-logout>${icon('logout', 17)} Sign out</button>
   </div>`;
 }
+
+// Sound: menu music and the match crowd, each on or off, with one volume.
+function soundMenu() {
+  const p = soundPrefs();
+  return html`<div class="um-sound"><div class="label">Sound</div><div class="snd-row">
+    <button type="button" class="snd-tog ${p.music ? 'on' : ''}" data-snd="music" aria-pressed="${p.music}">${icon('music', 16)} Music</button>
+    <button type="button" class="snd-tog ${p.crowd ? 'on' : ''}" data-snd="crowd" aria-pressed="${p.crowd}">${icon('users', 16)} Crowd</button>
+    <input type="range" class="snd-vol" data-vol min="0" max="100" step="1" value="${Math.round(p.vol * 100)}" aria-label="Volume" style="--v:${Math.round(p.vol * 100)}%">
+  </div></div>`;
+}
+document.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-snd]');
+  if (!b) return;
+  const k = b.dataset.snd as 'music' | 'crowd';
+  const on = !soundPrefs()[k];
+  setSoundPrefs({ [k]: on });
+  b.classList.toggle('on', on);
+  b.setAttribute('aria-pressed', String(on));
+});
+document.addEventListener('input', (e) => {
+  const r = e.target as HTMLInputElement;
+  if (!r.matches?.('[data-vol]')) return;
+  r.style.setProperty('--v', `${r.value}%`);
+  setSoundPrefs({ vol: +r.value / 100 });
+});
 
 // Colour themes: the classic floodlit look plus two alternatives, remembered per device.
 const THEMES = [
@@ -385,6 +412,7 @@ async function render(path: string) {
 
   const m = match(path);
   if (!m) return navigate('/', true);
+  setScene(path.startsWith('/match/') ? 'match' : 'menu');
   let el: HTMLElement;
   if (m.route.shell && state.user) {
     if (!shellMounted || !document.getElementById('page')) renderShell(path);
@@ -442,6 +470,7 @@ function safeTake(k: string) {
 
 startRouter(render);
 fullscreenOnFirstTap();
+initSound();
 // No pinch-zoom or ctrl-wheel zoom on the page (the 3D views handle their own gestures),
 // and no browser long-press menu outside text fields.
 for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
