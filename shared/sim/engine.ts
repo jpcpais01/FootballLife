@@ -1098,13 +1098,13 @@ class Engine {
     this.lastTouch = side;
     const fly = (to: number, done: () => void) => {
       this.passInfo = to >= 0 ? { to, x: tgt.x, y: tgt.y, cross: true } : null;
-      this.launch('air', tgt.x, tgt.y, to >= 0 ? Math.max(T, this.reach(to, tgt.x, tgt.y)) : T, z, to >= 0 && this.role(to) !== 'GK' ? 1.9 : 1.6, done);
+      this.launch('air', tgt.x, tgt.y, to >= 0 ? Math.max(T, this.reach(to, tgt.x, tgt.y)) : T, z, to >= 0 && this.role(to) !== 'GK' ? 1.78 : 1.6, done);
     };
     const clear = (marker: number, withQ: boolean) => {
       this.chase = [marker];
       this.landing = { x: tgt.x, y: tgt.y };
       this.passInfo = null;
-      this.launch('air', tgt.x, tgt.y, Math.max(T, this.reach(marker, tgt.x, tgt.y)), z, 1.9, () => {
+      this.launch('air', tgt.x, tgt.y, Math.max(T, this.reach(marker, tgt.x, tgt.y)), z, 1.78, () => {
         this.emit('cross', side, this.bx, this.by, { p: h, z, o: 'cleared', q: withQ ? marker : undefined });
         this.act(marker, 'header');
         this.lastTouch = D;
