@@ -19,7 +19,7 @@ export default defineConfig({
   plugins: [
     devApi(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'FootbalLife',
