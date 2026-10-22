@@ -109,7 +109,13 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   let replayReal = finished ? 0 : 0;
   let playing = true;
   let speed = 1;
-  let tab: 'feed' | 'stats' | 'lineups' = 'feed';
+  // One button steps through the side panels; the dots show where you are.
+  const TABS = [['feed', 'Commentary'], ['stats', 'Stats'], ['lineups', 'Line-ups']] as const;
+  let tab: (typeof TABS)[number][0] = 'feed';
+  const cycleInner = () => {
+    const i = TABS.findIndex(([k]) => k === tab);
+    return html`<span class="pc-label">${TABS[i][1]}</span><span class="pc-dots">${TABS.map((_, j) => html`<i class="${j === i ? 'on' : ''}"></i>`)}</span><span class="pc-next">${icon('arrow', 14)}</span>`;
+  };
   const kickoffHour = new Date(kickoff).getHours();
   const night = kickoffHour >= 17 || kickoffHour < 7;
   const prefQ = (localStorage.getItem('fl-quality') as Quality | null) ?? undefined;
@@ -122,14 +128,13 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   const kitBar = (c: { primary: string }) => html`<span class="kit" style="background:${c.primary}"></span>`;
   mount(el, html`
     <div class="row between match-head" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
-      <div class="row" style="gap:10px"><button class="btn sm ghost" data-back aria-label="Back">${icon('back', 16)}</button>
+      <div class="row" style="gap:10px">
         <div><div class="eyebrow">${m.kind === 'friendly' ? 'Friendly' : m.cup ? `FootbalLife Cup · ${m.cup.name}` : `League · Round ${m.round}`}</div><div class="h3">${m.home.name} vs ${m.away.name}</div></div></div>
       <span class="chip" id="status"></span>
     </div>
     <div class="match-wrap">
       <div>
         <div class="stage" id="stage">
-          <button class="stage-back" data-back aria-label="Go back" title="Go back">${icon('back', 16)}</button>
           <div class="scorebug">
             <div>${kitBar(lineups[0].colors)}<span>${lineups[0].short}</span></div>
             <div class="sb-score" id="score">0–0</div>
@@ -152,7 +157,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
         <div id="controls"></div>
       </div>
       <div class="card" style="padding:14px">
-        <div class="tabs" style="margin-bottom:10px">${(['feed', 'stats', 'lineups'] as const).map((t) => html`<button data-tab="${t}" class="${t === tab ? 'on' : ''}">${t === 'feed' ? 'Commentary' : t === 'stats' ? 'Stats' : 'Line-ups'}</button>`)}</div>
+        <button class="panel-cycle" data-cycle aria-label="Show next panel" title="Tap for the next panel">${cycleInner()}</button>
         <div id="panel"></div>
       </div>
     </div>`);
@@ -516,10 +521,10 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
       try { localStorage.setItem('fl-ff-board', boardPref ? 'on' : 'off'); } catch { /* ignore */ }
       el.querySelector('[data-ffb]')!.classList.toggle('on', boardPref);
     }
-    const tb = t.closest('[data-tab]') as HTMLElement | null;
-    if (tb) {
-      tab = tb.dataset.tab as typeof tab;
-      el.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b === tb));
+    const cb = t.closest('[data-cycle]') as HTMLElement | null;
+    if (cb) {
+      tab = TABS[(TABS.findIndex(([k]) => k === tab) + 1) % TABS.length][0];
+      cb.innerHTML = cycleInner().html;
       renderPanel(currentClock());
     }
     if (t.closest('#pp')) {

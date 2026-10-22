@@ -98,8 +98,8 @@ img, svg { display: block; }
   color: var(--text); background: rgba(255,255,255,0.07); border: 1px solid var(--line-2); transition: background 0.2s var(--ease), transform 0.2s var(--ease); }
 .top-back:active, .stage-back:active { transform: scale(0.92); background: rgba(255,255,255,0.14); }
 .app.is-sub .top-back { display: grid; }
+.app.at-match .top-back { display: none; }
 
-.stage-back { position: absolute; top: 10px; left: 10px; z-index: 4; background: rgba(var(--ink-rgb),0.75); backdrop-filter: blur(8px); }
 .brand-mark { width: 30px; height: 30px; }
 .wordmark { font-family: var(--display); font-weight: 800; font-style: italic; font-size: 23px; letter-spacing: 0.5px; line-height: 1; }
 .wordmark b { color: var(--lime); font-weight: 800; }
@@ -334,6 +334,15 @@ a.list-item:hover { background: rgba(255, 255, 255, 0.02); }
 .tabs { display: flex; gap: 4px; margin-bottom: 18px; overflow-x: auto; scrollbar-width: none; padding: 4px; border-radius: 999px; background: rgba(255,255,255,0.04); border: 1px solid var(--line); width: fit-content; max-width: 100%; }
 .tabs button { height: 36px; padding: 0 16px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-weight: 650; font-size: 14px; cursor: pointer; white-space: nowrap; transition: background .25s var(--ease), color .2s; }
 .tabs button:hover { color: var(--text); }
+/* Match side panel: one button that cycles Commentary → Stats → Line-ups. */
+.panel-cycle { display: flex; align-items: center; gap: 8px; width: 100%; height: 40px; margin-bottom: 10px; padding: 0 6px 0 14px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: var(--text); font: inherit; font-weight: 700; font-size: 14px; cursor: pointer; transition: background .2s var(--ease), transform .15s var(--ease); }
+.panel-cycle:hover { background: rgba(255,255,255,0.08); }
+.panel-cycle:active { transform: scale(0.97); }
+.panel-cycle .pc-label { flex: 1; min-width: 0; text-align: left; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panel-cycle .pc-dots { display: flex; flex: none; gap: 3px; }
+.panel-cycle .pc-dots i { display: block; flex: none; width: 6px; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.25); transition: width .25s var(--ease), background .25s; }
+.panel-cycle .pc-dots i.on { width: 12px; background: rgb(var(--accent-rgb)); }
+.panel-cycle .pc-next { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(var(--accent-rgb),0.16); color: rgb(var(--accent-rgb)); }
 .tabs button.on { color: #0a0c0e; background: #f4f6f8; }
 
 .countdown { font-family: var(--display); font-weight: 700; font-size: 28px; letter-spacing: 0.5px; font-variant-numeric: tabular-nums; }
@@ -1100,7 +1109,6 @@ a.bk-tie:hover { border-color: var(--line-2); }
   .app.at-match .topnav { display: none; }
   .app.at-match main { padding-top: 8px; }
   .match-head { display: none !important; }
-  .stage-back { display: grid; }
   #controls > .row { margin-top: 6px !important; }
   #controls .timeline { margin-top: 4px; height: 22px; }
   .match-wrap { grid-template-columns: minmax(0, 1fr) minmax(220px, 30%); gap: 12px; align-items: start; }
