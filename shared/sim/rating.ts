@@ -25,6 +25,12 @@ export function rateLine(l: PlayerLine, role: Position, scored: number, conceded
  */
 export function liveRating(events: MatchEvent[], upTo: number, idx: number, role: Position): number {
   const side = idx < 11 ? 0 : 1;
+  const { line, score } = lineFromEvents(events, upTo, idx);
+  return rateLine(line, role, score[side], score[1 - side]);
+}
+
+/** One player's stat line (unrated) from the events up to index `upTo`, plus the score then. */
+export function lineFromEvents(events: MatchEvent[], upTo: number, idx: number): { line: PlayerLine; score: [number, number] } {
   const l: PlayerLine = { idx, goals: 0, assists: 0, shots: 0, onTarget: 0, passes: 0, passesDone: 0, keyPasses: 0, tackles: 0, interceptions: 0, saves: 0, yellow: 0, red: 0, rating: 6 };
   const score: [number, number] = [0, 0];
   let lastPass: { from: number; t: number } | null = null;
@@ -73,5 +79,5 @@ export function liveRating(events: MatchEvent[], upTo: number, idx: number, role
       lastPass = null;
     }
   }
-  return rateLine(l, role, score[side], score[1 - side]);
+  return { line: l, score };
 }

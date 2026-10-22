@@ -352,11 +352,17 @@ async function playMatch(db: Db, m: MatchRow) {
   const pens = m.kind === 'cup' && result.score[0] === result.score[1] ? shootout(h.team, a.team, m.seed) : null;
   if (pens) result.pens = pens;
   const endsAt = new Date(new Date(m.kickoff_at).getTime() + totalReal(result.timeline) * 1000);
+  // Recorded motion lives in its own table so the match row stays small.
+  const tracks = result.tracks ?? [];
+  delete result.tracks;
   const r = await db.query(
     `UPDATE matches SET status = 'played', home_goals = $2, away_goals = $3, ends_at = $4, lineups = $5, result = $6, pens = $7
      WHERE id = $1 AND status = 'scheduled' RETURNING id`,
     [m.id, result.score[0], result.score[1], endsAt.toISOString(), JSON.stringify([h.snap, a.snap]), JSON.stringify(result), pens ? JSON.stringify(pens.score) : null],
   );
+  if (r.length && tracks.length) {
+    await db.query('INSERT INTO match_tracks (match_id, windows) VALUES ($1, $2) ON CONFLICT (match_id) DO UPDATE SET windows = EXCLUDED.windows', [m.id, JSON.stringify(tracks)]);
+  }
   return r.length > 0;
 }
 
@@ -542,7 +548,7 @@ export async function tick(db: Db, force = false) {
   lastTick = now;
   await ensureWorld(db);
   await ensureCup(db);
-  const due = await db.query<MatchRow>("SELECT * FROM matches WHERE status = 'scheduled' AND kickoff_at <= now() ORDER BY kickoff_at LIMIT 12");
+  const due = await db.query<MatchRow>("SELECT * FROM matches WHERE status = 'scheduled' AND kickoff_at <= now() ORDER BY kickoff_at LIMIT 6");
   for (const m of due) await playMatch(db, m);
   const done = await db.query<MatchRow>("SELECT * FROM matches WHERE status = 'played' AND ends_at <= now() ORDER BY ends_at LIMIT 20");
   for (const m of done) await finalizeMatch(db, m);

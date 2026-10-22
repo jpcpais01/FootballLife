@@ -2,10 +2,11 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ATTRIBUTES, generateAttributes, overall, POSITIONS, STARTING_LEVEL, type Attr } from '../shared/attributes.ts';
 import { sanitizeAppearance } from '../shared/appearance.ts';
 import { FRIENDLY_COOLDOWN_MIN, TRAINING_COOLDOWN_H } from '../shared/config.ts';
-import { realAt } from '../shared/timeline.ts';
+import { clockAt, realAt } from '../shared/timeline.ts';
 import { FORMATION_KEYS, getFormation, sanitizeTactics } from '../shared/formations.ts';
 import { hashSeed } from '../shared/rng.ts';
 import type { MatchResult } from '../shared/sim/types.ts';
+import type { TrackWindow } from '../shared/sim/tracks.ts';
 import { clearCookie, currentUser, login, logout, register, sessionCookie, type User } from './auth.ts';
 import { getDb, hasDatabaseConfig, type Db } from './db.ts';
 import { sanitizeBadge } from '../shared/badge.ts';
@@ -605,7 +606,18 @@ route('GET', '/api/matches/:id', async (c) => {
     while (revealed < res.events.length && realAt(res.events[revealed].t, res.timeline) <= elapsed + REVEAL_AHEAD) revealed++;
   }
   const since = Math.max(0, Math.min(revealed, Number(c.query.get('since')) || 0));
+  // Recorded motion for the true-speed stretches, released on the same look-ahead as events.
+  const tw = Math.max(0, Number(c.query.get('tw')) || 0);
+  const upTo = finished ? 1e9 : clockAt(elapsed + REVEAL_AHEAD, res.timeline);
+  const tr = await c.db.query<{ ws: TrackWindow[] | null }>(
+    `SELECT (SELECT jsonb_agg(x.w ORDER BY x.i) FROM jsonb_array_elements(windows) WITH ORDINALITY AS x(w, i)
+       WHERE x.i > $2 AND (x.w->>'t0')::float <= $3) AS ws FROM match_tracks WHERE match_id = $1`,
+    [c.params[0], tw, upTo],
+  );
+  const tracks = tr[0]?.ws ?? [];
   return {
+    tracks,
+    tracksFrom: tw,
     match: dto,
     ready: true,
     serverNow: now,

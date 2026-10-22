@@ -6,7 +6,7 @@ import { DEFAULT_TACTICS, getFormation } from '../../shared/formations.ts';
 import { Rng } from '../../shared/rng.ts';
 import { simulateMatch } from '../../shared/sim/engine.ts';
 import type { SimTeam } from '../../shared/sim/types.ts';
-import { clockAt, rateAt, totalReal } from '../../shared/timeline.ts';
+import { decodeWindow } from '../../shared/sim/tracks.ts';
 import { MatchViewer, type ViewerTeam } from './viewer.ts';
 
 function team(name: string, short: string, primary: string, secondary: string, seed: number): { sim: SimTeam; view: ViewerTeam } {
@@ -29,26 +29,31 @@ export function startDemo(container: HTMLElement): () => void {
   const night = new Date().getHours() >= 18 || new Date().getHours() < 7;
   const viewer = new MatchViewer(container, [a.view, b.view], res.halftimeAt, { night, quality: 'low', crowd: 4000 });
   viewer.setEvents(res.events);
+  viewer.setTracks((res.tracks ?? []).map(decodeWindow));
   viewer.setMode('broadcast');
-  const total = totalReal(res.timeline);
-  // Loop a lively stretch of the first half at broadcast pace.
-  let real = 30;
+  // Loop the match's highlights back to back, at true speed, straight from the recording.
+  const wins = (res.tracks ?? []).map((w) => [w.t0 + 1, w.t1 - 1] as const).filter(([a, b]) => b > a);
+  let wi = 0;
+  let t = wins.length ? wins[0][0] : 30;
   let raf = 0;
   let last = performance.now();
-  let lastGoals = 0;
+  let lastGoals = res.events.filter((e) => e.k === 'goal' && e.t <= t).length;
   const loop = () => {
     const now = performance.now();
-    real += Math.min(0.1, (now - last) / 1000);
+    t += Math.min(0.1, (now - last) / 1000);
     last = now;
-    if (real > Math.min(total, 260)) real = 30;
-    const t = clockAt(real, res.timeline);
+    if (wins.length && t > wins[wi][1]) {
+      wi = (wi + 1) % wins.length;
+      t = wins[wi][0];
+      lastGoals = res.events.filter((e) => e.k === 'goal' && e.t <= t).length;
+    }
     const goals = res.events.filter((e) => e.k === 'goal' && e.t <= t).length;
     if (goals > lastGoals) {
       const g = res.events.filter((e) => e.k === 'goal' && e.t <= t).pop()!;
       viewer.goal(g.s);
     }
     lastGoals = goals;
-    viewer.render(t, rateAt(t, res.timeline));
+    viewer.render(t, 1);
     raf = requestAnimationFrame(loop);
   };
   raf = requestAnimationFrame(loop);
