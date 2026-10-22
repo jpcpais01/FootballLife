@@ -10,7 +10,24 @@ import { errorBox, relTime } from './ui.ts';
 import { fullscreenOnFirstTap } from './fullscreen.ts';
 import { initSound, setScene, setSoundPrefs, soundPrefs } from './audio.ts';
 
-registerSW({ immediate: true });
+// New deploys install in the background and switch over while the game is out
+// of sight, never by reloading the page under the player.
+let swUpdate: ((reload?: boolean) => Promise<void>) | null = null;
+let swReg: ServiceWorkerRegistration | undefined;
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    swUpdate = updateSW;
+    if (document.hidden) void updateSW(true);
+  },
+  onRegisteredSW(_url, reg) {
+    swReg = reg;
+  },
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && swUpdate) void swUpdate(true);
+  else if (!document.hidden) void swReg?.update().catch(() => {});
+});
 
 addRoute('/', () => import('./pages/home.ts').then((m) => m.homePage));
 addRoute('/login', () => import('./pages/auth.ts').then((m) => m.authPage), false);
@@ -141,6 +158,14 @@ function isActive(href: string, path: string) {
 }
 
 let shellMounted = false;
+// Markup last written into a shell element, so unchanged refreshes leave it alone
+// instead of rebuilding it (which flickers images and icons).
+const written = new WeakMap<Element, string>();
+function setInner(el: Element, h: string) {
+  if (written.get(el) === h) return;
+  el.innerHTML = h;
+  written.set(el, h);
+}
 let enterSeq = 0;
 // A background refresh found newer data: re-run the page in place, keeping the scroll.
 let quiet = false;
@@ -257,6 +282,9 @@ function renderShell(path: string) {
     <nav class="dock" aria-label="Main menu"><div class="dock-in" id="dock">${dockHtml(path)}</div></nav>
     <div class="rotate-hint" role="dialog" aria-label="Turn your phone sideways"><div><div class="rh-phone"></div><h2>Turn your phone sideways</h2><p>FootbalLife is made to be played in landscape.</p><button class="btn ghost" data-portrait>Stay in portrait</button></div></div>
   </div>`);
+  written.set(document.getElementById('dock')!, dockHtml(path).map((r) => r.html).join(''));
+  written.set(document.getElementById('me-top')!, meTop().html);
+  written.set(document.getElementById('user-menu')!, menu().html);
   dockState(path, true);
   applyTint();
   try { if (sessionStorage.getItem('fl-portrait') === '1') root.querySelector('.app')?.classList.add('portrait-ok'); } catch { /* storage unavailable */ }
@@ -275,7 +303,9 @@ function updateNav(path: string, close = true) {
     }
   });
   const dock = document.getElementById('dock');
-  if (dock) dock.innerHTML = dockHtml(path).map((r) => r.html).join('');
+  const dh = dockHtml(path).map((r) => r.html).join('');
+  // Only touch the dock when it changed, so it doesn't flicker on every refresh.
+  if (dock) setInner(dock, dh);
   dockState(path);
   if (close) closeMenu();
 }
@@ -447,10 +477,18 @@ async function render(path: string) {
 // (The page element must survive: pages keep listeners on it.)
 document.addEventListener('me-changed', () => {
   if (!shellMounted || !state.player) return;
+  // Rewrite each piece only when its markup changed: a no-op refresh must not flash.
   const top = document.getElementById('me-top');
-  if (top) top.innerHTML = meTop().html;
+  if (top) setInner(top, meTop().html);
   const m = document.getElementById('user-menu');
-  if (m) m.outerHTML = menu().html;
+  const mh = menu().html;
+  if (m && written.get(m) !== mh) {
+    const open = !m.hidden;
+    m.outerHTML = mh;
+    const n = document.getElementById('user-menu')!;
+    written.set(n, mh);
+    n.hidden = !open;
+  }
   applyTint();
   updateNav(location.pathname, false);
 });

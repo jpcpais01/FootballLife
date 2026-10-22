@@ -33,10 +33,16 @@ export async function homePage(el: HTMLElement) {
   let focus = lastFocus;
   let tiles: Tile[] = [];
 
+  let last = '';
   const load = async (first = false) => {
     try {
-      data = first ? await api.page('/api/home') : await api.get('/api/home');
+      const d = first ? await api.page('/api/home') : await api.get('/api/home');
       if (!alive) return;
+      // The 30s poll re-renders only when something actually changed.
+      const json = JSON.stringify(d);
+      if (json === last) return;
+      last = json;
+      data = d;
       render();
     } catch (e) {
       if (alive && !data) mount(el, errorBox((e as Error).message));

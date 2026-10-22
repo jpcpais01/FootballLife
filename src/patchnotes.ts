@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-22T01:00:00Z',
+    entries: [
+      { title: 'No more random flashing', body: 'Pages no longer flash or redraw themselves out of nowhere. The home screen, the top bar and the menu bar now only change when something actually changed, like a new result or more coins, and game updates install quietly while FootbalLife is in the background instead of reloading the screen while you play.' },
+    ],
+  },
+  {
     hour: '2026-10-22T00:30:00Z',
     entries: [
       { title: 'Your real face, everywhere', body: 'Every portrait in the game is now a shot of your actual 3D player, in your club colours: the top bar, squad lists, the club chat, match line-ups and player pages. Change your look and every portrait follows.' },
