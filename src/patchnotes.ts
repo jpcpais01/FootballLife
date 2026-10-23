@@ -9,6 +9,7 @@ export const PATCH_NOTES: PatchGroup[] = [
   {
     hour: '2026-10-23T18:00:00Z',
     entries: [
+      { title: 'Natural hands', body: 'Players\' hands no longer stick out with the palms facing forward. They now hang relaxed in line with the arm, palms towards the legs, at home, in the locker room, in training and in matches.' },
       { title: 'Season badge no longer hidden', body: 'On phones held sideways, the small Season badge with your league place on the home screen slid under the coins and profile bar in the top right. It now sits clear of it, a little further left.' },
     ],
   },
