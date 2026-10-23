@@ -10,7 +10,7 @@ import { gear, type Equipped } from '../../shared/cosmetics.ts';
 import { type Pattern } from './character/bodyPaint.ts';
 import { whenCharacterReady } from './character/body.ts';
 import { buildCharacter, type CharacterKit, type Detail } from './character/character.ts';
-import { type ActOpts, type ActionKind, type AnimInput, Animator } from './rig/animator.ts';
+import { type ActOpts, type ActionKind, type AnimInput, Animator, seeded } from './rig/animator.ts';
 import { duration } from './rig/clip.ts';
 import { getClip, hasClip, loadMocap } from './rig/library.ts';
 import { B, makeBones, setBindPose } from './rig/skeleton.ts';
@@ -143,7 +143,7 @@ export class Figure {
   celebrate = 0;
   celStyle = '';
   /** Team-mates celebrate their own way: some jump for joy, some cheer. */
-  private jumper = Math.random() < 0.4;
+  private jumper = false;
   /** True for the goalscorer, who does their own celebration. */
   star = false;
   /** One-shot training pose held at progress `poseK` (0..1; juggling counts beats). */
@@ -183,7 +183,7 @@ export class Figure {
   /** A keeper with the ball in his hands. Set by the match viewer. */
   hold = false;
 
-  constructor(kit: Kit, look: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped, opts: { base?: boolean; number?: number; scale?: number; detail?: Detail; sync?: boolean } = {}) {
+  constructor(kit: Kit, look: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped, opts: { base?: boolean; number?: number; scale?: number; detail?: Detail; sync?: boolean; seed?: number } = {}) {
     loadMocap(`${import.meta.env.BASE_URL}anims/mocap.json`);
     // Older and bot looks may lack newer features; fill them in consistently.
     const app = sanitizeAppearance(look);
@@ -260,7 +260,10 @@ export class Figure {
     };
     if (opts.sync) whenCharacterReady(build);
     else whenCharacterReady(() => queueBuild(build));
-    this.anim = new Animator(this.bones, this.root);
+    // Who he is decides how he moves: the same player carries himself the same way every match.
+    const seed = opts.seed ?? Math.floor(Math.random() * 2 ** 31);
+    this.anim = new Animator(this.bones, this.root, seed);
+    this.jumper = seeded(seed ^ 0x5bd1e995)() < 0.4;
     this.root.scale.setScalar(scale);
   }
 

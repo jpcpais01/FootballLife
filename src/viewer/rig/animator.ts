@@ -23,7 +23,63 @@ export interface ActOpts {
   contactIn?: number;
   /** -1 plays the mirrored clip: left foot, or a dive to the player's right. */
   side?: 1 | -1;
+  /**
+   * Seeds this take's own variation (follow-through tempo, arm carriage, and
+   * for moves either side can play, the side), so a replay plays it the same way.
+   */
+  seed?: number;
 }
+
+/** A small seeded generator: the same seed always gives the same numbers. */
+export function seeded(seed: number) {
+  let a = (seed | 0) ^ 0x9e3779b9;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Stable number for a string (a player's name, a moment in the match). */
+export function hashOf(text: string) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+/**
+ * How one player carries himself, the same every match: stride length (and so
+ * cadence), how far he leans into his running, how wide he holds his arms, how
+ * he holds his head, and the tempo of his celebrations.
+ */
+interface Style {
+  stride: number;
+  lean: number;
+  arms: number;
+  nod: number;
+  tilt: number;
+  celRate: number;
+  /** Follow-throughs: some players snap through a strike, others let it flow. */
+  tempo: number;
+}
+
+function styleOf(r: () => number): Style {
+  const n = () => r() * 2 - 1;
+  return {
+    stride: 1 + n() * 0.07,
+    lean: 0.02 + r() * 0.07,
+    arms: n() * 0.09,
+    nod: n() * 0.06,
+    tilt: n() * 0.05,
+    celRate: 0.9 + r() * 0.22,
+    tempo: 0.92 + r() * 0.16,
+  };
+}
+
+/** Moves either side can play just as well: a take picks its side from its seed. */
+const EITHER_SIDE = new Set<ActionKind>(['trap', 'chest', 'header', 'keeperSet', 'keeperMiss', 'keeperDirect', 'jump']);
+export const eitherSide = (kind: ActionKind) => EITHER_SIDE.has(kind);
 
 export interface AnimInput {
   /** Ground speed in world m/s and its split along the facing (fwd) and to the player's left (side). */
@@ -52,6 +108,12 @@ interface Running {
   t: number;
   contact: number;
   rate: number;
+  /** Playback rate after contact (or for a take with no contact), the take's own. */
+  after: number;
+  /** Extra arm spread for this take (radians). */
+  flare: number;
+  /** The hands meet the ball: no arm styling on top. */
+  hands: boolean;
   w: number;
   /** Travel already handed to the root (body units), taken off the clip's hips from then on. */
   sx: number;
@@ -128,6 +190,19 @@ function rebase(pose: Pose, sx: number, sz: number, yaw: number) {
   pose.q[3] = hw * qw - hy * qy;
 }
 
+/** Turns bone `b` of `pose` by `angle` about the unit axis (x, y, z) of its parent's frame. */
+function turnBone(pose: Pose, b: number, x: number, y: number, z: number, angle: number) {
+  if (!angle) return;
+  const j = b * 4;
+  const s = Math.sin(angle / 2);
+  const ox = x * s, oy = y * s, oz = z * s, ow = Math.cos(angle / 2);
+  const qx = pose.q[j], qy = pose.q[j + 1], qz = pose.q[j + 2], qw = pose.q[j + 3];
+  pose.q[j] = ow * qx + ox * qw + oy * qz - oz * qy;
+  pose.q[j + 1] = ow * qy - ox * qz + oy * qw + oz * qx;
+  pose.q[j + 2] = ow * qz + ox * qy - oy * qx + oz * qw;
+  pose.q[j + 3] = ow * qw - ox * qx - oy * qy - oz * qz;
+}
+
 /** Moves one bone of `pose` toward `src` by w (nlerp). */
 function nlerpBone(pose: Pose, src: Pose, b: number, w: number) {
   const j = b * 4;
@@ -162,8 +237,10 @@ interface FootLock {
 export class Animator {
   private bones: THREE.Bone[];
   private root: THREE.Object3D;
-  private phase = Math.random();
-  private idleT = Math.random() * 10;
+  private rng: () => number;
+  private style: Style;
+  private phase: number;
+  private idleT: number;
   private celT = 0;
   private celW = 0;
   private celName = '';
@@ -192,13 +269,19 @@ export class Animator {
   private vS = 0;
   private holdW = 0;
   /** Each keeper has his own way of waiting. */
-  private keeperIdle = Math.random() < 0.5 || !hasClip('keeperIdle2') ? 'keeperIdle' : 'keeperIdle2';
+  private keeperIdle: string;
   /** The locomotion pose on its own, for legs that keep running under an action. */
   private loco = new Pose();
 
-  constructor(bones: THREE.Bone[], root: THREE.Object3D) {
+  /** `seed` makes the player's style and timing his own and the same every time (a hash of who he is). */
+  constructor(bones: THREE.Bone[], root: THREE.Object3D, seed = Math.floor(Math.random() * 2 ** 31)) {
     this.bones = bones;
     this.root = root;
+    this.rng = seeded(seed);
+    this.style = styleOf(this.rng);
+    this.phase = this.rng();
+    this.idleT = this.rng() * 10;
+    this.keeperIdle = this.rng() < 0.5 || !hasClip('keeperIdle2') ? 'keeperIdle' : 'keeperIdle2';
     const lock = (u: number, k: number, f: number): FootLock => ({ up: bones[u], knee: bones[k], foot: bones[f], locked: false, w: 0, at: new THREE.Vector3() });
     this.feet = [lock(B.LeftUpLeg, B.LeftLeg, B.LeftFoot), lock(B.RightUpLeg, B.RightLeg, B.RightFoot)];
   }
@@ -228,6 +311,25 @@ export class Animator {
     }
   }
 
+  /**
+   * Layers the player's own way of carrying himself over whatever is playing:
+   * a forward lean that grows as he runs, arms held wider or tighter (plus this
+   * take's own flare during an action), and a slight tilt and nod of the head.
+   */
+  private carriage(pose: Pose, v: number, actW: number) {
+    const st = this.style;
+    const run = Math.min(1, v / 4);
+    const free = 1 - actW * 0.6;
+    // Hands that meet the ball (a save, a throw) keep exactly where the take puts them.
+    const handsFree = this.action?.hands ? 1 - actW : 1;
+    const flare = this.action && !this.action.hands ? this.action.flare * actW : 0;
+    turnBone(pose, B.Spine, 1, 0, 0, st.lean * (0.3 + 0.7 * run) * free);
+    turnBone(pose, B.LeftArm, 0, 0, 1, -(st.arms * free + flare) * handsFree);
+    turnBone(pose, B.RightArm, 0, 0, 1, (st.arms * free + flare) * handsFree);
+    turnBone(pose, B.Head, 1, 0, 0, st.nod * free);
+    turnBone(pose, B.Head, 0, 0, 1, st.tilt * free);
+  }
+
   /** Holds the current pose and blends from it over `dur` seconds. */
   private cut(dur: number) {
     if (!this.hasPose) return;
@@ -243,7 +345,9 @@ export class Animator {
    * that frame (body units, in the player's own frame), or null.
    */
   act(kind: ActionKind, opts: ActOpts = {}): THREE.Vector3 | null {
-    const clip = this.clip(CLIP_OF[kind] ?? kind, opts.side === -1);
+    const vr = seeded(opts.seed ?? Math.floor(this.rng() * 2 ** 31));
+    const side = opts.side ?? (EITHER_SIDE.has(kind) && vr() < 0.5 ? -1 : 1);
+    const clip = this.clip(CLIP_OF[kind] ?? kind, side === -1);
     const dur = duration(clip);
     const contact = clip.contact ?? dur * 0.4;
     let rate = 1;
@@ -261,7 +365,11 @@ export class Animator {
     const eff = this.effector(clip, contact, part);
     // On the move, the support leg (or both legs for a catch) keeps the stride while the rest plays the action.
     const legs = WHOLE_BODY.has(kind) ? [] : part === 'foot' ? [1 - this.kickSide] : [0, 1];
-    this.action = { clip, t, contact, rate, w: busy && t >= 0 ? 1 : 0, sx: 0, sz: 0, syaw: 0, shifted: false, legs };
+    // This take's own touch: the follow-through runs a little quicker or slower (contact stays where the game puts it),
+    // and the arms are held a shade wider or tighter.
+    const after = this.style.tempo * (0.92 + vr() * 0.16);
+    const flare = (vr() * 2 - 1) * 0.12;
+    this.action = { clip, t, contact, rate, after, flare, hands: part === 'hands' || kind === 'throwIn' || kind === 'keeperThrow', w: busy && t >= 0 ? 1 : 0, sx: 0, sz: 0, syaw: 0, shifted: false, legs };
     return eff;
   }
 
@@ -390,7 +498,7 @@ export class Animator {
       strideW += w * (c.speed || 1) * duration(c);
     }
     // One shared phase: it advances at the body's speed over the blended stride length.
-    if (moveW > 1e-3) this.phase = (this.phase + (dt * v) / (strideW / moveW)) % 1;
+    if (moveW > 1e-3) this.phase = (this.phase + (dt * v) / ((strideW / moveW) * this.style.stride)) % 1;
     for (const [c, w] of weights) {
       if (w <= 1e-3) continue;
       sampleLoopPhase(c, this.phase, this.tmp);
@@ -420,14 +528,14 @@ export class Animator {
     if (inp.celebrate) {
       if (inp.celebrate !== this.celName) {
         this.celName = inp.celebrate;
-        this.celT = Math.random() * 0.3;
+        this.celT = this.rng() * 0.6;
       }
       // Running to the scorer or the corner flag is running; the celebration plays once he gets there.
       const want = Math.max(0, Math.min(1, 1 - (inp.speed - 1.2) / 1.6));
       this.celW = this.celW < want ? Math.min(want, this.celW + dt * 4) : Math.max(want, this.celW - dt * 4);
     } else this.celW = Math.max(0, this.celW - dt * 4);
     if (this.celW > 0 && this.celName) {
-      this.celT += dt;
+      this.celT += dt * this.style.celRate;
       const cc = this.clip(this.celName);
       // One-off takes (a jump for joy) repeat.
       sample(cc, cc.loop ? this.celT : this.celT % duration(cc), this.tmp);
@@ -445,7 +553,7 @@ export class Animator {
     const a = this.action;
     if (a) {
       const dur = duration(a.clip);
-      a.t += dt * (a.t < a.contact ? a.rate : 1);
+      a.t += dt * (a.t < a.contact ? a.rate : a.after);
       if (a.t >= dur) this.action = null;
       else if (a.t >= 0) {
         // Starting: the held pose blends into the action, so the wind-up begins from where the body is.
@@ -496,6 +604,9 @@ export class Animator {
       sample(c, Math.min(duration(c), 0.8), this.tmp);
       for (const b of ARMS) nlerpBone(pose, this.tmp, b, hw);
     }
+
+    // ---- His own carriage ----
+    this.carriage(pose, v, actW);
 
     // ---- Blend out of a cut ----
     if (this.fromT < this.fromDur) {

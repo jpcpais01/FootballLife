@@ -635,6 +635,34 @@ img.av3d { display: block; object-fit: cover; transition: opacity .3s; }
   .life-card { padding: 12px; }
 }
 
+.house-main-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.house-main-head .tabs { margin: 0; flex: 1; min-width: 0; }
+.house-coins { display: none; position: absolute; right: 12px; top: 12px; }
+.stage-title .eyebrow { margin-bottom: 2px; }
+.stage-title .st-name { font: 800 22px/1.1 var(--font); letter-spacing: -0.01em; }
+.stage-title .st-meta { margin-top: 3px; font-size: 12px; color: rgba(255,255,255,.72); }
+.stage-hint { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px;
+  background: rgba(var(--ink-rgb),.62); backdrop-filter: blur(10px); border: 1px solid var(--line); color: var(--muted); font-size: 12px; white-space: nowrap; pointer-events: none;
+  animation: hint-out .6s var(--ease) 7s forwards; }
+@keyframes hint-out { to { opacity: 0; transform: translate(-50%, 6px); } }
+@media (orientation: portrait) and (max-width: 700px) { .house-stage { height: 56vh; height: 56svh; } }
+/* Landscape phone: the house fills the screen, the panel scrolls beside it. */
+@media (orientation: landscape) and (max-height: 540px) {
+  .house-page > .page-head { display: none; }
+  .house-layout { grid-template-columns: minmax(0, 1fr) minmax(260px, 34%); gap: 12px; height: calc(100dvh / 0.88 - 48px); align-items: stretch; }
+  .app.is-sub .house-layout { height: calc((100dvh - var(--top-h)) / 0.88 - 48px); }
+  .house-stage { position: relative; top: 0; height: 100%; margin: 0; border-radius: var(--radius); border: 1px solid var(--line); }
+  .house-main { height: 100%; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+  .house-main-head { position: sticky; top: 0; z-index: 2; padding-bottom: 8px; margin-bottom: 4px; background: linear-gradient(180deg, var(--bg) 70%, transparent); }
+  .house-coins { display: inline-flex; }
+  .house-main .tabs { overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+  .house-main .tabs button { padding-left: 14px; padding-right: 14px; }
+  .stage-switch { top: auto; bottom: 10px; right: 10px; }
+  .house-stage .stage-hint { display: inline-flex; left: 12px; transform: none; bottom: 14px; }
+  @keyframes hint-out { to { opacity: 0; } }
+  .stage-title .st-name { font-size: 19px; }
+}
+
 /* ---------- cup ---------- */
 .bracket { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 6px; scroll-snap-type: x mandatory; }
 .bk-col { flex: 1 0 210px; display: flex; flex-direction: column; scroll-snap-align: start; }
