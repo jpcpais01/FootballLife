@@ -7,6 +7,13 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T15:00:00Z',
+    entries: [
+      { title: 'Clever movement in attack', body: 'Attackers now make the runs real players make. As a pass travels, a team-mate further up reads where the next ball will go and runs into the space beyond the man receiving it, the classic third-man run. A player with a defender tight on him takes a couple of steps away to drag his marker, then darts back towards the ball, and the gap that opens is the pass. Players around the ball also stay out of the lane in front of the dribbler, so he has grass to run into.' },
+      { title: 'Rotations and balance', body: 'When a full-back goes round the outside, his winger comes inside into the pocket between defenders instead of the two standing on top of each other. When too many players have gone forward, the deepest spare midfielder or full-back holds back, so a team always keeps three players behind the ball to stop the counter.' },
+    ],
+  },
+  {
     hour: '2026-10-23T14:50:00Z',
     entries: [
       { title: 'A new training ground', body: 'Training now happens at the club academy at golden hour: real grass with mowing stripes and worn patches, a modern academy building, a covered stand, trees swaying in the breeze, floodlights, cones, ladders, hurdles, mannequins and a cart full of balls. The goal has a proper net that bulges when you score, and the light, shadows and colours match the stadium.' },

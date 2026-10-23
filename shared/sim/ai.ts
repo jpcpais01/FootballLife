@@ -92,13 +92,17 @@ interface Mind {
   mark: Int16Array;
   /** The back line's height per side (own frame), moved in steps like a real line. */
   line: [number, number];
+  /** A movement a player has committed to: kind (0 none), until when, and where. */
+  move: Float64Array;
+  /** When each player may make another such movement. */
+  cool: Float64Array;
   t: number;
 }
 const minds = new WeakMap<Float64Array, Mind>();
 function mindOf(w: World): Mind {
   let m = minds.get(w.mem);
   if (!m) {
-    m = { tx: new Float64Array(22).fill(NaN), ty: new Float64Array(22).fill(NaN), settled: new Uint8Array(22), presser: [-1, -1], mark: new Int16Array(22).fill(-1), line: [NaN, NaN], t: -1 };
+    m = { tx: new Float64Array(22).fill(NaN), ty: new Float64Array(22).fill(NaN), settled: new Uint8Array(22), presser: [-1, -1], mark: new Int16Array(22).fill(-1), line: [NaN, NaN], move: new Float64Array(22 * 5), cool: new Float64Array(22), t: -1 };
     minds.set(w.mem, m);
   }
   return m;
@@ -119,6 +123,8 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
     mind.presser = [-1, -1];
     mind.mark.fill(-1);
     mind.line = [NaN, NaN];
+    mind.move.fill(0);
+    mind.cool.fill(0);
   }
   mind.t = w.t;
   /** Players doing a job right now (pressing, tracking, receiving, chasing): they skip the pacing pass. */
@@ -592,6 +598,11 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
         busy[i] = 1;
         continue;
       }
+      if (r === 'WG' && ballA.u > 0.45) {
+        // Rotation: with his full-back bombing on outside him, the winger comes inside into the half-space.
+        const fb = outs[A].find((j) => role(j) === 'FB' && Math.sign(frame(w.px[j], w.py[j], A).v) === Math.sign(p.v) && Math.abs(frame(w.px[j], w.py[j], A).v) > Math.abs(frame(w.px[i], w.py[i], A).v) + 0.1 && frame(w.px[j], w.py[j], A).u > ballA.u - 0.03);
+        if (fb !== undefined) set(i, { u: p.u, v: Math.sign(p.v) * 0.48 }, A, 0.3);
+      }
     }
     // Give and go: the passer carries on into the space ahead.
     const lp = w.lastPass;
@@ -619,6 +630,21 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
         set(i, { u: Math.min(s.u, w.pass ? 1 : lineA - 0.005), v: s.v * far * (k === 0 ? -1 : 1) }, A, 0.65);
         busy[i] = 1;
       });
+    }
+    // Balance: when bodies have flooded forward, someone holds back. A team
+    // keeps at least three outfield players behind the ball, and the deepest
+    // spare midfielder or full-back drops into the gap left by whoever went.
+    if (ballA.u > 0.45) {
+      const behind = outs[A].filter((i) => frame(w.px[i], w.py[i], A).u < ballA.u - 0.08).length;
+      if (behind < 3) {
+        const spare = outs[A]
+          .filter((i) => i !== carrier && i !== recv && i !== runner && !busy[i] && !boxers.has(i) && ['DM', 'CM', 'FB'].includes(role(i)))
+          .sort((a, b) => frame(w.px[a], w.py[a], A).u - frame(w.px[b], w.py[b], A).u)[0];
+        if (spare !== undefined) {
+          set(spare, { u: clamp(ballA.u - 0.17, 0.3, 0.7), v: clamp(ballA.v * 0.3, -0.35, 0.35) }, A, 0.5);
+          busy[spare] = 1;
+        }
+      }
     }
     if (carrier < 0 && recv < 0) return;
     // Support: the players around the ball keep moving into pockets where a pass can find them.
@@ -648,6 +674,12 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
         s += clamp(f.u - ballA.u, -0.15, 0.2) * 9;
         s -= hyp(x - base.x, y - base.y) * 0.13;
         // Close enough for a simple ball (8-16 m is ideal), never on top of the man on the ball.
+        // Leave the carrier the grass in front of him to run into.
+        if (carrier >= 0) {
+          const fu = f.u - ballA.u;
+          const fv = Math.abs(f.v - ballA.v) * 34;
+          if (fu > 0.01 && fu < 0.12 && fv < 3.5) s -= 1.4;
+        }
         if (db < 5) s -= (5 - db) * 1.2;
         else if (db < 8) s -= (8 - db) * 0.15;
         else if (db > 18) s -= (db - 18) * 0.06;
@@ -690,10 +722,96 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
     }
     // Everyone else forgets their old support spot.
     for (const i of teams[A]) if (near.indexOf(i) < 0) w.mem[i * 2] = w.mem[i * 2 + 1] = NaN;
+    movements(near, bx, by);
     // The receiver attacks the pass.
     if (w.pass && recv >= 0) {
       setAbs(recv, w.pass.x, w.pass.y, 1);
       busy[recv] = 1;
+    }
+  }
+
+  /**
+   * Movements with a purpose, each one committed to for a second or two:
+   *
+   * - Third-man run: as a pass travels, a team-mate beyond it reads where the
+   *   next ball will go and runs into the space past the receiver.
+   * - Check away, then show: a supporting player with a man tight on him
+   *   takes a couple of steps away to drag the marker, then comes sharply
+   *   towards the ball. The marker follows a beat late, and the gap that
+   *   opens is the pass.
+   *
+   * Nothing scripts the pass itself: the engine sees a free man and finds him.
+   */
+  function movements(near: number[], bx: number, by: number) {
+    const M = mind.move;
+    const recv = w.pass ? w.pass.to : -1;
+    const runner = w.runner[A];
+    const passer = w.lastPass && w.t - w.lastPass.t < 1.5 ? w.lastPass.from : -1;
+    const free = (i: number) => i !== carrier && i !== recv && i !== runner && i !== passer && !busy[i] && w.boxRun.indexOf(i) < 0;
+    // Carry on with moves already under way.
+    let thirdMan = -1;
+    for (const i of outs[A]) {
+      const k = M[i * 5];
+      if (!k) continue;
+      if (w.t > M[i * 5 + 1] || !free(i)) { M[i * 5] = 0; continue; }
+      if (k === 1) thirdMan = i;
+      if (k === 2 && w.t > M[i * 5 + 4]) {
+        // Second half of the check: the sharp move towards the ball.
+        const dx = bx - w.px[i];
+        const dy = by - w.py[i];
+        const dl = hyp(dx, dy) || 1;
+        const step = Math.min(7, Math.max(0, dl - 9));
+        M[i * 5] = 3;
+        M[i * 5 + 2] = w.px[i] + (dx / dl) * step;
+        M[i * 5 + 3] = w.py[i] + (dy / dl) * step;
+      }
+      setAbs(i, M[i * 5 + 2], M[i * 5 + 3], k === 1 ? 0.85 : M[i * 5] === 3 ? 0.8 : 0.4);
+      busy[i] = 1;
+    }
+    // Third-man run, read off a pass in flight.
+    if (w.pass && recv >= 0 && thirdMan < 0 && runner < 0 && frame(w.pass.x, w.pass.y, A).u > 0.4 && trait(recv, Math.floor(w.t)) < 0.3) {
+      const pt = frame(w.pass.x, w.pass.y, A);
+      let best = -1;
+      let bs = 0;
+      let spot = { x: 0, y: 0 };
+      for (const i of outs[A]) {
+        if (!free(i) || mind.cool[i] > w.t || !['CM', 'AM', 'WG', 'ST'].includes(role(i))) continue;
+        const p = frame(w.px[i], w.py[i], A);
+        const d = hyp(w.px[i] - w.pass.x, w.py[i] - w.pass.y);
+        if (d < 8 || d > 26 || p.u < pt.u - 0.04 || p.u > lineA - 0.03) continue;
+        // Into the space beyond the receiver, staying onside.
+        const u = Math.min(lineA - 0.01, Math.max(p.u, pt.u) + 0.1);
+        const v = clamp(p.v * 0.7 + pt.v * 0.3, -0.85, 0.85);
+        const a = toAbs({ u, v }, w.dir[A]);
+        const sc = Math.min(nearestOpp(A, a.x, a.y), 9) + Math.min(laneGap(A, w.pass.x, w.pass.y, a.x, a.y), 4) - (d - 12) * 0.08 + trait(i, 5) * 1.5;
+        if (sc > bs) { bs = sc; best = i; spot = a; }
+      }
+      // Not every pass: only when there is real space to run into.
+      if (best >= 0 && bs > 10) {
+        M.set([1, w.t + 2.4, spot.x, spot.y, 0], best * 5);
+        mind.cool[best] = w.t + 14;
+        setAbs(best, spot.x, spot.y, 0.85);
+        busy[best] = 1;
+      }
+    }
+    // Check away, then show, for a tightly marked supporter near the ball.
+    if (carrier >= 0) {
+      for (const i of near) {
+        if (!free(i) || M[i * 5] || mind.cool[i] > w.t) continue;
+        if (nearestOpp(A, w.px[i], w.py[i]) > 2.6) continue;
+        const db = d2(i, bx, by);
+        if (db < 10 || db > 28) continue;
+        // Not everyone at once, and not all the time.
+        if (trait(i, Math.floor(w.t / 3)) > 0.2) continue;
+        mind.cool[i] = w.t + 12;
+        const dx = w.px[i] - bx;
+        const dy = w.py[i] - by;
+        const dl = hyp(dx, dy) || 1;
+        M.set([2, w.t + 2.6, w.px[i] + (dx / dl) * 2.5, w.py[i] + (dy / dl) * 2.5, w.t + 0.7], i * 5);
+        setAbs(i, M[i * 5 + 2], M[i * 5 + 3], 0.4);
+        busy[i] = 1;
+        break;
+      }
     }
   }
 
