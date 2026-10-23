@@ -113,6 +113,17 @@ const trait = (i: number, k: number) => {
   return x - Math.floor(x);
 };
 
+/**
+ * An attacking corner is a rehearsed move. While the ball is dead the
+ * attackers stand in a pack, one of them in front of the keeper; as the
+ * delivery is struck they burst out to the zones the routine gives them, so
+ * runs cross, markers get dragged and the space appears where the ball lands.
+ */
+interface Routine { key: Restart; side: Side; from: number; job: Float64Array }
+const routines = new WeakMap<Float64Array, Routine>();
+/** How long after the delivery the runs are attacked flat out. */
+const DELIVERY = 2.2;
+
 export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64Array) {
   const { slots, sentOff } = w;
   const mind = mindOf(w);
@@ -127,6 +138,11 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
     mind.cool.fill(0);
   }
   mind.t = w.t;
+  let routine = routines.get(w.mem);
+  if (routine && w.restart && w.restart !== routine.key) routine = undefined;
+  if (routine && !w.restart && Number.isNaN(routine.from)) routine.from = w.t;
+  if (routine && !w.restart && w.t - routine.from > DELIVERY) routine = undefined;
+  if (!routine) routines.delete(w.mem);
   /** Players doing a job right now (pressing, tracking, receiving, chasing): they skip the pacing pass. */
   const busy = new Uint8Array(22);
   const role = (i: number) => slots[i < 11 ? 0 : 1][i % 11].role;
@@ -258,6 +274,7 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
   keepers();
   defend();
   attack();
+  deliveryRuns();
 
   // Interceptor or second-ball racers go for the ball.
   for (const i of w.chase) {
@@ -950,13 +967,25 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       ].map((p) => ({ u: p.u, v: p.v * sgn }));
       const atk = outfield(S).filter((i) => i !== taker).sort((a, b) => (BOX_PRIORITY[role(b)] ?? 0) - (BOX_PRIORITY[role(a)] ?? 0));
       const inBox: number[] = [];
+      const corner = e.k === 'corner';
+      if (corner && !routine) {
+        routine = { key: e, side: S, from: NaN, job: cornerRoutine(atk.slice(0, box.length), sgn) };
+        routines.set(w.mem, routine);
+      }
       atk.forEach((i, k) => {
         let p: Pt;
-        if (k < box.length) { p = box[k]; inBox.push(i); }
+        if (k < box.length) { p = corner ? packSpot(k, sgn) : box[k]; inBox.push(i); }
         else if (k < box.length + 2) p = { u: 0.78, v: k % 2 ? 0.2 : -0.2 };
         else p = { u: 0.55, v: k % 2 ? 0.3 : -0.3 };
         set(i, p, S, urgAll);
       });
+      // The pack shuffles while the taker places the ball: little steps, nobody still.
+      if (corner) {
+        for (const i of inBox) {
+          const j = 0.55 * Math.sin(w.t * (0.9 + trait(i, 6)) + trait(i, 7) * 6.3);
+          setAbs(i, tx[i] + j * 0.6, ty[i] + j, 0.3);
+        }
+      }
       if (gkS >= 0) set(gkS, { u: 0.14, v: 0 }, S, urgAll);
       if (gkO >= 0) set(gkO, { u: 0.008, v: 0 }, O, urgAll);
       // The defending side leaves its quickest forward up as an outlet for the counter,
@@ -1061,6 +1090,56 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
         const a = near[k] ?? near[0];
         if (a !== undefined) setAbs(i, tx[i] * 0.25 + tx[a] * 0.75, ty[i] * 0.25 + ty[a] * 0.75, urgAll);
       });
+    }
+  }
+
+  /**
+   * Where the pack stands before the kick: a loose huddle around the penalty
+   * spot, leaning to the far side, and the last man on the keeper's toes.
+   */
+  function packSpot(k: number, sgn: number): Pt {
+    if (k === 5) return { u: 0.982, v: 0.02 * sgn };
+    const ring = [{ u: 0.9, v: -0.03 }, { u: 0.888, v: -0.08 }, { u: 0.905, v: -0.13 }, { u: 0.877, v: -0.01 }, { u: 0.892, v: -0.18 }];
+    return { u: ring[k].u, v: ring[k].v * sgn };
+  }
+
+  /**
+   * The zones each man attacks once the corner is struck. Three routines:
+   * flood the near post, overload the far post, or spread across the goal.
+   * The best header in the pack always takes the routine's key zone.
+   */
+  function cornerRoutine(pack: number[], sgn: number) {
+    const Z = {
+      near: { u: 0.965, v: 0.1 }, nearFront: { u: 0.945, v: 0.17 }, six: { u: 0.955, v: 0 },
+      far: { u: 0.955, v: -0.13 }, farBack: { u: 0.915, v: -0.25 }, spot: { u: 0.895, v: -0.02 },
+      edge: { u: 0.83, v: 0.05 }, keeper: { u: 0.98, v: 0.03 },
+    };
+    const plans = [
+      [Z.nearFront, Z.near, Z.six, Z.far, Z.edge, Z.keeper],
+      [Z.far, Z.farBack, Z.six, Z.near, Z.spot, Z.keeper],
+      [Z.spot, Z.near, Z.far, Z.six, Z.farBack, Z.keeper],
+    ];
+    const pick = plans[Math.floor(trait(Math.floor(w.t * 10) % 9973, 8) * plans.length)];
+    const job = new Float64Array(44).fill(NaN);
+    pack.forEach((i, k) => {
+      const z = pick[k];
+      const a = toAbs({ u: z.u, v: z.v * sgn }, w.dir[w.restart!.s]);
+      job[i * 2] = a.x;
+      job[i * 2 + 1] = a.y;
+    });
+    return job;
+  }
+
+  /** As the corner comes in, everyone in the pack attacks his zone at full tilt. */
+  function deliveryRuns() {
+    if (!routine || w.restart || routine.side !== A) return;
+    const flying = w.pass?.cross || w.landing || w.bz > 1;
+    if (!flying) return;
+    for (let i = routine.side * 11; i < routine.side * 11 + 11; i++) {
+      const x = routine.job[i * 2];
+      if (Number.isNaN(x) || sentOff[i] || busy[i] || i === w.pass?.to || w.chase.indexOf(i) >= 0) continue;
+      setAbs(i, x, routine.job[i * 2 + 1], 0.85 + 0.12 * trait(i, 9));
+      busy[i] = 1;
     }
   }
 }

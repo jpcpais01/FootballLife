@@ -10,6 +10,7 @@ export const PATCH_NOTES: PatchGroup[] = [
     hour: '2026-10-23T19:00:00Z',
     entries: [
       { title: 'A referee on the pitch', body: 'Every match now has a referee and two assistants. The referee runs the diagonal, staying close enough to see but out of the way of play, while the assistants move along the touchlines level with the last defender. He blows his whistle for fouls, goals and kick-offs, points the way for free kicks, points to the spot for penalties, jogs over and holds up a yellow or red card to the player he books, and points back to the centre after a goal. Assistants flag offsides and signal which way a throw-in goes. Players shown a red card now walk off the pitch instead of vanishing.' },
+      { title: 'Corners with a plan', body: 'Attacking corners are now rehearsed moves. While the taker places the ball, the attackers shuffle in a pack around the penalty spot and one stands on the keeper\'s toes. As the ball is struck they burst out to their zones: some corners flood the near post, some overload the back post, others spread across the goal, and the best header in the team always takes the key run. Runs cross, markers get dragged, and the box finally looks like a real corner.' },
     ],
   },
   {
