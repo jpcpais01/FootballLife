@@ -319,12 +319,19 @@ export class MatchViewer {
     this.lastTime = now;
     this.elapsed += realDt;
     let gameDt = this.lastClock < 0 ? 0 : t - this.lastClock;
-    const jumped = gameDt < -0.5 || gameDt > 30 || this.first || snap;
+    let jumped = gameDt < -0.5 || gameDt > 30 || this.first || snap;
     this.first = false;
     if (gameDt < 0 || gameDt > 30) gameDt = 0;
     this.lastClock = t;
 
     const fr = this.playback.frame(t);
+    // The recording reset everyone between phases (a kickoff after the break): cut, don't glide.
+    const reset = fr.cut >= 0 && this.lastCut >= 0 && fr.cut !== this.lastCut && Math.abs(fr.cut - this.lastCut) < 500;
+    this.lastCut = fr.cut;
+    if (reset && !jumped) {
+      jumped = true;
+      gameDt = 0;
+    }
     // Ball.
     this.ball.position.set(fr.ball.x, fr.ball.z, fr.ball.y);
     // Rolls by the distance it covers (spins in the air), unless the clock jumped.
@@ -356,6 +363,10 @@ export class MatchViewer {
         this.accel[i].y += (Math.max(-12, Math.min(12, ay)) - this.accel[i].y) * 0.2;
         f.pos.set(fr.targets[i].x, fr.targets[i].y);
         f.vel.set(v.x, v.y);
+        if (jumped) {
+          this.accel[i].set(0, 0);
+          f.teleport(Math.atan2(fr.ball.x - f.pos.x, fr.ball.y - f.pos.y));
+        }
       }
       this.trackedActions(fr, t, rate);
     } else {
@@ -422,6 +433,7 @@ export class MatchViewer {
     if (draw) this.composer.render(realDt);
   }
 
+  private lastCut = -1;
   private accel = Array.from({ length: 22 }, () => new THREE.Vector2());
   private fired = new Set<string>();
 

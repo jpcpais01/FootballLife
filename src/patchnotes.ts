@@ -7,6 +7,13 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T09:00:00Z',
+    entries: [
+      { title: 'No more ice skating', body: 'Players standing, waiting at a set piece or walking back now keep their feet planted on the grass instead of sliding around, and step to a new spot with a proper lift of the foot. A player who passes or shoots on the run keeps running with his standing leg while he strikes, instead of gliding across the grass mid-kick. Team-mates sprinting to the scorer after a goal run there, then celebrate once they arrive. Foot sliding across a match is down by about two thirds.' },
+      { title: 'Clean cuts, no popping', body: 'When the players are reset for a kickoff, they appear on their new spots in a clean cut instead of gliding across the pitch. A player who takes a touch and then plays a pass straight away flows from one move into the next, instead of his body jumping back in a single frame.' },
+    ],
+  },
+  {
     hour: '2026-10-22T03:00:00Z',
     entries: [
       { title: 'Players think like footballers', body: 'Every time a player has the ball he now weighs up everything he could do: a safe pass to a free team-mate, a pass that breaks the lines, a switch of play to the open wing, a ball in behind for a runner, carrying it into space, taking his man on, crossing or shooting. Each is judged by the danger it creates against the risk of losing the ball there, and better decision makers pick the right one more often. No more passes into a crowd or shots from nowhere.' },
