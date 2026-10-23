@@ -250,6 +250,10 @@ const lg3 = await call('bo', 'GET', '/api/league');
 check('season rolled over with honours', lg3.season.number === 2 && lg3.honours.length === 1 && lg3.honours[0].champion && lg3.honours[0].cup && lg3.honours[0].golden_boot, lg3.honours[0]);
 const tr = await db.query<{ n: string }>("SELECT count(*) n FROM trophies WHERE player_id IS NOT NULL");
 check('player trophies recorded', +tr[0].n >= 3, tr[0].n);
+const meAfter = await call('bo', 'GET', '/api/me');
+check('awards night offered after the season ends', meAfter.ceremony === 1, meAfter.ceremony);
+const cer = await call('ana', 'GET', '/api/season/ceremony/1');
+check('awards night has the table, champions and awards', cer.table.length >= 2 && cer.champion && cer.awards.length >= 2 && cer.me && cer.me.pos >= 1, `${cer.awards.length} awards, you ${cer.me?.pos}`);
 
 server.close();
 process.exit(failed ? 1 : 0);

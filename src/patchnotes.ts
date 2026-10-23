@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T23:00:00Z',
+    entries: [
+      { title: 'Awards night', body: 'When a season ends, the next time you open the game it gets its own ceremony. First comes where your club finished and the coins it earned. Then the champions are unveiled with their points and record, then the cup winners, then the Golden Boot, Playmaker, Golden Glove and Player of the Season, each with its trophy, the winner and their numbers. A big "That\'s you!" lights up if one of them is yours. It closes with your own season in numbers and any silverware you took home. Tap to move through it, or skip.' },
+    ],
+  },
+  {
     hour: '2026-10-23T21:00:00Z',
     entries: [
       { title: 'Free kicks like the real thing', body: 'On a free kick swung in from deep, the defence now holds a line around the edge of the box to catch runners offside. The attackers stand level with it beside their markers, shuffling and waiting, then sprint in behind as the ball is struck, each to his own zone: near post, far post or the penalty spot. Two players wait outside the box for the second ball. On a shooting free kick, a second man stands over the ball with the taker to keep the keeper guessing, and an attacker joins the end of the wall to block his view.' },

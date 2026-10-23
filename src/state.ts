@@ -23,7 +23,8 @@ export interface MePlayer {
 
 export interface MeClub { id: string; name: string; short: string; colors: { primary: string; secondary: string }; badge: Badge; isBot: boolean }
 
-export const state: { user: { id: string; username: string } | null; player: MePlayer | null; club: MeClub | null; loaded: boolean; invites: number; unread: number; match: { id: string; live: boolean; kickoffAt: string } | null; trainReady: boolean; daily: { checkin: boolean; ready: string[]; level: number; fame: number } | null } = {
+export const state: { user: { id: string; username: string } | null; player: MePlayer | null; club: MeClub | null; loaded: boolean; invites: number; unread: number; match: { id: string; live: boolean; kickoffAt: string } | null; trainReady: boolean; daily: { checkin: boolean; ready: string[]; level: number; fame: number } | null; ceremony: number | null } = {
+  ceremony: null,
   daily: null,
   match: null,
   trainReady: false,
@@ -45,6 +46,7 @@ export async function refreshMe() {
   state.match = r.match ?? null;
   state.trainReady = !!r.trainReady;
   state.daily = r.daily ?? null;
+  state.ceremony = r.ceremony ?? null;
   state.loaded = true;
   document.dispatchEvent(new CustomEvent('me-changed'));
 }
