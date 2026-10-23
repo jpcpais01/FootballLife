@@ -7,6 +7,14 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T13:00:00Z',
+    entries: [
+      { title: 'Daily check-in streak', body: 'Open the game each day to claim a check-in reward. A week of rewards climbs from 50 coins on day 1 up to 400 coins and a gift on day 7, then the week starts again. Miss a day and the streak starts over, but you never lose anything you have earned.' },
+      { title: 'Daily goals', body: 'Every day you get three new goals: a quick one, one on the training ground and one with your club, like changing your look, scoring 80 or more in a drill, or sending a message in club chat. Each one pays coins and fame, and finishing all three opens a bonus of 150 coins. Tap the target button in the top bar or the Today card on the home screen to see them. A banner tells you as soon as a goal is complete.' },
+      { title: 'Fame and career levels', body: 'You now have a Fame level, shown on your avatar. Matches, training, achievements, check-ins and daily goals all earn fame. Every new level pays coins and moves you up a title, from Academy prospect through Fan favourite and Club legend to Icon.' },
+    ],
+  },
+  {
     hour: '2026-10-23T12:30:00Z',
     entries: [
       { title: 'Real wing play', body: 'Full-backs and wingers who are better crossers than shooters now take the ball down the line and cross from out wide, instead of everyone cutting inside. There are about twice as many crosses and more corners. Forwards make runs in behind far more often, so you see more through balls and the odd offside.' },

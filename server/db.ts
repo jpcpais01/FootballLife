@@ -296,6 +296,10 @@ CREATE TABLE IF NOT EXISTS vacancies (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS vacancies_active ON vacancies(active, created_at DESC);
+ALTER TABLE players ADD COLUMN IF NOT EXISTS daily JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE players ADD COLUMN IF NOT EXISTS streak INT NOT NULL DEFAULT 0;
+ALTER TABLE players ADD COLUMN IF NOT EXISTS streak_day TEXT;
+ALTER TABLE players ADD COLUMN IF NOT EXISTS fame INT NOT NULL DEFAULT 0;
 `;
 
 async function migrate(db: Db) {

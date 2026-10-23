@@ -5,6 +5,7 @@ import { ITEM_BY_ID } from '../shared/cosmetics.ts';
 import { HOUSES } from '../shared/life.ts';
 import type { Db } from './db.ts';
 import { newId } from './http.ts';
+import { addFame } from './daily.ts';
 import type { PlayerRow } from './squads.ts';
 
 export async function notify(db: Db, playerId: string, kind: string, text: string, data: Record<string, unknown> = {}) {
@@ -70,6 +71,7 @@ export async function checkAchievements(db: Db, playerId: string): Promise<strin
       const a = ACH_BY_ID[id];
       fresh.push(id);
       if (a.coins) await db.query('UPDATE players SET coins = coins + $2 WHERE id = $1', [p.id, a.coins]);
+      await addFame(db, p.id, { bronze: 20, silver: 50, gold: 120 }[a.tier]);
       const item = a.item && (await grantItem(db, p.id, a.item, 'achievement')) ? ITEM_BY_ID[a.item] : null;
       const extra = [a.coins ? `+${a.coins} coins` : '', item ? `unlocked ${item.name}` : ''].filter(Boolean).join(', ');
       await notify(db, p.id, 'achievement', `Achievement unlocked: ${a.name}.${extra ? ` ${extra[0].toUpperCase()}${extra.slice(1)}.` : ''}`, { ach: id });

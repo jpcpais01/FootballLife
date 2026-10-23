@@ -12,6 +12,7 @@ import { icon } from '../icons.ts';
 import { navigate } from '../router.ts';
 import { refreshMe } from '../state.ts';
 import { countdown, errorBox, kickoffLabel, relTime, skeleton, toast } from '../ui.ts';
+import { fameBar, goalRows, type Daily } from '../daily.ts';
 
 interface Tile {
   id: string;
@@ -32,6 +33,7 @@ export async function homePage(el: HTMLElement) {
   let alive = true;
   let focus = lastFocus;
   let tiles: Tile[] = [];
+  let pulledToday = false;
 
   let last = '';
   const load = async (first = false) => {
@@ -131,6 +133,26 @@ export async function homePage(el: HTMLElement) {
         </div>
         <div class="hero-art"><div class="hero-attrs">${keyAttrs(p.attrs, p.position)}</div></div>`,
     });
+
+    // ---- today: check-in, daily goals and fame ----
+    const dl = d.daily as Daily;
+    const ready = dl.goals.filter((g) => g.done && !g.claimed).length + (dl.bonus.ready && !dl.bonus.claimed ? 1 : 0) + (dl.checkin.done ? 0 : 1);
+    const allDone = dl.bonus.claimed;
+    const today: Tile = {
+      id: 'today', label: 'Today', href: '/', accent: '#ffb23d',
+      art: () => html`<div class="ta-icon">${icon('target', 46)}</div>${ready ? html`<span class="ta-dot"></span>` : ''}`,
+      hero: () => html`<div class="hero-copy">
+          <div class="eyebrow">${icon('flame', 13)} ${dl.checkin.streak ? `${dl.checkin.streak}-day streak` : 'Today'}</div>
+          <div class="hero-title">${ready ? `${ready} ${ready === 1 ? 'reward' : 'rewards'} ready` : allDone ? 'All done today' : 'Daily goals'}</div>
+          <div class="hero-meta">${icon('clock', 15)} New goals in <b class="num" data-countdown="${dl.resetsAt}">${countdown(dl.resetsAt)}</b></div>
+          ${fameBar(dl.fame)}
+          <div class="hero-cta">${dl.checkin.done ? html`<button class="btn white lg" data-daily>${icon('flame')} Streak</button>` : html`<button class="btn white lg" data-checkin>${icon('coin')} Claim day ${dl.checkin.day}: ${dl.checkin.reward.coins}</button>`}</div>
+        </div>
+        <div class="hero-art"><div class="hero-goals">${goalRows(dl, true)}</div></div>`,
+    };
+    // Rewards waiting lead the spotlight; otherwise it sits after training.
+    if (ready) t.unshift(today);
+    else t.push(today);
 
     // ---- league ----
     if (d.season) {
@@ -251,6 +273,8 @@ export async function homePage(el: HTMLElement) {
   const render = () => {
     const d = data;
     tiles = buildTiles();
+    // Rewards waiting: open on them the first time this visit.
+    if (tiles[0].id === 'today' && !pulledToday) { focus = 'today'; pulledToday = true; }
     if (!tiles.some((t) => t.id === focus)) focus = tiles[0].id;
     const greet = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening';
     mount(el, html`
@@ -316,6 +340,8 @@ export async function homePage(el: HTMLElement) {
     setFocus(next.id, true);
   };
 
+  const onDaily = () => { last = ''; void load(); };
+  document.addEventListener('daily-changed', onDaily);
   el.addEventListener('click', async (e) => {
     const t = e.target as HTMLElement;
     const st = t.closest('[data-step]') as HTMLElement | null;
@@ -350,6 +376,7 @@ export async function homePage(el: HTMLElement) {
   poll = window.setInterval(load, 30_000);
   return () => {
     alive = false;
+    document.removeEventListener('daily-changed', onDaily);
     clearInterval(timer);
     clearInterval(poll);
   };
