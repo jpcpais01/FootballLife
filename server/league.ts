@@ -1,5 +1,6 @@
 import type { Badge } from '../shared/badge.ts';
-import { overall, type Attr, type Position } from '../shared/attributes.ts';
+import { overall, type Attr, type Attributes, type Position } from '../shared/attributes.ts';
+import { BASE_HOME_EDGE, clubEffects } from '../shared/clubUpgrades.ts';
 import { KICKOFF_HOURS_UTC, LEAGUE_SIZE, MATCH_COINS, POINTS } from '../shared/config.ts';
 import { totalReal } from '../shared/timeline.ts';
 import { getFormation, sanitizeTactics, type Tactics } from '../shared/formations.ts';
@@ -273,7 +274,11 @@ export interface LineupSnapshot {
   players: { id: string; name: string; number: number; pos: Position; role: Position; slot: string; ovr: number; bot: boolean; app: Record<string, number>; eq?: Equipped }[];
 }
 
-export function buildTeam(club: ClubRow, players: PlayerRow[]): { team: SimTeam; snap: LineupSnapshot } {
+/**
+ * Builds the sim side. `boost` is the facilities' small attribute bonus: team
+ * chemistry for everyone, plus the academy's extra for AI players.
+ */
+export function buildTeam(club: ClubRow, players: PlayerRow[], boost = { all: 0, bots: 0 }): { team: SimTeam; snap: LineupSnapshot } {
   const { xi } = resolveLineup(club, players);
   const formation = getFormation(club.formation);
   // Order by formation slot so index 0 is the goalkeeper.
@@ -293,7 +298,7 @@ export function buildTeam(club: ClubRow, players: PlayerRow[]): { team: SimTeam;
       natural: e.player.position,
       slotId: e.slotId,
       role: e.role,
-      attrs: e.player.attrs,
+      attrs: boosted(e.player.attrs, boost.all + (e.player.is_bot ? boost.bots : 0)),
       bot: e.player.is_bot,
     })),
   };
@@ -319,6 +324,11 @@ export function buildTeam(club: ClubRow, players: PlayerRow[]): { team: SimTeam;
     })),
   };
   return { team, snap };
+}
+
+function boosted(attrs: Attributes, k: number): Attributes {
+  if (!k) return attrs;
+  return Object.fromEntries(Object.entries(attrs).map(([a, v]) => [a, v * (1 + k)])) as Attributes;
 }
 
 interface MatchRow {
@@ -347,9 +357,12 @@ async function playMatch(db: Db, m: MatchRow) {
   if (home.is_bot || !(await clubPlayers(db, home.id)).length) await syncSquad(db, home);
   if (away.is_bot || !(await clubPlayers(db, away.id)).length) await syncSquad(db, away);
   const [hp, ap] = await Promise.all([clubPlayers(db, home.id), clubPlayers(db, away.id)]);
-  const h = buildTeam(home, hp);
-  const a = buildTeam(away, ap);
-  const result = simulateMatch(h.team, a.team, m.seed, { homeAdvantage: m.kind === 'league' ? undefined : 0 });
+  const he = clubEffects(home.facilities);
+  const ae = clubEffects(away.facilities);
+  const h = buildTeam(home, hp, { all: he.chemistry, bots: he.academy });
+  const a = buildTeam(away, ap, { all: ae.chemistry + ae.awayChemistry, bots: ae.academy });
+  // A league home tie gets the base edge plus the stadium's; cups and friendlies stay neutral.
+  const result = simulateMatch(h.team, a.team, m.seed, { homeAdvantage: m.kind === 'league' ? BASE_HOME_EDGE + he.homeEdge : 0 });
   const pens = m.kind === 'cup' && result.score[0] === result.score[1] ? shootout(h.team, a.team, m.seed) : null;
   if (pens) result.pens = pens;
   const endsAt = new Date(new Date(m.kickoff_at).getTime() + totalReal(result.timeline) * 1000);
@@ -375,6 +388,8 @@ async function finalizeMatch(db: Db, m: MatchRow) {
   const cupName = m.kind === 'cup' ? (m as unknown as { meta?: { name?: string } }).meta?.name ?? 'Cup' : '';
   const rng = new Rng(hashSeed(`swap:${m.id}`));
   const humans: string[] = [];
+  const coinBonus: number[] = [];
+  for (const snap of m.lineups) coinBonus.push(snap.players.some((p) => !p.bot) ? clubEffects((await loadClub(db, snap.clubId))?.facilities).coins : 0);
   for (let side = 0; side < 2; side++) {
     const snap = m.lineups[side];
     const gf = res.score[side];
@@ -397,7 +412,7 @@ async function finalizeMatch(db: Db, m: MatchRow) {
       const opp = m.lineups[1 - side].name;
       const score = `${gf}–${ga}${pens ? `, ${pens[side]}–${pens[1 - side]} on pens` : ''}`;
       if (official) {
-        const coins = MATCH_COINS[outcome] + line.goals * MATCH_COINS.goal + line.assists * MATCH_COINS.assist;
+        const coins = Math.round((MATCH_COINS[outcome] + line.goals * MATCH_COINS.goal + line.assists * MATCH_COINS.assist) * (1 + (coinBonus[side] ?? 0)));
         const xpRes = matchXp(p.position, p.attrs, p.xp as Partial<Record<Attr, number>>, line.rating, (m.seed + i) >>> 0);
         await db.query('UPDATE players SET coins = coins + $2, attrs = $3, xp = $4 WHERE id = $1', [p.id, coins, JSON.stringify(xpRes.attrs), JSON.stringify(xpRes.xp)]);
         const ups = xpRes.levelUps.length ? ` Level up: ${[...new Set(xpRes.levelUps.map((u) => u.attr))].join(', ')}.` : '';

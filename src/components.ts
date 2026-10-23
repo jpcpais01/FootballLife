@@ -11,6 +11,8 @@ export interface ClubBrief {
   colors: { primary: string; secondary: string };
   badge: Badge;
   isBot?: boolean;
+  /** The club owns the Golden crest. */
+  gold?: boolean;
 }
 
 export interface MatchBrief {
@@ -27,7 +29,10 @@ export interface MatchBrief {
   cup?: { stage: number; total: number; tie: number; name: string };
 }
 
-export const badge = (c: ClubBrief, size = 28) => badgeSvg(c.colors, c.badge, size, c.short);
+export const badge = (c: ClubBrief, size = 28) => {
+  const svg = badgeSvg(c.colors, c.badge, size, c.short);
+  return c.gold ? raw(`<span class="crest-gold" style="--s:${size}px">${svg.html}</span>`) : svg;
+};
 
 export function posChip(pos: string): Raw {
   return html`<span class="pos pos-${pos}" title="${POSITION_NAMES[pos as Position] ?? pos}">${pos}</span>`;

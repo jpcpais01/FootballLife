@@ -64,7 +64,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
         <div><div class="countdown" style="font-size:44px" id="cd">${countdown(m.kickoffAt)}</div><div class="small muted">${kickoffLabel(m.kickoffAt)}</div></div>
         <a href="/club/${m.away.id}" class="stack" style="align-items:center;gap:10px">${badge(m.away, 96)}<div class="h2">${m.away.name}</div></a>
       </div>
-      <p class="muted small" style="max-width:520px;margin:0 auto">The match is simulated on the server at kick-off and plays out live for everyone. Line-ups lock at kick-off — coaches can still change tactics until then.</p>
+      <p class="muted small" style="max-width:520px;margin:0 auto">The match is simulated on the server at kick-off and plays out live for everyone. Line-ups lock at kick-off — the captain can still change tactics until then.</p>
     </div>`);
     renderPre();
     poll = window.setInterval(async () => {

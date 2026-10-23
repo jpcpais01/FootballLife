@@ -1,10 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ATTRIBUTES, generateAttributes, overall, POSITIONS, STARTING_LEVEL, type Attr } from '../shared/attributes.ts';
-import { sanitizeAppearance } from '../shared/appearance.ts';
+import { randomAppearance, sanitizeAppearance } from '../shared/appearance.ts';
 import { FRIENDLY_COOLDOWN_MIN, TRAINING_COOLDOWN_H } from '../shared/config.ts';
 import { clockAt, realAt } from '../shared/timeline.ts';
 import { FORMATION_KEYS, getFormation, sanitizeTactics } from '../shared/formations.ts';
-import { hashSeed } from '../shared/rng.ts';
+import { hashSeed, Rng } from '../shared/rng.ts';
 import type { MatchResult } from '../shared/sim/types.ts';
 import type { TrackWindow } from '../shared/sim/tracks.ts';
 import { clearCookie, currentUser, login, logout, register, sessionCookie, type User } from './auth.ts';
@@ -13,31 +13,42 @@ import { sanitizeBadge } from '../shared/badge.ts';
 import { bad, forbidden, hexColor, HttpError, newId, notFound, oneOf, readJson, sendJson, str } from './http.ts';
 import { currentSeason, placeNewClub, standings, tick, type LineupSnapshot } from './league.ts';
 import { drillMultiplier, trainingSession, TRAINING_FOCI, type TrainingFocus } from './progression.ts';
-import { clubPlayers, clubStrength, resolveLineup, syncSquad, type ClubRow, type PlayerRow } from './squads.ts';
+import { botName, clubPlayers, clubStrength, resolveLineup, syncSquad, type ClubRow, type PlayerRow } from './squads.ts';
 import { ACHIEVEMENTS, ACH_BY_ID } from '../shared/achievements.ts';
 import { featured, ITEM_BY_ID, ITEMS, priceOf, sanitizeEquipped, shopDay, SLOTS, type Slot } from '../shared/cosmetics.ts';
 import { achStats, checkAchievements, notify } from './rewards.ts';
 import { addFame, bump, checkIn, claimGoal, dailyBrief, dailyDto } from './daily.ts';
 import type { GoalEvent } from '../shared/daily.ts';
+import { spendStars } from './stars.ts';
+import { LEVELS, MAX_LEVEL, PERK_BY_ID, PERKS, readFacilities, rushCost, UPGRADE_BY_ID, UPGRADES, clubEffects } from '../shared/clubUpgrades.ts';
 import { CHAT_MAX, clubMessage, defaultShirt, leaveClub, MAX_HUMANS, moveToClub, notifyStaff } from './social.ts';
 import { CAR_BY_ID, CAR_COLORS, DEFAULT_HOME, FLOOR_STYLES, FURNITURE, FURNITURE_BY_ID, FURNITURE_SLOTS, HOUSE_BY_ID, HOUSES, RESPRAY_COST, sanitizeHome, WALL_COLORS, type FurnitureSlot } from '../shared/life.ts';
 
 // ---------- roles & permissions ----------
 
-export const ROLES = ['founder', 'president', 'coach', 'captain', 'player'] as const;
+export const ROLES = ['founder', 'president', 'captain', 'player'] as const;
 type Role = (typeof ROLES)[number];
+// The president runs the club (upgrades, settings, members) and the captain
+// sets tactics. The head coach is staff bought with upgrades, not a player.
 const CAN = {
-  tactics: ['founder', 'president', 'coach'],
+  tactics: ['captain'],
+  upgrades: ['founder', 'president'],
   settings: ['founder', 'president'],
   invite: ['founder', 'president', 'captain'],
-  friendly: ['founder', 'president', 'coach', 'captain'],
+  friendly: ['founder', 'president', 'captain'],
   roles: ['founder', 'president'],
   kick: ['founder', 'president'],
 } satisfies Record<string, Role[]>;
-const RANK: Record<Role, number> = { founder: 4, president: 3, coach: 2, captain: 1, player: 0 };
+const RANK: Record<Role, number> = { founder: 3, president: 2, captain: 1, player: 0 };
 
 function can(role: string | undefined, action: keyof typeof CAN) {
   return !!role && (CAN[action] as string[]).includes(role);
+}
+
+/** Tactics belong to the captain; until the club names one, the founder or president sets them. */
+function canTactics(role: string | undefined, members: Pick<PlayerRow, 'club_role' | 'is_bot'>[]) {
+  if (can(role, 'tactics')) return true;
+  return can(role, 'upgrades') && !members.some((m) => !m.is_bot && m.club_role === 'captain');
 }
 
 // ---------- context ----------
@@ -85,8 +96,9 @@ async function getClub(db: Db, id: string): Promise<ClubRow> {
 
 // ---------- DTOs ----------
 
-const clubBrief = (c: Pick<ClubRow, 'id' | 'name' | 'short' | 'colors' | 'badge' | 'is_bot'>) => ({
+const clubBrief = (c: Pick<ClubRow, 'id' | 'name' | 'short' | 'colors' | 'badge' | 'is_bot'> & { facilities?: unknown }) => ({
   id: c.id, name: c.name, short: c.short, colors: c.colors, badge: c.badge, isBot: c.is_bot,
+  ...(readFacilities(c.facilities).perks.includes('crest') ? { gold: true } : {}),
 });
 
 function playerDto(p: PlayerRow, full = true) {
@@ -252,7 +264,9 @@ route('POST', '/api/train', async (c) => {
   const streak = last && Date.now() - last < 24 * 3600_000 ? 0.15 : 0;
   // The drill score scales the session: 0.8× for a botched drill up to 1.3× for a perfect one.
   const perf = drillMultiplier(c.body.score as number | undefined);
-  const res = trainingSession(p.position, p.attrs, p.xp as Partial<Record<Attr, number>>, focus, streak, perf);
+  // The club's balls & kit upgrade adds to every member's session.
+  const kit = p.club_id ? clubEffects((await c.db.query<{ facilities: unknown }>('SELECT facilities FROM clubs WHERE id = $1', [p.club_id]))[0]?.facilities).training : 0;
+  const res = trainingSession(p.position, p.attrs, p.xp as Partial<Record<Attr, number>>, focus, streak, perf * (1 + kit));
   const updated = await c.db.query(
     // Compare at millisecond precision: the row we read came back as a JS Date, which drops Postgres' microseconds.
     `UPDATE players SET attrs = $2, xp = $3, last_train_at = now(), train_count = train_count + 1 WHERE id = $1 AND (last_train_at IS NULL OR date_trunc('milliseconds', last_train_at) = $4) RETURNING id`,
@@ -446,7 +460,8 @@ route('GET', '/api/clubs/:id', async (c) => {
     lineup: Object.fromEntries(xi.map((e) => [e.slotId, e.player.id])),
     bench: bench.map((p) => p.id),
     fixtures,
-    me: { role: myRole ?? null, inClub: !!myRole, hasClub: !!me?.club_id, perms: myRole ? Object.fromEntries(Object.keys(CAN).map((k) => [k, can(myRole, k as keyof typeof CAN)])) : {} },
+    facilities: await facilitiesDto(c.db, club, me),
+    me: { role: myRole ?? null, inClub: !!myRole, hasClub: !!me?.club_id, perms: myRole ? { ...Object.fromEntries(Object.keys(CAN).map((k) => [k, can(myRole, k as keyof typeof CAN)])), tactics: canTactics(myRole, players) } : {} },
   };
 });
 
@@ -476,10 +491,10 @@ route('POST', '/api/clubs/leave', async (c) => {
 route('POST', '/api/clubs/:id/lineup', async (c) => {
   const p = await myPlayer(c);
   const club = await getClub(c.db, c.params[0]);
-  if (p.club_id !== club.id || !can(p.club_role, 'tactics')) throw forbidden('Only the founder, president or coach can change tactics');
+  const players = await clubPlayers(c.db, club.id);
+  if (p.club_id !== club.id || !canTactics(p.club_role, players)) throw forbidden('Only the captain can change tactics');
   const formation = oneOf(c.body.formation ?? club.formation, FORMATION_KEYS, 'formation');
   const tactics = sanitizeTactics(c.body.tactics as never);
-  const players = await clubPlayers(c.db, club.id);
   const ids = new Set(players.map((x) => x.id));
   const slots = new Set(getFormation(formation).slots.map((s) => s.id));
   const lineup: Record<string, string> = {};
@@ -518,7 +533,7 @@ route('POST', '/api/clubs/:id/role', async (c) => {
   const p = await myPlayer(c);
   const club = await getClub(c.db, c.params[0]);
   if (p.club_id !== club.id || !can(p.club_role, 'roles')) throw forbidden('Only the founder or president can assign roles');
-  const role = oneOf(c.body.role, ['president', 'coach', 'captain', 'player'] as const, 'role');
+  const role = oneOf(c.body.role, ['president', 'captain', 'player'] as const, 'role');
   const target = (await c.db.query<PlayerRow>('SELECT * FROM players WHERE id = $1 AND club_id = $2 AND NOT is_bot', [c.body.playerId, club.id]))[0];
   if (!target) throw notFound('Member not found');
   if (target.id === p.id) throw bad('You cannot change your own role');
@@ -550,10 +565,115 @@ route('POST', '/api/clubs/:id/kick', async (c) => {
   return { ok: true };
 });
 
+// ---------- club facilities ----------
+
+const coachName = (clubId: string, lv: number) => botName(new Rng(hashSeed(`coach:${clubId}:${lv}`)));
+
+async function facilitiesDto(db: Db, club: ClubRow, me: PlayerRow | undefined) {
+  const f = await settleFacilities(db, club);
+  const donors = await db.query<{ id: string; name: string; appearance: never; equipped: never; coins: number; stars: number }>(
+    `SELECT p.id, p.name, p.appearance, p.equipped, SUM(d.coins)::int AS coins, SUM(d.stars)::int AS stars FROM club_donations d JOIN players p ON p.id = d.player_id
+     WHERE d.club_id = $1 GROUP BY p.id ORDER BY SUM(d.stars) * 100 + SUM(d.coins) DESC LIMIT 5`, [club.id]);
+  const rng = new Rng(hashSeed(`coach-look:${club.id}:${f.lv.coach}`));
+  return {
+    bank: { coins: club.bank_coins ?? 0, stars: club.bank_stars ?? 0 },
+    levels: f.lv,
+    build: f.build ? { ...f.build, rush: rushCost(f.build.at) } : null,
+    perks: f.perks,
+    coach: { name: coachName(club.id, f.lv.coach), level: f.lv.coach, appearance: sanitizeAppearance(randomAppearance(() => rng.next())) },
+    donors: donors.map((d) => ({ id: d.id, name: d.name, appearance: sanitizeAppearance(d.appearance), equipped: sanitizeEquipped(d.equipped), coins: d.coins, stars: d.stars })),
+    wallet: me && me.club_id === club.id ? { coins: me.coins, stars: me.stars ?? 0 } : null,
+  };
+}
+
+/** Finishes works whose time is up and tells the club. */
+async function settleFacilities(db: Db, club: ClubRow) {
+  const f = readFacilities(club.facilities);
+  if (f.done) {
+    const { done, ...rest } = f;
+    const r = await db.query("UPDATE clubs SET facilities = $2 WHERE id = $1 AND facilities->'build'->>'at' = $3 RETURNING id", [club.id, JSON.stringify(rest), (club.facilities as { build?: { at?: string } }).build?.at ?? '']);
+    if (r.length) await clubMessage(db, club.id, `Works finished: ${UPGRADE_BY_ID[done].name} is now level ${rest.lv[done]}`);
+    club.facilities = rest as never;
+  }
+  return f;
+}
+
+async function myClubFor(c: Ctx, perm?: 'upgrades') {
+  const p = await myPlayer(c);
+  const club = await getClub(c.db, c.params[0]);
+  if (p.club_id !== club.id) throw forbidden('You are not in this club');
+  if (club.is_bot) throw bad('AI clubs have no treasury');
+  if (perm && !can(p.club_role, perm)) throw forbidden('Only the president can spend the club treasury');
+  return { p, club };
+}
+
+route('POST', '/api/clubs/:id/donate', async (c) => {
+  const { p, club } = await myClubFor(c);
+  const coins = Math.floor(Number(c.body.coins ?? 0));
+  const stars = Math.floor(Number(c.body.stars ?? 0));
+  if (!(coins >= 0 && stars >= 0) || coins + stars <= 0) throw bad('Pick an amount to donate');
+  if (coins > 0 && coins < 10) throw bad('Donate at least 10 coins');
+  await c.db.tx(async (db) => {
+    if (coins > 0) {
+      const r = await db.query('UPDATE players SET coins = coins - $2 WHERE id = $1 AND coins >= $2 RETURNING id', [p.id, coins]);
+      if (!r.length) throw bad('Not enough coins');
+    }
+    if (stars > 0 && (await spendStars(db, p.id, stars, `club-donate:${club.id}`)) === null) throw bad('Not enough stars');
+    await db.query('UPDATE clubs SET bank_coins = bank_coins + $2, bank_stars = bank_stars + $3 WHERE id = $1', [club.id, coins, stars]);
+    await db.query('INSERT INTO club_donations (id, club_id, player_id, coins, stars) VALUES ($1, $2, $3, $4, $5)', [newId('d_'), club.id, p.id, coins, stars]);
+    const what = [coins ? `${coins.toLocaleString('en')} coins` : '', stars ? `${stars} star${stars === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ');
+    await clubMessage(db, club.id, `${p.name} donated ${what} to the club`);
+  });
+  return { ok: true };
+});
+
+route('POST', '/api/clubs/:id/upgrade', async (c) => {
+  const { p, club } = await myClubFor(c, 'upgrades');
+  const id = oneOf(c.body.id, UPGRADES.map((u) => u.id), 'upgrade');
+  const f = await settleFacilities(c.db, club);
+  if (f.build) throw bad(`Works on the ${UPGRADE_BY_ID[f.build.id].name.toLowerCase()} are still going on`);
+  const to = f.lv[id] + 1;
+  if (to > MAX_LEVEL) throw bad('Already at the top level');
+  const cost = LEVELS[to - 1];
+  const at = new Date(Date.now() + cost.hours * 3600_000).toISOString();
+  const next = { lv: f.lv, perks: f.perks, build: { id, to, at } };
+  const r = await c.db.query(
+    'UPDATE clubs SET bank_coins = bank_coins - $2, bank_stars = bank_stars - $3, facilities = $4 WHERE id = $1 AND bank_coins >= $2 AND bank_stars >= $3 RETURNING id',
+    [club.id, cost.coins, cost.stars, JSON.stringify(next)]);
+  if (!r.length) throw bad('The treasury is short. Ask members to donate.');
+  await clubMessage(c.db, club.id, `${p.name} started works: ${UPGRADE_BY_ID[id].name} to level ${to} (${cost.hours} h)`);
+  return { ok: true };
+});
+
+route('POST', '/api/clubs/:id/rush', async (c) => {
+  const { p, club } = await myClubFor(c, 'upgrades');
+  const f = await settleFacilities(c.db, club);
+  if (!f.build) throw bad('Nothing is being built');
+  const stars = rushCost(f.build.at);
+  const next = { lv: { ...f.lv, [f.build.id]: f.build.to }, perks: f.perks, build: null };
+  const r = await c.db.query('UPDATE clubs SET bank_stars = bank_stars - $2, facilities = $3 WHERE id = $1 AND bank_stars >= $2 RETURNING id', [club.id, stars, JSON.stringify(next)]);
+  if (!r.length) throw bad(`Finishing now needs ${stars} stars in the treasury`);
+  await clubMessage(c.db, club.id, `${p.name} rushed the works: ${UPGRADE_BY_ID[f.build.id].name} is now level ${f.build.to}`);
+  return { ok: true };
+});
+
+route('POST', '/api/clubs/:id/perk', async (c) => {
+  const { p, club } = await myClubFor(c, 'upgrades');
+  const id = oneOf(c.body.id, PERKS.map((x) => x.id), 'item');
+  const f = await settleFacilities(c.db, club);
+  if (f.perks.includes(id)) throw bad('The club already has it');
+  const perk = PERK_BY_ID[id];
+  const next = { lv: f.lv, build: f.build, perks: [...f.perks, id] };
+  const r = await c.db.query('UPDATE clubs SET bank_stars = bank_stars - $2, facilities = $3 WHERE id = $1 AND bank_stars >= $2 RETURNING id', [club.id, perk.stars, JSON.stringify(next)]);
+  if (!r.length) throw bad(`${perk.name} costs ${perk.stars} stars from the treasury`);
+  await clubMessage(c.db, club.id, `${p.name} bought the ${perk.name} for the club`);
+  return { ok: true };
+});
+
 route('POST', '/api/clubs/:id/friendly', async (c) => {
   const p = await myPlayer(c);
   const club = await getClub(c.db, c.params[0]);
-  if (p.club_id !== club.id || !can(p.club_role, 'friendly')) throw forbidden('Only club staff or the captain can arrange friendlies');
+  if (p.club_id !== club.id || !can(p.club_role, 'friendly')) throw forbidden('Only the president or the captain can arrange friendlies');
   const opp = await getClub(c.db, String(c.body.opponentId ?? ''));
   if (opp.id === club.id || !opp.active) throw bad('Pick another club');
   if (club.last_friendly_at && Date.now() - new Date(club.last_friendly_at).getTime() < FRIENDLY_COOLDOWN_MIN * 60_000) {

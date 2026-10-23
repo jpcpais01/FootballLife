@@ -11,8 +11,25 @@ import { confirmModal, errorBox, promptModal, relTime, skeleton, toast } from '.
 import { TROPHY_KINDS, type TrophyKind } from '../../shared/achievements.ts';
 import { trophyArt } from '../gearArt.ts';
 import { EMOJI_SETS, jumboCount, recentEmoji, rememberEmoji } from '../emoji.ts';
+import { LEVELS, MAX_LEVEL, PERKS, UPGRADES, type UpgradeId } from '../../shared/clubUpgrades.ts';
+import { hashSeed } from '../../shared/rng.ts';
 
-type Tab = 'squad' | 'chat' | 'tactics' | 'fixtures' | 'honours' | 'manage';
+type Tab = 'squad' | 'facilities' | 'chat' | 'tactics' | 'fixtures' | 'honours' | 'manage';
+
+const UPGRADE_ICONS: Record<UpgradeId, string> = { stadium: 'stadium', coach: 'whistle', balls: 'ball', academy: 'academy', lounge: 'briefcase' };
+const PERK_ICONS: Record<string, string> = { crest: 'shield', tifo: 'flag', bus: 'bus' };
+const fmt = (n: number) => n.toLocaleString('en');
+
+/** Baked training-ground stills, by what is in them. */
+const groundShots = new Map<string, string>();
+const groundJobs = new Map<string, Promise<string>>();
+
+function hoursLeft(at: string) {
+  const ms = Math.max(0, new Date(at).getTime() - Date.now());
+  const h = Math.floor(ms / 3600_000);
+  const m = Math.ceil((ms % 3600_000) / 60_000);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
 
 export async function clubPage(el: HTMLElement, [id]: string[]) {
   mount(el, html`${skeleton(120, 3)}`);
@@ -75,7 +92,7 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
         <div class="card-head"><div class="h2">Starting XI</div>
           <select class="input" id="formation" style="width:auto;height:38px" ${canEdit ? '' : 'disabled'}>${FORMATION_KEYS.map((k) => html`<option ${k === draft!.formation ? 'selected' : ''}>${k}</option>`)}</select></div>
         ${pitch}
-        <p class="tiny muted" style="text-align:center;margin:12px 0 0">${canEdit ? 'Tap a position, then tap a player below to put them there. Players out of position lose effectiveness.' : 'Only the founder, president or coach can change the line-up.'}</p>
+        <p class="tiny muted" style="text-align:center;margin:12px 0 0">${canEdit ? 'Tap a position, then tap a player below to put them there. Players out of position lose effectiveness.' : 'Only the captain can change the line-up.'}</p>
       </div>
       <div class="span-6 stack" style="gap:16px">
         <div class="card stack" style="gap:14px"><div class="h2">Team instructions</div>${seg('mentality')}${seg('tempo')}${seg('pressing')}${seg('width')}
@@ -90,6 +107,93 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
             </div>`)}</div></div>
         ${canEdit ? html`<div class="row"><button class="btn primary grow" id="save">Save tactics</button><button class="btn" id="auto">Auto-pick</button></div>` : ''}
       </div>
+    </div>`;
+  };
+
+  /** Who is out training today: a few of the squad, changing through the day. */
+  const groundSpec = () => {
+    const f = d.facilities;
+    const seed = hashSeed(`${d.club.id}:${Math.floor(Date.now() / (3 * 3600_000))}`);
+    const shuffle = (xs: any[], k: number) => xs.map((m) => [hashSeed(`${m.id}:${seed}:${k}`), m] as const).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+    const humans = shuffle(d.members.filter((m: any) => !m.isBot && m.position !== 'GK'), 1).slice(0, 3);
+    const bots = shuffle(d.members.filter((m: any) => m.isBot && m.position !== 'GK'), 2);
+    const squad = [...humans, ...bots].slice(0, 5);
+    return {
+      kit: d.club.colors,
+      players: squad.map((m: any) => ({ app: m.appearance, eq: m.isBot ? undefined : m.equipped })),
+      coach: f.coach.appearance,
+      levels: { stadium: f.levels.stadium, balls: f.levels.balls, coach: f.levels.coach },
+      tifo: f.perks.includes('tifo'),
+      seed,
+    };
+  };
+  const groundKey = (spec: ReturnType<typeof groundSpec>) => JSON.stringify(spec);
+  const paintGround = (key: string, url: string) => {
+    const img = el.querySelector<HTMLImageElement>('#cgimg');
+    if (img && img.dataset.k === key) { img.src = url; img.classList.add('on'); }
+  };
+  const loadGround = (spec: ReturnType<typeof groundSpec>, key: string) => {
+    if (groundShots.has(key)) return;
+    let job = groundJobs.get(key);
+    if (!job) {
+      const wide = Math.min(1600, Math.round(Math.max(900, el.clientWidth) * Math.min(2, devicePixelRatio || 1)));
+      job = import('../viewer/clubGround.ts').then((m) => m.renderClubGround(spec, wide, Math.round(wide * 0.36)));
+      groundJobs.set(key, job);
+    }
+    job.then((url) => { groundShots.set(key, url); groundJobs.delete(key); paintGround(key, url); }).catch((err) => { groundJobs.delete(key); console.warn('training ground', err); });
+  };
+
+  const facilitiesTab = (): Raw => {
+    const f = d.facilities;
+    const boss = !!d.me.perms?.upgrades;
+    const member = !!d.me.inClub;
+    const build = f.build;
+    const buildDef = build ? UPGRADES.find((u) => u.id === build.id)! : null;
+    const coachDef = UPGRADES.find((u) => u.id === 'coach')!;
+    const donors = f.donors as any[];
+    const card = (u: (typeof UPGRADES)[number]): Raw => {
+      const lv = f.levels[u.id];
+      const next = lv < MAX_LEVEL ? LEVELS[lv] : null;
+      const building = build?.id === u.id;
+      const short = next ? f.bank.coins < next.coins || f.bank.stars < next.stars : true;
+      return html`<div class="fac ${building ? 'building' : ''} ${lv >= MAX_LEVEL ? 'maxed' : ''}">
+        <div class="fac-top"><span class="fac-ic">${icon(UPGRADE_ICONS[u.id], 22)}</span>
+          <div class="grow"><div class="fac-name">${u.name}</div><div class="fac-stage">${lv ? u.stages[lv - 1] : 'Not built yet'}</div></div>
+          <span class="fac-lv">${lv}<small>/${MAX_LEVEL}</small></span></div>
+        <div class="pips">${Array.from({ length: MAX_LEVEL }, (_, i) => html`<i class="${i < lv ? 'on' : building && i === lv ? 'wip' : ''}"></i>`)}</div>
+        <p class="fac-blurb">${u.blurb}</p>
+        <div class="fac-fx"><span>${lv ? u.effect(lv) : 'No bonus yet'}</span>${next ? html`<span class="to">${icon('arrow', 14)} ${u.effect(lv + 1)}</span>` : html`<span class="chip lime">Max level</span>`}</div>
+        ${building ? html`<div class="fac-cost"><span class="lime">${icon('hammer', 14)} Building · <b data-until="${build.at}">${hoursLeft(build.at)}</b> left</span></div>`
+          : next ? html`<div class="fac-cost"><span>${icon('coin', 14)} ${fmt(next.coins)}</span>${next.stars ? html`<span class="star-amt">${icon('star', 14)} ${next.stars}</span>` : ''}<span class="dim">${icon('clock', 14)} ${next.hours} h</span>
+            ${boss ? html`<button class="btn sm ${short || build ? '' : 'primary'}" data-upgrade="${u.id}" ${short || build ? 'disabled' : ''}>${build ? 'Busy' : short ? 'Short' : `Build ${u.stages[lv]}`}</button>` : ''}</div>` : ''}
+      </div>`;
+    };
+    return html`<div class="dash">
+      <div class="card span-5 stack treasury" style="gap:14px">
+        <div class="card-head" style="margin:0"><div class="h2">${icon('bank', 18)} Club treasury</div>${boss ? html`<span class="chip lime">You decide</span>` : html`<span class="chip">President decides</span>`}</div>
+        <div class="vault"><div><b>${fmt(f.bank.coins)}</b><span>${icon('coin', 15)} coins</span></div><div class="st"><b>${fmt(f.bank.stars)}</b><span>${icon('star', 15)} stars</span></div></div>
+        ${member ? html`<div class="row wrap"><button class="btn primary grow" id="donate">${icon('gift', 16)} Donate</button><span class="tiny muted">You have ${fmt(f.wallet?.coins ?? 0)} coins · ${f.wallet?.stars ?? 0} stars</span></div>` : html`<p class="small muted" style="margin:0">Members fund the club. The president spends it on upgrades.</p>`}
+        <div><div class="h3" style="margin-bottom:8px">Top donors</div>
+          ${donors.length ? html`<div class="list">${donors.map((x, i) => html`<a class="list-item donor" href="/player/${x.id}"><span class="rank">${i + 1}</span>${avatar(x.appearance, d.club.colors, 30, undefined, { eq: x.equipped })}<span class="grow ellipsis" style="font-weight:700">${x.name}</span><span class="small">${icon('coin', 13)} ${fmt(x.coins)}</span>${x.stars ? html`<span class="small star-amt">${icon('star', 13)} ${x.stars}</span>` : ''}</a>`)}</div>` : html`<div class="small dim">No donations yet. Be the first.</div>`}
+        </div>
+      </div>
+      <div class="card span-7 stack coach-card" style="gap:14px">
+        <div class="row" style="gap:14px">${avatar(f.coach.appearance, { primary: '#1f252d', secondary: d.club.colors.primary }, 76)}
+          <div class="grow"><div class="eyebrow">Head coach · staff</div><div class="h2" style="margin:2px 0 4px">${f.coach.name}</div>
+            <div class="row" style="gap:8px"><span class="stars5">${Array.from({ length: 5 }, (_, i) => html`<i class="${i < Math.max(1, f.coach.level) ? 'on' : ''}">${icon('star', 14)}</i>`)}</span><span class="small muted">${f.coach.level ? coachDef.effect(f.coach.level) : 'Volunteer coach'}</span></div></div></div>
+        <p class="small muted" style="margin:0">The coach isn't one of the players. Upgrade him to build chemistry in the starting XI. The captain still picks the team and tactics.</p>
+        ${build && buildDef ? html`<div class="works"><div class="row between"><span class="small"><b>${icon('hammer', 14)} ${buildDef.name}</b> → level ${build.to} · ${buildDef.stages[build.to - 1]}</span><span class="small lime" data-until="${build.at}">${hoursLeft(build.at)}</span></div>
+          <div class="bar" style="margin-top:8px"><i style="width:${Math.round(100 * (1 - Math.max(0, new Date(build.at).getTime() - Date.now()) / (LEVELS[build.to - 1].hours * 3600_000)))}%"></i></div>
+          ${boss ? html`<button class="btn sm" id="rush" style="margin-top:10px">${icon('star', 14)} Finish now · ${build.rush} stars</button>` : ''}</div>`
+          : html`<div class="works idle small muted">${icon('hammer', 14)} No works going on. ${boss ? 'Pick an upgrade below.' : 'The president picks the next upgrade.'}</div>`}
+      </div>
+      <div class="span-12 fac-grid">${UPGRADES.map(card)}</div>
+      <div class="card span-12 club-rare"><div class="card-head"><div class="h2">${icon('star', 18)} Rare items</div><span class="tiny muted">Stars only</span></div>
+        <div class="perk-grid">${PERKS.map((x) => {
+          const own = f.perks.includes(x.id);
+          return html`<div class="perk ${own ? 'own' : ''}"><span class="fac-ic">${icon(PERK_ICONS[x.id], 22)}</span><div class="grow"><div class="fac-name">${x.name}</div><div class="tiny muted">${x.blurb}</div></div>
+            ${own ? html`<span class="chip lime">${icon('check', 12)} Owned</span>` : boss ? html`<button class="btn sm" data-perk="${x.id}" ${f.bank.stars < x.stars ? 'disabled' : ''}>${icon('star', 13)} ${x.stars}</button>` : html`<span class="chip star-amt">${icon('star', 12)} ${x.stars}</span>`}</div>`;
+        })}</div></div>
     </div>`;
   };
 
@@ -123,11 +227,11 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
         <div class="list">${humans.map((m: any) => {
           const editable = perms.roles && m.id !== state.player?.id && m.role !== 'founder' && !(d.me.role === 'president' && m.role === 'president');
           return html`<div class="list-item">${avatar(m.appearance, d.club.colors, 34)}<div class="grow"><div style="font-weight:600">${m.name}</div><div class="tiny muted">${m.position} · ${m.ovr} OVR</div></div>
-            ${editable ? html`<select class="input" style="width:auto;height:34px" data-role="${m.id}">${(d.me.role === 'founder' ? ['president', 'coach', 'captain', 'player'] : ['coach', 'captain', 'player']).map((r) => html`<option value="${r}" ${m.role === r ? 'selected' : ''}>${roleLabel(r)}</option>`)}</select>
+            ${editable ? html`<select class="input" style="width:auto;height:34px" data-role="${m.id}">${(d.me.role === 'founder' ? ['president', 'captain', 'player'] : ['captain', 'player']).map((r) => html`<option value="${r}" ${m.role === r ? 'selected' : ''}>${roleLabel(r)}</option>`)}</select>
               ${perms.kick ? html`<button class="btn sm ghost danger" data-kick="${m.id}" data-name="${m.name}">Remove</button>` : ''}` : html`<span class="chip ${m.role === 'founder' ? 'lime' : ''}">${roleLabel(m.role)}</span>`}
           </div>`;
         })}</div>
-        <p class="tiny dim" style="margin:12px 0 0">Founder: everything. President: settings, roles, members. Coach: line-up and tactics. Captain: invites and friendlies. Roles can only be managed below your own.</p>
+        <p class="tiny dim" style="margin:12px 0 0">Founder and president: upgrades, treasury, settings, roles and members. Captain: line-up, tactics, invites and friendlies. Until there is a captain, the president sets the tactics. Roles can only be managed below your own.</p>
       </div>
     </div>`;
   };
@@ -169,14 +273,21 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
   const render = () => {
     const c = d.club;
     const me = d.me;
-    const tabs: Tab[] = ['squad', ...(me.inClub ? (['chat'] as Tab[]) : []), 'tactics', 'fixtures', 'honours', ...(me.inClub ? (['manage'] as Tab[]) : [])];
+    const f = c.isBot ? null : d.facilities;
+    const spec = f ? groundSpec() : null;
+    const ground = spec ? { spec, key: groundKey(spec) } : null;
+    const shot = ground ? groundShots.get(ground.key) : undefined;
+    const tabs: Tab[] = ['squad', ...(f ? (['facilities'] as Tab[]) : []), ...(me.inClub ? (['chat'] as Tab[]) : []), 'tactics', 'fixtures', 'honours', ...(me.inClub ? (['manage'] as Tab[]) : [])];
     if (!tabs.includes(tab)) tab = 'squad';
     const reqCount = d.requests?.length ?? 0;
     const humans = d.members.filter((m: any) => !m.isBot).length;
     mount(el, html`
-      <div class="card hero-card" style="padding:24px;margin-bottom:18px;background:radial-gradient(600px 300px at 100% 0%, ${c.colors.primary}33, transparent 60%), linear-gradient(135deg, #171c20, #121518)">
-        <div class="row wrap" style="gap:18px">
-          ${badge(c, 88)}
+      <div class="card club-hero ${f?.perks.includes('crest') ? 'gold' : ''}">
+        ${ground ? html`<img id="cgimg" class="cg-img ${shot ? 'on' : ''}" data-k="${ground.key}" alt="" ${shot ? html`src="${shot}"` : ''}>` : ''}
+        <div class="cg-shade" style="--club:${c.colors.primary}"></div>
+        ${ground ? html`<div class="cg-tag">${icon('whistle', 13)} Training ground · ${f.coach.name}</div>` : ''}
+        <div class="cg-body row wrap">
+          <span class="cg-badge">${badge(c, 84)}</span>
           <div class="grow">
             <div class="eyebrow">${c.isBot ? 'AI club' : `Founded ${new Date(c.createdAt).toLocaleDateString()}`}</div>
             <div class="h1" style="margin-top:4px">${c.name}</div>
@@ -195,8 +306,9 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
         </div>
       </div>
       <div class="tabs">${tabs.map((t) => html`<button class="${t === tab ? 'on' : ''}" data-tab="${t}">${t[0].toUpperCase() + t.slice(1)}${t === 'manage' && reqCount ? html` <i class="nav-dot" style="margin-left:4px">${reqCount}</i>` : ''}</button>`)}</div>
-      <div class="fade-in">${tab === 'squad' ? squadTab() : tab === 'chat' ? chatTab() : tab === 'tactics' ? tacticsTab() : tab === 'fixtures' ? fixturesTab() : tab === 'honours' ? honoursTab() : manageTab()}</div>
+      <div class="fade-in">${tab === 'squad' ? squadTab() : tab === 'facilities' ? facilitiesTab() : tab === 'chat' ? chatTab() : tab === 'tactics' ? tacticsTab() : tab === 'fixtures' ? fixturesTab() : tab === 'honours' ? honoursTab() : manageTab()}</div>
       <div id="friendly-modal"></div>`);
+    if (ground && !shot) loadGround(ground.spec, ground.key);
     if (tab === 'chat') {
       scrollChat();
       startChat();
@@ -366,6 +478,30 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
       return;
     }
     if (t.closest('#friendly')) return openFriendly();
+    if (t.closest('#donate')) return openDonate();
+    const up = t.closest('[data-upgrade]') as HTMLButtonElement | null;
+    if (up) {
+      const u = UPGRADES.find((x) => x.id === up.dataset.upgrade)!;
+      const lv = d.facilities.levels[u.id];
+      const cost = LEVELS[lv];
+      if (!(await confirmModal(`Build ${u.stages[lv]}?`, `${u.name} to level ${lv + 1}: ${u.effect(lv + 1)}. Costs ${fmt(cost.coins)} coins${cost.stars ? ` and ${cost.stars} stars` : ''} from the treasury and takes ${cost.hours} hours.`, 'Start works'))) return;
+      up.disabled = true;
+      try { await api.post(`/api/clubs/${id}/upgrade`, { id: u.id }); toast('Works started', 'ok'); await load(); } catch (err) { up.disabled = false; toast((err as Error).message, 'err'); }
+      return;
+    }
+    if (t.closest('#rush')) {
+      const b = d.facilities.build;
+      if (!b || !(await confirmModal('Finish the works now?', `Uses ${b.rush} stars from the treasury.`, 'Finish now'))) return;
+      try { await api.post(`/api/clubs/${id}/rush`); toast('Works finished!', 'ok'); await load(); } catch (err) { toast((err as Error).message, 'err'); }
+      return;
+    }
+    const perk = t.closest('[data-perk]') as HTMLButtonElement | null;
+    if (perk) {
+      const x = PERKS.find((p) => p.id === perk.dataset.perk)!;
+      if (!(await confirmModal(`Buy the ${x.name}?`, `${x.blurb} Uses ${x.stars} stars from the treasury.`, 'Buy'))) return;
+      try { await api.post(`/api/clubs/${id}/perk`, { id: x.id }); toast(`${x.name} bought`, 'ok'); await load(); } catch (err) { toast((err as Error).message, 'err'); }
+      return;
+    }
   });
 
   el.addEventListener('change', async (e) => {
@@ -456,6 +592,42 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
     });
   };
 
+  const openDonate = () => {
+    const w = d.facilities.wallet ?? { coins: 0, stars: 0 };
+    let coins = Math.min(100, w.coins);
+    let stars = 0;
+    const back = document.createElement('div');
+    back.className = 'modal-back';
+    const body = () => html`<div class="modal donate" style="width:min(460px,100%)">
+      <div class="h2" style="margin-bottom:4px">Donate to ${d.club.name}</div>
+      <p class="small muted" style="margin:0 0 14px">Everything goes into the club treasury. The president spends it on upgrades.</p>
+      <div class="field"><label>${icon('coin', 14)} Coins <span class="dim">· you have ${fmt(w.coins)}</span></label>
+        <div class="seg">${[50, 100, 250, 500, 1000].map((n) => html`<button type="button" data-dc="${n}" class="${coins === n ? 'on' : ''}" ${w.coins < n ? 'disabled' : ''}>${fmt(n)}</button>`)}<button type="button" data-dc="${w.coins}" class="${coins === w.coins && w.coins ? 'on' : ''}" ${w.coins < 10 ? 'disabled' : ''}>All</button></div></div>
+      <div class="field" style="margin-top:12px"><label>${icon('star', 14)} Stars <span class="dim">· you have ${w.stars}</span></label>
+        <div class="seg">${[0, 1, 5, 10, 25].map((n) => html`<button type="button" data-ds="${n}" class="${stars === n ? 'on' : ''}" ${w.stars < n ? 'disabled' : ''}>${n || 'None'}</button>`)}</div></div>
+      <div class="row" style="justify-content:flex-end;margin-top:18px"><button class="btn ghost" data-x>Cancel</button><button class="btn primary" data-go ${coins + stars > 0 ? '' : 'disabled'}>${icon('gift', 16)} Donate${coins ? ` ${fmt(coins)} coins` : ''}${stars ? `${coins ? ' +' : ''} ${stars} stars` : ''}</button></div></div>`.html;
+    back.innerHTML = body();
+    document.body.appendChild(back);
+    back.addEventListener('click', async (ev) => {
+      const t = ev.target as HTMLElement;
+      if (t === back || t.closest('[data-x]')) return back.remove();
+      const dc = t.closest('[data-dc]') as HTMLElement | null;
+      if (dc) { coins = coins === Number(dc.dataset.dc) ? 0 : Number(dc.dataset.dc); back.innerHTML = body(); return; }
+      const ds = t.closest('[data-ds]') as HTMLElement | null;
+      if (ds) { stars = Number(ds.dataset.ds); back.innerHTML = body(); return; }
+      const go = t.closest('[data-go]') as HTMLButtonElement | null;
+      if (!go) return;
+      go.disabled = true;
+      try {
+        await api.post(`/api/clubs/${id}/donate`, { coins, stars });
+        back.remove();
+        toast('Thank you! The club treasury grew.', 'ok');
+        await refreshMe();
+        await load();
+      } catch (err) { go.disabled = false; toast((err as Error).message, 'err'); }
+    });
+  };
+
   const openFriendly = async () => {
     const clubs = (await api.get('/api/clubs')).clubs.filter((c: any) => c.id !== id);
     const back = document.createElement('div');
@@ -482,6 +654,11 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
     });
   };
 
+  // Works countdowns tick without a re-render.
+  const ticker = window.setInterval(() => {
+    for (const n of el.querySelectorAll<HTMLElement>('[data-until]')) n.textContent = hoursLeft(n.dataset.until!);
+  }, 30_000);
+
   try {
     await load(true);
   } catch (e) {
@@ -490,6 +667,7 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
   return () => {
     gone = true;
     stopChat();
+    clearInterval(ticker);
   };
 }
 
