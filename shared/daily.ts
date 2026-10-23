@@ -50,6 +50,12 @@ export function fameLevel(fame: number) {
   return { level, into: left, need: fameToNext(level), total: fame };
 }
 
+/** Fame for playing a match: a flat amount for friendlies, more for what you did in official games. */
+export function matchFame(official: boolean, outcome: 'win' | 'draw' | 'loss', goals: number, assists: number, motm: boolean) {
+  if (!official) return 10;
+  return 20 + (outcome === 'win' ? 15 : 0) + goals * 10 + assists * 6 + (motm ? 25 : 0);
+}
+
 /** A title for each stage of a career, shown under your level. */
 export function fameTitle(level: number): string {
   const t = ['Academy prospect', 'Squad player', 'Rising talent', 'First-team regular', 'Fan favourite', 'Star player', 'Club legend', 'World class', 'Icon'];

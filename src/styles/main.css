@@ -1973,3 +1973,51 @@ a.bk-tie:hover { border-color: var(--line-2); }
 .nb-legend { background: linear-gradient(135deg, #3a0a14, #2a1a00); color: #fff1c4; box-shadow: 0 0 16px color-mix(in srgb, var(--b1) 45%, transparent); margin-top: 6px; }
 .nb-legend::before { background: linear-gradient(90deg, var(--b1), var(--b2), var(--b1), var(--b2)); background-size: 300% 100%; animation: mythflow 2.4s linear infinite; }
 .nb-crown { position: absolute; left: 50%; top: -11px; width: 22px; height: 12px; transform: translateX(-50%); background: var(--b1); clip-path: polygon(0 100%, 0 20%, 25% 60%, 50% 0, 75% 60%, 100% 20%, 100% 100%); filter: drop-shadow(0 0 4px var(--b1)); }
+
+/* ---------- full-time report ---------- */
+.rp-back { position: fixed; inset: 0; z-index: 240; display: grid; place-items: center; padding: 16px; background: radial-gradient(70% 70% at 30% 50%, rgba(var(--accent-rgb), .12), rgba(0,0,0,.78)); backdrop-filter: blur(8px); animation: fadeIn .3s; }
+.rp-back.out { transition: opacity .3s; opacity: 0; }
+.rp { --tone: var(--lime); position: relative; display: grid; grid-template-columns: minmax(180px, 230px) 1fr; gap: 26px; width: min(760px, 100%); padding: 26px 28px; border-radius: 26px;
+  background: linear-gradient(160deg, var(--panel-2), var(--bg-2)); border: 1px solid var(--line); box-shadow: 0 30px 80px rgba(0,0,0,.55); animation: modalIn .5s var(--spring); }
+.rp[data-tone="top"] { --tone: #ffb23d; }
+.rp[data-tone="ok"] { --tone: #8fd3ff; }
+.rp[data-tone="low"] { --tone: var(--muted); }
+.rp-hero { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; }
+.rp-ring { position: relative; width: 112px; height: 112px; border-radius: 50%; padding: 4px; background: conic-gradient(var(--tone), transparent 70%, var(--tone)); animation: rpSpin 6s linear infinite; }
+.rp-av { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; background: var(--bg-2); animation: rpSpin 6s linear infinite reverse; }
+.rp-star { position: absolute; right: -2px; bottom: 4px; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: #ffb23d; color: #1a1200; box-shadow: 0 0 18px rgba(255,178,61,.6); animation: rpSpin 6s linear infinite reverse; }
+.rp-rate { margin-top: 8px; font-size: 64px; line-height: 1; font-weight: 900; color: var(--tone); text-shadow: 0 0 30px color-mix(in srgb, var(--tone) 40%, transparent); }
+.rp-name { font-weight: 800; }
+.rp-form { font-size: 12px; font-weight: 800; }
+.rp-form.up { color: var(--lime); }
+.rp-form.down { color: var(--muted); }
+.rp-body { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.rp-res.w { color: var(--lime); }
+.rp-res.l { color: var(--red); }
+.rp-verdict { font-size: 22px; font-weight: 800; line-height: 1.2; }
+.rp-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.rp-stats > div { display: flex; flex-direction: column; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
+.rp-stats b { font-size: 20px; }
+.rp-stats span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.rp-earn { display: flex; flex-wrap: wrap; gap: 8px; }
+.rp-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; font-size: 13px; font-weight: 800; background: rgba(255,255,255,.06); color: var(--muted); }
+.rp-chip.coin { background: rgba(var(--accent-rgb), .12); color: var(--lime); }
+.rp-chip.fame { background: rgba(255,178,61,.12); color: #ffb23d; }
+.rp-chip.up { background: rgba(143,211,255,.12); color: #8fd3ff; }
+.rp-chip.up svg { transform: rotate(-90deg); }
+.rp-actions { display: flex; gap: 10px; margin-top: auto; }
+.rp-actions .btn { flex: 1; }
+@keyframes rpSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .rp-ring, .rp-av, .rp-star { animation: none; } }
+@media (orientation: landscape) and (max-height: 540px) {
+  .rp { grid-template-columns: 170px 1fr; gap: 18px; padding: 16px 20px; }
+  .rp-ring { width: 88px; height: 88px; }
+  .rp-rate { font-size: 48px; }
+  .rp-verdict { font-size: 18px; }
+  .rp-body { gap: 10px; }
+  .rp-stats b { font-size: 17px; }
+  .rp-stats > div { padding: 7px 10px; }
+}
+@media (max-width: 560px) and (orientation: portrait) {
+  .rp { grid-template-columns: 1fr; }
+}

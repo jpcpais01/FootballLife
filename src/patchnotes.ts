@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T17:00:00Z',
+    entries: [
+      { title: 'Your match, at full time', body: 'When the final whistle goes, a report card now tells the story of your own game: your rating counts up in a glowing ring, a gold star if you were player of the match, your goals, shots, passing and tackles, and one line on how it went. It shows the coins and fame you earned, any attributes that levelled up, and how the rating compares to your season average, so you know when you have just played your best game of the season.' },
+    ],
+  },
+  {
     hour: '2026-10-23T16:30:00Z',
     entries: [
       { title: 'Defenders who read the game', body: 'Midfielders and forwards with nobody to mark now step into the passing lane between the ball and the most dangerous player near them, so the forward pass is cut off instead of left open. When a team is caught outnumbered on the break, defenders no longer dive in: the back line backs off and the nearest man stands the attacker up a few metres away, slowing him down until help gets back.' },
