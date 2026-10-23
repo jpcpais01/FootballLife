@@ -78,6 +78,13 @@ const train = await call('ana', 'POST', '/api/train', { focus: 'finishing', scor
 check('perfect drill gives the top multiplier', train.perf === 1.3, train.perf);
 check('training grants xp', (train.xp.finishing ?? 0) > 0 || train.levelUps.length > 0, train.xp.finishing);
 check('training cooldown enforced', await call('ana', 'POST', '/api/train', { focus: 'finishing' }).then(() => false, () => true));
+{
+  // A second session once recovered. Neon stores microseconds (PGlite's clock only has ms), which must not trip the double-submit guard.
+  const tdb = await getDb();
+  await tdb.query("UPDATE players SET last_train_at = now() - interval '2 days' + interval '123 microseconds' WHERE name = 'Ana Costa'");
+  const again = await call('ana', 'POST', '/api/train', { focus: 'finishing', score: 50 }).then(() => true, (e) => String(e));
+  check('second session after cooldown is accepted', again === true, again);
+}
 
 const league = await call('ana', 'GET', '/api/league');
 check('league has 10 clubs and 90 fixtures', league.table.length === 10 && league.matches.length === 90, `${league.table.length}/${league.matches.length}`);
