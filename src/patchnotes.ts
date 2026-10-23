@@ -13,6 +13,7 @@ export const PATCH_NOTES: PatchGroup[] = [
       { title: 'Donate to your club', body: 'Members can donate coins and stars from the new Facilities tab. Top donors are listed in the treasury, and every donation shows in the club chat. Levels 4 and 5 need stars, stars can finish works early, and three rare items are bought with stars only: the Golden crest, an Ultras tifo and the Team bus.' },
       { title: 'President and captain', body: 'The president (and the founder) now make every upgrade decision with the treasury. The captain picks the line-up and tactics; until a club names one, the president does. The head coach is no longer a player role: he is staff you hire and improve through upgrades. Members who were coach are now players.' },
       { title: 'Your training ground', body: 'The top of the club page now shows your training ground: a few of your squad at work, with the head coach watching. Who is out training changes through the day, and the stand, floodlights, balls and banner grow as you upgrade the club.' },
+      { title: 'Your player leads the home screen', body: 'The home spotlight now opens on your own player in 3D, standing in a pool of light in his outfit and slowly turning. Tap him and he celebrates. Next to him are your overall rating, games, goals and average rating per game, plus your five key attributes as new glowing gauge bars that fill up when you arrive and change colour as you improve, from red through amber to your theme colour and gold for 80 and up.' },
     ],
   },
   {

@@ -1,18 +1,20 @@
 // Home screen: what's happening, not where to go (the dock is the menu).
-// A swipeable spotlight of big cards (next match, club, training, league…)
-// with arrows, and a row of activity cards below.
+// A swipeable spotlight of big cards, led by your own player in 3D, then the
+// next match, club, training, league… with arrows, and activity cards below.
 import { HOUSE_BY_ID } from '../../shared/life.ts';
 import { ITEM_BY_ID, RARITY_COLORS } from '../../shared/cosmetics.ts';
 import { api } from '../api.ts';
 import { avatar } from '../art.ts';
-import { badge, homeTable, keyAttrs, linkRows, matchRow, posChip, roleLabel, standingsTable, type MatchBrief } from '../components.ts';
-import { html, mount, type Raw } from '../dom.ts';
+import { attrMeters, attrTier, badge, homeTable, keyAttrs, linkRows, matchRow, posChip, roleLabel, standingsTable, type MatchBrief } from '../components.ts';
+import { afterPaint, html, mount, type Raw } from '../dom.ts';
 import { itemArt, trophyArt } from '../gearArt.ts';
 import { icon } from '../icons.ts';
 import { navigate } from '../router.ts';
 import { refreshMe } from '../state.ts';
 import { countdown, errorBox, kickoffLabel, relTime, skeleton, toast } from '../ui.ts';
 import { fameBar, goalRows, type Daily } from '../daily.ts';
+import { POSITION_NAMES } from '../../shared/attributes.ts';
+import type { Turntable } from '../viewer/turntable.ts';
 
 interface Tile {
   id: string;
@@ -23,7 +25,9 @@ interface Tile {
   hero: () => Raw;
 }
 
-let lastFocus = 'match';
+let lastFocus = 'me';
+// The player's stage outlives the page so coming back home is instant.
+let parkedTT: Turntable | null = null;
 
 export async function homePage(el: HTMLElement) {
   mount(el, html`<div class="home-skel">${skeleton(130, 1)}${skeleton(360, 1)}</div>`);
@@ -33,7 +37,8 @@ export async function homePage(el: HTMLElement) {
   let alive = true;
   let focus = lastFocus;
   let tiles: Tile[] = [];
-  let pulledToday = false;
+  let tt: Turntable | null = null;
+  let ttLoading = false;
 
   let last = '';
   const load = async (first = false) => {
@@ -63,6 +68,22 @@ export async function homePage(el: HTMLElement) {
     const kit = d.club?.colors ?? { primary: '#2a3340', secondary: '#c6ff3d' };
     const m: MatchBrief | null = d.live ?? d.next;
     const t: Tile[] = [];
+
+    // ---- you: the spotlight's lead, your player in 3D ----
+    const c = p.career;
+    t.push({
+      id: 'me', label: p.name, href: `/player/${p.id}`, accent: kit.secondary,
+      art: () => html`<div class="ta-icon">${avatar(p.appearance, d.club?.colors, 70, d.club ? p.shirt : undefined, { eq: p.equipped })}</div>`,
+      hero: () => html`<div class="hero-copy">
+          <div class="eyebrow">${d.club ? html`${d.club.name} · ${roleLabel(p.role)}` : 'Free agent'}</div>
+          <div class="hero-title">${p.name}</div>
+          <div class="me-ovr"><b class="t-${attrTier(p.ovr)}">${p.ovr}</b><span>${posChip(p.position)}<small>${POSITION_NAMES[p.position as keyof typeof POSITION_NAMES]}</small></span></div>
+          <div class="hero-stats me-stats"><div><b>${c.apps}</b><span>Games</span></div><div><b>${c.goals}</b><span>Goals</span></div><div><b>${c.rating ? c.rating.toFixed(1) : '–'}</b><span>Avg rating</span></div></div>
+          <div class="hero-cta"><a class="btn white lg" href="/player/${p.id}">My profile</a><a class="btn lg" href="/shop">${icon('shirt')} Outfit</a></div>
+        </div>
+        <div class="me-stage" id="me-stage"><div class="me-ph">${avatar(p.appearance, d.club?.colors, 200, d.club ? p.shirt : undefined, { eq: p.equipped })}</div></div>
+        <div class="me-attrs"><div class="eyebrow">Key attributes</div>${attrMeters(p.attrs, p.position)}</div>`,
+    });
 
     // ---- next match / find a club ----
     if (!d.club) {
@@ -150,8 +171,8 @@ export async function homePage(el: HTMLElement) {
         </div>
         <div class="hero-art"><div class="hero-goals">${goalRows(dl, true)}</div></div>`,
     };
-    // Rewards waiting lead the spotlight; otherwise it sits after training.
-    if (ready) t.unshift(today);
+    // Rewards waiting come straight after your player; otherwise after training.
+    if (ready) t.splice(1, 0, today);
     else t.push(today);
 
     // ---- league ----
@@ -236,18 +257,6 @@ export async function homePage(el: HTMLElement) {
         <div class="hero-art"><div class="ta-big">${icon('swap', 160)}</div></div>`,
     });
 
-    // ---- profile ----
-    t.push({
-      id: 'profile', label: p.name, href: `/player/${p.id}`, accent: '#c6ff3d',
-      art: () => html`<div class="ta-icon">${avatar(p.appearance, d.club?.colors, 70, d.club ? p.shirt : undefined, { eq: p.equipped })}</div>`,
-      hero: () => html`<div class="hero-copy">
-          <div class="eyebrow">${d.club ? d.club.name : 'Free agent'}</div>
-          <div class="hero-title">${p.name}</div>
-          <div class="hero-stats"><div><b class="lime">${p.ovr}</b><span>${posChip(p.position)}</span></div><div><b>${p.career.apps}</b><span>Apps</span></div><div><b>${p.career.goals}</b><span>Goals</span></div><div><b>${p.career.assists}</b><span>Assists</span></div><div><b>${p.career.rating?.toFixed(1) ?? '–'}</b><span>Rating</span></div></div>
-          <div class="hero-cta"><a class="btn white lg" href="/player/${p.id}">My profile</a><a class="btn lg" href="/shop/look">Edit look</a></div>
-        </div>
-        <div class="hero-art">${avatar(p.appearance, d.club?.colors, 240, d.club ? p.shirt : undefined, { eq: p.equipped })}</div>`,
-    });
     return t;
   };
 
@@ -273,8 +282,6 @@ export async function homePage(el: HTMLElement) {
   const render = () => {
     const d = data;
     tiles = buildTiles();
-    // Rewards waiting: open on them the first time this visit.
-    if (tiles[0].id === 'today' && !pulledToday) { focus = 'today'; pulledToday = true; }
     if (!tiles.some((t) => t.id === focus)) focus = tiles[0].id;
     const greet = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening';
     mount(el, html`
@@ -290,6 +297,36 @@ export async function homePage(el: HTMLElement) {
       <div class="act-title"><span class="h2">Your activity</span></div>
       <div class="act-row">${activity()}</div>`);
     bind();
+    void mountStage();
+  };
+
+  // The 3D stage survives re-renders: its canvas moves into the new host.
+  const mountStage = async () => {
+    const host = el.querySelector<HTMLElement>('#me-stage');
+    if (!host || !alive) return;
+    const p = data.player;
+    const kit = data.club?.colors ?? { primary: '#1d2329', secondary: '#c6ff3d' };
+    if (!tt && parkedTT) { tt = parkedTT; parkedTT = null; }
+    if (!tt) {
+      if (ttLoading) return;
+      ttLoading = true;
+      try {
+        const { createTurntable } = await import('../viewer/turntable.ts');
+        await afterPaint();
+        if (!alive) return;
+        const accent = `rgb(${getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim()})`;
+        tt = createTurntable(el.querySelector<HTMLElement>('#me-stage') ?? host, { stage: 'floor', drag: false, accent, casual: true });
+      } catch {
+        return;
+      } finally {
+        ttLoading = false;
+      }
+    }
+    const cur = el.querySelector<HTMLElement>('#me-stage');
+    if (!cur) return;
+    tt.attach(cur);
+    tt.set(p.appearance, p.equipped, kit, p.position === 'GK');
+    void tt.shown.then(() => cur.classList.add('live'));
   };
 
   const setFocus = (id: string, scroll = false) => {
@@ -379,5 +416,6 @@ export async function homePage(el: HTMLElement) {
     document.removeEventListener('daily-changed', onDaily);
     clearInterval(timer);
     clearInterval(poll);
+    if (tt) { parkedTT?.dispose(); tt.park(); parkedTT = tt; }
   };
 }
