@@ -53,12 +53,14 @@ await call('bo', 'POST', `/api/clubs/${created.id}/join`, { code: club.club.invi
 const club2 = await call('bo', 'GET', `/api/clubs/${created.id}`);
 check('human joined, bot GK replaced', club2.members.filter((m: { isBot: boolean }) => !m.isBot).length === 2 && club2.members.filter((m: { position: string; isBot: boolean }) => m.position === 'GK' && m.isBot).length === 1);
 check('player cannot change tactics', await call('bo', 'POST', `/api/clubs/${created.id}/lineup`, { formation: '4-4-2' }).then(() => false, () => true));
-await call('ana', 'POST', `/api/clubs/${created.id}/role`, { playerId: club2.members.find((m: { name: string }) => m.name === 'Bo Larsen').id, role: 'coach' });
+await call('ana', 'POST', `/api/clubs/${created.id}/role`, { playerId: club2.members.find((m: { name: string }) => m.name === 'Bo Larsen').id, role: 'captain' });
+check('the coach is no longer a player role', await call('ana', 'POST', `/api/clubs/${created.id}/role`, { playerId: club2.members.find((m: { name: string }) => m.name === 'Bo Larsen').id, role: 'coach' }).then(() => false, () => true));
+check('founder gives up tactics once there is a captain', await call('ana', 'POST', `/api/clubs/${created.id}/lineup`, { formation: '4-4-2' }).then(() => false, () => true));
 await call('bo', 'POST', `/api/clubs/${created.id}/lineup`, { formation: '4-4-2', tactics: { mentality: 'attacking' } });
-check('coach changed formation', (await call('bo', 'GET', `/api/clubs/${created.id}`)).club.formation === '4-4-2');
+check('captain changed formation', (await call('bo', 'GET', `/api/clubs/${created.id}`)).club.formation === '4-4-2');
 
 // Club identity can be edited any time by the founder or president.
-check('coach cannot edit the badge', await call('bo', 'POST', `/api/clubs/${created.id}/settings`, { name: 'Bo United' }).then(() => false, () => true));
+check('captain cannot edit the badge', await call('bo', 'POST', `/api/clubs/${created.id}/settings`, { name: 'Bo United' }).then(() => false, () => true));
 const aiName = league0Name(await call('ana', 'GET', '/api/clubs'), created.id);
 check('rename to a taken name is refused', await call('ana', 'POST', `/api/clubs/${created.id}/settings`, { name: aiName }).then(() => false, () => true));
 await call('ana', 'POST', `/api/clubs/${created.id}/settings`, {
@@ -153,6 +155,7 @@ await call('cara', 'POST', `/api/clubs/${created.id}/request`, {});
 check('duplicate request blocked', await call('cara', 'POST', `/api/clubs/${created.id}/request`, {}).then(() => false, () => true));
 const withReq = await call('ana', 'GET', `/api/clubs/${created.id}`);
 check('staff see join request', withReq.requests.length === 1 && withReq.requests[0].player.name === 'Cara Neves');
+await call('ana', 'POST', `/api/clubs/${created.id}/role`, { playerId: withReq.members.find((m: { name: string }) => m.name === 'Bo Larsen').id, role: 'player' });
 check('players cannot answer requests', await call('bo', 'POST', `/api/invites/${withReq.requests[0].id}/respond`, { accept: true }).then(() => false, () => true));
 await call('ana', 'POST', `/api/invites/${withReq.requests[0].id}/respond`, { accept: true });
 check('accepted request joins club', (await call('cara', 'GET', '/api/me')).player.clubId === created.id);
