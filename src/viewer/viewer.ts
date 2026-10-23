@@ -17,6 +17,7 @@ import type { MatchEvent } from '../../shared/sim/types.ts';
 import { type ActAim, type ActionKind, Figure, GK_KITS, type Kit } from './figures.ts';
 import { eitherSide, hashOf } from './rig/animator.ts';
 import { B } from './rig/skeleton.ts';
+import { Officials } from './officials.ts';
 import { Playback } from './playback.ts';
 import type { Track } from '../../shared/sim/tracks.ts';
 import { buildStadium, PL, PW, type Stadium } from './stadium.ts';
@@ -75,6 +76,7 @@ export class MatchViewer {
   private labelCanvas = document.createElement('canvas');
   private labelFor = -2;
   private playback: Playback;
+  private officials: Officials;
   private teams: [ViewerTeam, ViewerTeam];
   private resizeObs: ResizeObserver;
   private camTarget = new THREE.Vector3();
@@ -183,6 +185,8 @@ export class MatchViewer {
     this.scene.add(this.labelSprite);
 
     this.playback = new Playback([teams[0], teams[1]], halftimeAt);
+    // Referee and assistants, in a shirt neither team (nor either keeper) wears.
+    this.officials = new Officials(this.scene, this.playback, [kits[0].primary, kits[1].primary, GK_KITS[0].primary, GK_KITS[1].primary], hashOf(`${teams[0].name}|${teams[1].name}`));
     this.buildComposer(opts.night);
     this.resizeObs = new ResizeObserver(() => this.resize());
     this.resizeObs.observe(container);
@@ -379,7 +383,8 @@ export class MatchViewer {
     }
     for (let i = 0; i < 22; i++) {
       const f = this.figures[i];
-      if (fr.sentOff[i]) {
+      // A sent-off player walks to the tunnel in the recording; he only leaves the picture once he's off the pitch.
+      if (fr.sentOff[i] && !(fr.tracked && t - this.playback.redCardAt(i) < 60 && Math.abs(fr.targets[i].y) < 36.5)) {
         f.root.visible = false;
         continue;
       }
@@ -420,6 +425,7 @@ export class MatchViewer {
       ringMat.opacity += ((i === fr.holder ? 0.9 : 0) - ringMat.opacity) * Math.min(1, realDt * 10);
     }
 
+    this.officials.update({ fr, t, gameDt, realDt, rate, jumped, elapsed: this.elapsed, ball: this.ball.position, camera: this.camera });
     this.holdBall(fr, t);
 
     // Holder label.

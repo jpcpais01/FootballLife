@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T19:00:00Z',
+    entries: [
+      { title: 'A referee on the pitch', body: 'Every match now has a referee and two assistants. The referee runs the diagonal, staying close enough to see but out of the way of play, while the assistants move along the touchlines level with the last defender. He blows his whistle for fouls, goals and kick-offs, points the way for free kicks, points to the spot for penalties, jogs over and holds up a yellow or red card to the player he books, and points back to the centre after a goal. Assistants flag offsides and signal which way a throw-in goes. Players shown a red card now walk off the pitch instead of vanishing.' },
+    ],
+  },
+  {
     hour: '2026-10-23T18:00:00Z',
     entries: [
       { title: 'Natural hands', body: 'Players\' hands no longer stick out with the palms facing forward. They now hang relaxed in line with the arm, palms towards the legs, at home, in the locker room, in training and in matches.' },

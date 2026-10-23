@@ -167,6 +167,11 @@ export class Playback {
     });
   }
 
+  /** Game time player `idx` was sent off, or Infinity. */
+  redCardAt(idx: number) {
+    return this.redAt.find((r) => r.idx === idx)?.t ?? Infinity;
+  }
+
   dir(side: 0 | 1, t: number): 1 | -1 {
     const homeDir = t <= this.halftimeAt ? 1 : -1;
     return (side === 0 ? homeDir : -homeDir) as 1 | -1;
