@@ -31,17 +31,23 @@ const TRACK_HZ = 5;
 const GOAL_X = 52.5;
 const GOAL_HALF = 3.66;
 const BALL_R = 0.11;
+/** Optional probe for the calibration scripts (scripts/sim-check.ts and friends); a no-op in the game. */
+const tap = (k: string, d: Record<string, unknown>) => (globalThis as { __simTap?: (k: string, d: Record<string, unknown>) => void }).__simTap?.(k, d);
 /** Grass drag on a pass along the ground (1/s). */
 const GROUND_K = 0.6;
 // Calibration of the decision model against real match numbers.
-const SHOOT_K = 0.6; // how keen players are to shoot
+const SHOOT_K = 0.55; // how keen players are to shoot
 const CROSS_K = 1; // how keen wide players are to cross
 const PASS_K = 1.04; // overall pass completion
-const BOX_K = 0.7; // completion of passes into the box
-const FINAL_K = 0.9; // completion of passes into the final third
-const XG_A = -1.85; // base of the shot-quality curve
+const BOX_K = 0.8; // completion of passes into the box
+const FINAL_K = 0.95; // completion of passes into the final third
+const XG_A = -0.47; // base of the shot-quality curve
+const XG_D = 0.13; // how fast chances fade with distance
 /** Duels a close defender forces per second on the man on the ball. */
-const TACKLE_RATE = 0.35;
+const TACKLE_RATE = 0.13;
+const ATTR_SPREAD = 0.6; // how far apart ratings pull players
+const RANGE_K = 0.006; // appetite for shots from outside the box
+const LONG_K = 0.011; // how much a long ball's completion drops per metre
 
 const hyp = (x: number, y: number) => Math.sqrt(x * x + y * y);
 const clamp = (x: number, a: number, b: number) => (x < a ? a : x > b ? b : x);
@@ -246,7 +252,9 @@ class Engine {
     const load = (this.t / 5400) * (tac.pressing === 'high' ? 1.12 : tac.pressing === 'low' ? 0.9 : 1);
     const fatigue = Math.max(0, load * 0.95 - p.attrs.stamina / 150) * 0.16;
     const homeK = side === 0 ? 1 + this.homeAdv : 1;
-    return p.attrs[attr] * fitK * (1 - fatigue) * homeK;
+    // Talent tilts every duel, but on the day anyone can beat anyone.
+    const v = 60 + (p.attrs[attr] - 60) * ATTR_SPREAD;
+    return v * fitK * (1 - fatigue) * homeK;
   }
 
   private mix(i: number, w: Partial<Record<Attr, number>>): number {
@@ -481,7 +489,8 @@ class Engine {
     if (this.owner >= 0 && !this.restart) {
       this.tx[this.owner] = this.carryX;
       this.ty[this.owner] = this.carryY;
-      this.urg[this.owner] = 0.75;
+      // Into open grass he drives at it; with men around him he keeps it close.
+      this.urg[this.owner] = clamp(0.4 + (this.nearest((1 - this.sideOf(this.owner)) as Side, this.bx, this.by).d - 2) * 0.06, 0.4, 0.8);
     }
   }
 
@@ -506,8 +515,10 @@ class Engine {
       if (i === this.owner) top *= 0.84;
       if (this.busy[i] > this.t) top *= 0.25;
       const u = this.urg[i];
-      const cruise = u > 0 ? top * (0.5 + 0.5 * u) : d > 15 ? top * 0.7 : Math.min(top * 0.5, 1 + d * 0.4);
-      const want = Math.min(cruise, d * 1.7);
+      // Footballers mostly walk and jog to hold their place, and only sprint when the play calls for it.
+      const cruise = u > 0 ? top * (0.22 + 0.78 * u ** 1.5) : d > 15 ? top * 0.55 : Math.min(top * 0.4, 0.6 + d * 0.35);
+      // Close enough: he stands rather than shuffling after every small shift of the shape.
+      const want = d < 0.6 && u < 0.6 ? 0 : Math.min(cruise, d * 1.7);
       const wx = d > 0.05 ? (dx / d) * want : 0;
       const wy = d > 0.05 ? (dy / d) * want : 0;
       let ax = wx - this.vx[i];
@@ -872,7 +883,7 @@ class Engine {
     }
     if (this.receiving || this.t < this.decideAt || this.busy[h] > this.t) return;
     const tac = this.tactics[side];
-    let mean = press.d < 2.5 ? 0.22 : press.d < 6 ? 0.8 : 1.5;
+    let mean = press.d < 2.5 ? 0.25 : press.d < 6 ? 1.0 : 2.0;
     if (tac.tempo === 'direct') mean *= 0.8;
     if (tac.tempo === 'patient') mean *= 1.25;
     if (this.role(h) === 'GK') mean = 0.3;
@@ -916,22 +927,35 @@ class Engine {
     const lossHere = this.lossCost(this.bx, this.by, side);
     const evs: number[] = [];
     const runs: (() => void)[] = [];
+    const labels: string[] = [];
+    let label = '';
     const add = (ev: number, run: () => void) => {
       evs.push(ev);
       runs.push(run);
+      labels.push(label);
     };
 
-    for (const o of this.passOptions('pass')) add(o.ev, () => this.playPass(o));
+    for (const o of this.passOptions('pass')) {
+      label = o.through ? 'through' : o.lofted ? 'long' : 'pass';
+      add(o.ev, () => this.playPass(o));
+    }
+    label = 'shoot';
 
     // Shoot.
     if (b.u > 0.7) {
       const xg = this.shotXg(side, this.bx, this.by, false);
       const ego = role === 'ST' ? 1.2 : role === 'WG' || role === 'AM' ? 1.08 : role === 'CB' || role === 'DM' ? 0.7 : 0.95;
       const ment = tac.mentality === 'attacking' ? 1.1 : tac.mentality === 'defensive' ? 0.92 : 1;
-      add(xg * SHOOT_K * ego * ment * (0.8 + this.a(h, 'shooting') / 250), () => this.shoot(false));
+      // From outside the box a strike is also worth the rebound, the deflection or the corner it may win,
+      // so players with a sight of goal and a good shot in them let fly.
+      const dg = hyp(this.dir(side) * GOAL_X - this.bx, this.by);
+      const sight = Math.abs(this.by) < 22 && this.inCone(side, this.bx, this.by) <= 1 ? 1 : 0;
+      const range = dg > 15 && dg < 26 ? RANGE_K * sight * (this.a(h, 'shooting') / 65) ** 2 * clamp(press.d / 3, 0.4, 1) : 0;
+      add(xg * SHOOT_K * ego * ment * (0.8 + this.a(h, 'shooting') / 250) + range, () => this.shoot(false));
     }
 
     // Cross: worth it with bodies in the box.
+    label = 'cross';
     if (b.u > 0.72 && Math.abs(b.v) > 0.42) {
       let n = 0;
       for (const j of this.active(side)) {
@@ -947,6 +971,7 @@ class Engine {
     }
 
     // Carry it on into space.
+    label = 'carry';
     const c = this.carryPlan(h, 7 + Math.min(8, press.d * 0.6));
     const cf = this.fr(c.x, c.y, side);
     // Running into a defender in the way is as risky as having one on your back.
@@ -957,13 +982,25 @@ class Engine {
       if (hyp(this.px[j] - (this.bx + (c.x - this.bx) * k), this.py[j] - (this.by + (c.y - this.by) * k)) < 3.5) crowd++;
     }
     const risk = clamp(0.45 * Math.exp(-press.d / 1.5) + 0.4 * Math.exp(-pathGap / 1.6) + crowd * 0.12, 0.005, 0.85);
-    add((1 - risk) * (threat(cf.u, cf.v) + 0.005 + Math.min(c.space, 8) * 0.0005) - risk * lossHere, () => {
+    // He can't just run through a man standing in his way: that's taking him on.
+    let blocked = false;
+    for (const j of this.active(D)) {
+      const dx = this.px[j] - this.bx;
+      const dy = this.py[j] - this.by;
+      const dj = hyp(dx, dy);
+      if (dj > 2.6) continue;
+      const cl = hyp(c.x - this.bx, c.y - this.by) || 1;
+      const along = (dx * (c.x - this.bx) + dy * (c.y - this.by)) / cl;
+      if (along > 0 && Math.abs(dx * (c.y - this.by) - dy * (c.x - this.bx)) / cl < 1.6) blocked = true;
+    }
+    if (!blocked) add((1 - risk) * (threat(cf.u, cf.v) + 0.005 + Math.min(c.space, 8) * 0.0005) - risk * lossHere, () => {
       this.carryX = c.x;
       this.carryY = c.y;
       this.decideAt = this.t + this.rng.range(0.4, 1);
     });
 
     // Take him on.
+    label = 'dribble';
     if (press.d < 3 && press.idx >= 0) {
       const att = this.mix(h, { dribbling: 4, ballControl: 2, acceleration: 2, pace: 1 });
       const def = this.mix(press.idx, { tackling: 4, defPositioning: 2, strength: 1.5, pace: 1, acceleration: 1 });
@@ -976,6 +1013,7 @@ class Engine {
       add(p * (threat(beyond.u, beyond.v) * clamp(next / 6, 0.25, 1) + 0.005) - (1 - p) * lossHere - flair, () => this.duel(press.idx, true));
     }
 
+    label = 'hoof';
     // Get rid of it: under pressure deep in his own half with nothing on.
     if (b.u < 0.3 && press.d < 3.5) add(-0.012 - b.u * 0.02, () => this.hoof());
 
@@ -984,7 +1022,9 @@ class Engine {
       this.decideAt = this.t + 0.5;
       return;
     }
-    runs[this.pick(evs, this.a(h, 'decisions'))]();
+    const k = this.pick(evs, this.a(h, 'decisions'));
+    tap('decide', { t: this.t, s: side, h, k, n: evs.length, labels, u: b.u, v: b.v, press: press.d, held: this.t - this.ownerSince });
+    runs[k]();
   }
 
   /**
@@ -1036,8 +1076,9 @@ class Engine {
           const oEff = Math.max(0, this.dist(i, x, y) - T * 1.6);
           if (oEff < 7) keep *= 1 - (lofted ? 0.45 * Math.exp(-oEff / 2.4) : 0.4 * Math.exp(-oEff / 1.5));
         }
-        if (lofted) p = 0.98 - (1 - keep) - Math.max(0, d - 25) * 0.0045 + (qLong - 60) * 0.0025;
-        else p = 1 - 0.62 * Math.exp(-g / 0.85) - (1 - keep) - Math.max(0, d - 18) * 0.006 + (qShort - 60) * 0.002;
+        // Balls in the air are contested where they come down, and the longer the riskier.
+        if (lofted) p = 0.93 - (1 - keep) - Math.max(0, d - 18) * LONG_K + (qLong - 60) * 0.0025;
+        else p = 1 - 0.62 * Math.exp(-g / 0.85) - (1 - keep) - Math.max(0, d - 14) * 0.009 + (qShort - 60) * 0.002;
       }
       if (!gk && pp < 1.5) p -= 0.07;
       else if (!gk && pp < 3) p -= 0.03;
@@ -1155,6 +1196,7 @@ class Engine {
     const T = d / speed + (lofted ? 0.5 : kind === 'throw' ? 0.3 : 0.1);
     const kicker = h;
     const gkHands = this.role(h) === 'GK' && this.inHands;
+    tap('pass', { t: this.t, s: side, h, to, x0: this.bx, y0: this.by, x1: tgt.x, y1: tgt.y, d, lofted, through, kind, gk: fromKeeper, p, u0: this.fr(this.bx, this.by, side).u, u1: this.fr(tgt.x, tgt.y, side).u, held: this.t - this.ownerSince });
     const kickAct: ActKind = kind === 'throw'
       ? 'throwIn'
       : this.role(h) === 'GK'
@@ -1431,9 +1473,7 @@ class Engine {
         this.act(marker, 'header');
         this.lastTouch = D;
         if (this.rng.chance(withQ ? 0.14 : 0.12)) {
-          this.loose = true;
-          this.bvx = this.bvy = 0;
-          this.outOfPlay(true, 'corner');
+          this.behindForCorner(side, 'header');
           return;
         }
         this.clearance(marker);
@@ -1478,6 +1518,28 @@ class Engine {
     }
     this.boxRun = [att];
     clear(marker, true);
+  }
+
+  /**
+   * A defender's (or the keeper's) touch sends the ball over his own goal line,
+   * wide of the post: it flies out from where he touched it, then it's a corner.
+   */
+  private behindForCorner(att: Side, how: 'header' | 'block' | 'parry') {
+    const dA = this.dir(att);
+    const sy = Math.sign(this.by || (this.rng.chance(0.5) ? 1 : -1));
+    // Out past the post on the ball's side, a few metres behind the line.
+    const lineX = dA * (GOAL_X + this.rng.range(1.5, 4));
+    const outY = sy * clamp(Math.abs(this.by) + this.rng.range(2, 9), GOAL_HALF + 1.2, 30);
+    const d = hyp(lineX - this.bx, outY - this.by);
+    const speed = how === 'parry' ? this.rng.range(8, 12) : how === 'block' ? this.rng.range(9, 15) : this.rng.range(8, 13);
+    const T = d / speed + 0.2;
+    this.passInfo = null;
+    this.chase = [];
+    this.landing = null;
+    this.launch('air', lineX, outY, T, 0, BALL_R, () => {
+      this.loose = true;
+      this.outOfPlay(true, 'corner');
+    });
   }
 
   private nearestTo(side: Side, x: number, y: number): number {
@@ -1682,12 +1744,12 @@ class Engine {
     const d = Math.max(3, hyp(gx - x, y));
     const dx = Math.max(0.3, Math.abs(gx - x));
     // Distance and how much of the goal he can see.
-    let xg = (1 / (1 + Math.exp(-(XG_A + 1.5 * goalView(dx, y) - 0.09 * d)))) * nearPost(dx, y);
+    let xg = (1 / (1 + Math.exp(-(XG_A + 1.5 * goalView(dx, y) - XG_D * d)))) * nearPost(dx, y);
     if (header) xg *= 0.42;
     if (setPiece === 'penalty') xg = 0.76;
     if (setPiece === 'freekick') xg = Math.min(xg, 0.07);
     const press = this.nearest(D, x, y, gk).d;
-    if (!setPiece) xg *= clamp(0.35 + press / 4, 0.35, 1.1);
+    if (!setPiece) xg *= clamp(0.5 + press / 5, 0.5, 1.1);
     // Bodies between the ball and the goal mouth.
     if (!setPiece) xg *= Math.pow(0.8, this.inCone(side, x, y));
     const dTac = this.tactics[D];
@@ -1707,6 +1769,7 @@ class Engine {
     const d = Math.max(3, hyp(gx - this.bx, this.by));
     const xg = this.shotXg(side, this.bx, this.by, header, setPiece);
     const dTac = this.tactics[D];
+    tap('shot', { t: this.t, s: side, h, x: this.bx, y: this.by, d, header, setPiece, xg, u: this.fr(this.bx, this.by, side).u, v: this.fr(this.bx, this.by, side).v });
 
     const sq = header
       ? this.mix(h, { heading: 4, offPositioning: 2, strength: 1 })
@@ -1720,7 +1783,7 @@ class Engine {
         : d < 12
           ? this.mix(gk, { oneOnOne: 3, reflexes: 3, gkPositioning: 2 })
           : this.mix(gk, { reflexes: 3, gkPositioning: 3, oneOnOne: 1 });
-    const pGoal = clamp(xg * Math.exp((sq - kq) / 70), 0.01, 0.9);
+    const pGoal = clamp(xg * Math.exp((sq - kq) / 110), 0.01, 0.9);
     const assist = this.lastPass && this.sideOf(this.lastPass.from) === side && this.t - this.lastPass.t < 15 ? this.lastPass.from : -1;
     const xgR = Math.round(xg * 100) / 100;
     const o = header ? 'header' : setPiece ?? (d > 20 ? 'long' : 'close');
@@ -1809,8 +1872,7 @@ class Engine {
         this.act(blocker, 'tackle');
         this.lastTouch = D;
         if (this.rng.chance(0.4)) {
-          this.loose = true;
-          this.outOfPlay(true, 'corner');
+          this.behindForCorner(side, 'block');
           return;
         }
         // Ricochet.
@@ -1856,13 +1918,7 @@ class Engine {
         this.emit('shot', side, this.bx, this.by, { p: h, q: gk, o: parry ? 'parried' : 'saved', xg: xgR, z, hl: 1 });
         this.lastTouch = D;
         if (parry) {
-          // Pushed away wide of the post and behind.
-          const out = Math.sign(this.by || (this.rng.chance(0.5) ? 1 : -1));
-          this.bvx = ds * this.rng.range(3, 6);
-          this.bvy = out * this.rng.range(5, 9);
-          this.bvz = this.rng.range(1.5, 4);
-          this.loose = true;
-          this.outOfPlay(true, 'corner');
+          this.behindForCorner(side, 'parry');
           return;
         }
         this.give(gk, null);

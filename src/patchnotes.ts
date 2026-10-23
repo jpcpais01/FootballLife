@@ -7,6 +7,13 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T10:30:00Z',
+    entries: [
+      { title: 'Matches play like real football', body: 'The match AI has been retuned against real match data. Players now walk and jog to hold their shape and only sprint when the play needs it, instead of running everywhere. Teams keep the ball with more short passes from team-mates who come close to offer an option, and play far fewer hopeful long balls. The tempo is calmer. Attackers can no longer walk the ball through a defender standing in their way, so they have to take him on, pass or shoot. Players shoot from the edge of the box when they see the goal, and chances get harder to score the further out they are. A typical match now has about 28 shots and three goals, a bit over half of the shots from inside the box. Better teams still win most games, but upsets happen again.' },
+      { title: 'No more surprise corners', body: 'When a defender heads a cross behind, a shot is blocked wide, or the keeper tips one round the post, you now see the ball fly over the goal line before the corner is given. Before, it just stopped in the box and the corner appeared.' },
+    ],
+  },
+  {
     hour: '2026-10-23T10:00:00Z',
     entries: [
       { title: 'Training comes alive', body: 'Every drill now uses real motion capture. Your player runs in and strikes through the ball with his boot meeting it, side-foots passes after squaring up to the board, slides in to win the ball and gets back up, and keepers dive full stretch, land and get up again. Between reps he does real keepy-ups: knee to knee, catching the ball on his foot and flicking it back up, with the ball riding the touch. He walks back to his mark and turns on the spot properly instead of snapping round.' },
