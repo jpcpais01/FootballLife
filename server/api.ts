@@ -242,7 +242,8 @@ route('POST', '/api/train', async (c) => {
   const perf = drillMultiplier(c.body.score as number | undefined);
   const res = trainingSession(p.position, p.attrs, p.xp as Partial<Record<Attr, number>>, focus, streak, perf);
   const updated = await c.db.query(
-    'UPDATE players SET attrs = $2, xp = $3, last_train_at = now(), train_count = train_count + 1 WHERE id = $1 AND (last_train_at IS NULL OR last_train_at = $4) RETURNING id',
+    // Compare at millisecond precision: the row we read came back as a JS Date, which drops Postgres' microseconds.
+    `UPDATE players SET attrs = $2, xp = $3, last_train_at = now(), train_count = train_count + 1 WHERE id = $1 AND (last_train_at IS NULL OR date_trunc('milliseconds', last_train_at) = $4) RETURNING id`,
     [p.id, JSON.stringify(res.attrs), JSON.stringify(res.xp), p.last_train_at],
   );
   if (!updated.length) throw bad('Training already in progress');

@@ -11,6 +11,7 @@ export const PATCH_NOTES: PatchGroup[] = [
     entries: [
       { title: 'Instant player creator', body: 'Changing your look no longer freezes the screen. Faces and kits are now painted in the background, only the part you changed is rebuilt, and your player updates in place without restarting his pose. Trying hairstyles, eye colours or face sliders now feels immediate, and the option previews fill in without stalling the page. Players also load more smoothly in matches and at home.' },
       { title: 'Better look studio', body: 'The player stage in the Look tab is now much taller and fills the side of the screen, and the face close-up zooms in further. Your player now stands still on the turning stand instead of shuffling and crossing his legs, and pale skin tones have more natural warmth instead of looking white.' },
+      { title: 'Training sessions save again', body: 'Finishing a training drill no longer fails with "Training already in progress" when the score is being banked. Every session after your first was being turned away by mistake; your XP and drill score now count every time you train.' },
     ],
   },
   {
