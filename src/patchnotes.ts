@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T20:00:00Z',
+    entries: [
+      { title: 'Your season, at a glance', body: 'The league has a new You tab, also on the home screen as My season. It shows your form as a line of every rating this season, with stars for player of the match. It shows your club\'s place and how it has moved round by round, how far you are off the top, and your next fixture. You can see where you stand in the Golden Boot, Playmaker and Player of the Season races and how far behind the leader you are. Milestones count up your appearances, goals, assists and big games, and every match you played is listed with your rating.' },
+    ],
+  },
+  {
     hour: '2026-10-23T19:00:00Z',
     entries: [
       { title: 'A referee on the pitch', body: 'Every match now has a referee and two assistants. The referee runs the diagonal, staying close enough to see but out of the way of play, while the assistants move along the touchlines level with the last defender. He blows his whistle for fouls, goals and kick-offs, points the way for free kicks, points to the spot for penalties, jogs over and holds up a yellow or red card to the player he books, and points back to the centre after a goal. Assistants flag offsides and signal which way a throw-in goes. Players shown a red card now walk off the pitch instead of vanishing.' },

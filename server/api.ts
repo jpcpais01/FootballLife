@@ -738,6 +738,79 @@ route('GET', '/api/league', async (c) => {
   };
 });
 
+/** Your season so far: form, totals, where you stand in each award race and how the club's league place has moved. */
+route('GET', '/api/season/me', async (c) => {
+  const p = await myPlayer(c);
+  const season = await currentSeason(c.db);
+  if (!season) return { season: null };
+  const all = (await c.db.query<MatchListRow>(`${MATCH_SELECT} WHERE m.season_id = $1 ORDER BY m.kickoff_at`, [season.id])).map(matchDto);
+  const done = new Map(all.filter((m) => m.status === 'finished').map((m) => [m.id, m]));
+  const rows = await c.db.query<{ match_id: string; club_id: string; goals: number; assists: number; shots: number; saves: number; tackles: number; clean_sheet: boolean; rating: number; motm: boolean; outcome: string | null }>(
+    'SELECT match_id, club_id, goals, assists, shots, saves, tackles, clean_sheet, rating, motm, outcome FROM player_match_stats WHERE player_id = $1 AND season_id = $2',
+    [p.id, season.id],
+  );
+  // Only matches that have finished for everyone, so a live game is never spoiled.
+  const games = rows.filter((r) => done.has(r.match_id)).map((r) => {
+    const m = done.get(r.match_id)!;
+    const home = m.home.id === r.club_id;
+    return {
+      matchId: r.match_id, kind: m.kind, at: m.kickoffAt, round: m.round, cup: m.cup?.name,
+      opp: home ? m.away : m.home, home, score: m.score, pens: m.pens,
+      outcome: r.outcome, rating: r.rating, goals: r.goals, assists: r.assists, shots: r.shots, saves: r.saves, tackles: r.tackles, cleanSheet: r.clean_sheet, motm: r.motm,
+    };
+  }).sort((a, b) => a.at.localeCompare(b.at));
+
+  // Award races, the same rules the end-of-season awards use.
+  const rounds = new Set(all.filter((m) => m.kind === 'league').map((m) => m.round)).size;
+  const minApps = Math.max(1, Math.floor(rounds * 0.4));
+  const race = async (expr: string, where = '', having = `${expr} > 0`) => {
+    const r = await c.db.query<{ player_id: string; name: string; v: number }>(
+      `SELECT s.player_id, max(p.name) AS name, (${expr})::float AS v FROM player_match_stats s JOIN players p ON p.id = s.player_id JOIN matches m ON m.id = s.match_id
+       WHERE s.season_id = $1 AND s.kind = 'league' AND m.status = 'final' ${where} GROUP BY s.player_id HAVING ${having} ORDER BY v DESC, count(*) ASC`,
+      [season.id],
+    );
+    const i = r.findIndex((x) => x.player_id === p.id);
+    return { rank: i < 0 ? null : i + 1, of: r.length, value: i < 0 ? null : Math.round(r[i].v * 100) / 100, leader: r[0] ? { name: r[0].name, playerId: r[0].player_id, value: Math.round(r[0].v * 100) / 100 } : null };
+  };
+  const races = {
+    golden_boot: await race('sum(s.goals)'),
+    playmaker: await race('sum(s.assists)'),
+    pots: await race('avg(s.rating)', '', `count(*) >= ${minApps}`),
+    ...(p.position === 'GK' ? { golden_glove: await race('sum(CASE WHEN s.clean_sheet THEN 1 ELSE 0 END)', "AND p.position = 'GK'") } : {}),
+  };
+
+  // The club's league place after every round, replayed from the results.
+  let club = null;
+  if (p.club_id) {
+    const table = await standings(c.db, season.id);
+    const me = table.findIndex((t) => t.clubId === p.club_id);
+    const pts = new Map<string, { pts: number; gd: number; gf: number }>(table.map((t) => [t.clubId, { pts: 0, gd: 0, gf: 0 }]));
+    const path: number[] = [];
+    const league = all.filter((m) => m.kind === 'league');
+    const maxRound = Math.max(0, ...league.filter((m) => m.status === 'finished').map((m) => m.round ?? 0));
+    for (let r = 1; r <= maxRound; r++) {
+      for (const m of league) {
+        if (m.round !== r || !m.score) continue;
+        const [hg, ag] = m.score as [number, number];
+        const h = pts.get(m.home.id);
+        const a = pts.get(m.away.id);
+        if (!h || !a) continue;
+        h.gf += hg; a.gf += ag; h.gd += hg - ag; a.gd += ag - hg;
+        h.pts += hg > ag ? 3 : hg === ag ? 1 : 0;
+        a.pts += ag > hg ? 3 : hg === ag ? 1 : 0;
+      }
+      const order = [...pts.entries()].sort((x, y) => y[1].pts - x[1].pts || y[1].gd - x[1].gd || y[1].gf - x[1].gf);
+      path.push(order.findIndex(([id]) => id === p.club_id) + 1);
+    }
+    const next = all.find((m) => m.status !== 'finished' && (m.home.id === p.club_id || m.away.id === p.club_id));
+    club = me < 0 ? null : {
+      position: me + 1, of: table.length, points: table[me].points, played: table[me].played, form: table[me].form,
+      leader: table[0].points, third: table[Math.min(2, table.length - 1)].points, rounds, path, next: next ?? null,
+    };
+  }
+  return { season: { id: season.id, number: season.number }, position: p.position, games, races, club, minApps };
+});
+
 /** The signed-in player's own line for the full-time report: what they earned and how it compares. */
 async function myReport(c: Ctx, matchId: string) {
   if (!c.user) return undefined;

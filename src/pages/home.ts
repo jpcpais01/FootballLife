@@ -184,7 +184,7 @@ export async function homePage(el: HTMLElement) {
             <div class="eyebrow">Division 1 · Season ${d.season.number}</div>
             <div class="hero-title">${d.position ? `${ordinal(d.position)} place` : 'The league'}</div>
             <p class="hero-desc">${d.table?.[0] ? `${d.table[0].name} lead with ${d.table[0].points} points.` : ''} Top three earn the biggest season rewards, and the champions get medals.</p>
-            <div class="hero-cta"><a class="btn white lg" href="/league">Full table</a><a class="btn lg" href="/league?tab=leaders">Top scorers</a></div>
+            <div class="hero-cta"><a class="btn white lg" href="/league">Full table</a>${d.club ? html`<a class="btn lg" href="/league?tab=you">My season</a>` : html`<a class="btn lg" href="/league?tab=leaders">Top scorers</a>`}</div>
           </div>
           <div class="hero-art"><div class="hero-table" id="htbl">${d.table ? standingsTable(d.table.slice(0, 6), d.club?.id, true) : ''}</div></div>`,
       });
