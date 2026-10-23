@@ -5,6 +5,8 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { randomAppearance, type Appearance } from '../../shared/appearance.ts';
 import type { Equipped } from '../../shared/cosmetics.ts';
 import { Figure, GK_KITS, SHOWCASE_SCALE, type Kit } from './figures.ts';
+import type { ActionKind } from './rig/animator.ts';
+import { B } from './rig/skeleton.ts';
 
 export type DrillId = 'shooting' | 'passing' | 'sprint' | 'defending' | 'keeper';
 export type Outcome = 'perfect' | 'good' | 'miss';
@@ -386,8 +388,6 @@ export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
       });
     });
   const wait = (sec: number) => tween(sec, () => {});
-  let meSpeed = 0;
-  let dummySpeed = 0;
   let juggling = true;
   const camPos = new THREE.Vector3(0, 3, 8);
   const camLook = new THREE.Vector3(0, 1, -10);
@@ -430,17 +430,45 @@ export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
       ball.position.y += 4 * h * u * (1 - u);
       ball.rotation.x -= spin * 0.016;
     });
-  const kick = (f: Figure, sec = 0.5) =>
-    tween(sec, (u) => {
-      f.pose = 'kick';
-      f.poseK = u;
-      if (u >= 1) f.pose = '';
+  /** Where the root must stand, facing `heading`, for bone `b` to meet `at` at the contact of `kind`. */
+  const standFor = (f: Figure, kind: ActionKind, b: number, at: THREE.Vector3, heading: number) => {
+    const keep = f.root.rotation.y;
+    const pos = f.root.position.clone();
+    f.root.rotation.y = heading;
+    f.root.position.set(0, 0, 0);
+    f.root.updateMatrixWorld();
+    const off = f.partAt(kind, b, f.contactTime(kind));
+    f.root.rotation.y = keep;
+    f.root.position.copy(pos);
+    f.root.updateMatrixWorld();
+    return new THREE.Vector3(at.x - off.x, 0, at.z - off.z);
+  };
+  /** Waits for a walk or a turn on the spot to finish, at most `max` seconds. */
+  const moved = (f: Figure, max = 3) =>
+    new Promise<void>((res) => {
+      let t = 0;
+      tasks.push((dt) => {
+        t += dt;
+        const done = (!f.busyMoving && !f.acting) || t >= max;
+        if (done) res();
+        return done;
+      });
+    });
+  /** Waits for the body to finish what it's doing (a dive and getting back up), at most `max` seconds. */
+  const settle = (f: Figure, max = 3) =>
+    new Promise<void>((res) => {
+      let t = 0;
+      tasks.push((dt) => {
+        t += dt;
+        const done = !f.acting || t >= max;
+        if (done) res();
+        return done;
+      });
     });
 
   const startPositions = () => {
     tasks.length = 0;
     juggling = drill !== 'keeper';
-    meSpeed = dummySpeed = 0;
     if (me) {
       me.pose = '';
       me.root.visible = true;
@@ -503,13 +531,18 @@ export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
     if (!me) return;
     const t = targetPts[rep % 4];
     juggling = false;
+    ball.position.set(0, BALL_R, SHOT_Z);
+    // A couple of strides in, timed so the boot meets the ball on the spot.
+    const heading = Math.atan2(t.x - ball.position.x, t.z - ball.position.z);
+    const spot = standFor(me, 'shot', B.RightToeBase, ball.position, heading);
     const from = me.root.position.clone();
-    const spot = new THREE.Vector3(-0.35, 0, SHOT_Z + 0.55);
-    meSpeed = 4;
-    await tween(0.45, (u) => me!.root.position.lerpVectors(from, spot, ease(u)));
-    meSpeed = 0;
-    void kick(me, 0.5);
-    await wait(0.24);
+    const run = 0.6;
+    me.act('shot', { contactIn: run });
+    const h0 = me.root.rotation.y;
+    await tween(run, (u) => {
+      me!.root.position.lerpVectors(from, spot, u);
+      me!.root.rotation.y = h0 + (heading - h0) * Math.min(1, u * 2);
+    });
     const start = ball.position.clone();
     let to: THREE.Vector3;
     if (o === 'perfect') to = t.clone();
@@ -526,42 +559,45 @@ export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
     const end = to.clone().setY(BALL_R);
     if (o !== 'miss') end.z = GOAL_Z - 1.9;
     await flight(to, end, 0.2, 0.4, 4);
-    await wait(0.35);
     ball.position.set(0, BALL_R, SHOT_Z);
-    meSpeed = 2;
-    const back = new THREE.Vector3(-1.1, 0, SHOT_Z + 1.6);
-    const at = me.root.position.clone();
-    await tween(0.5, (u) => me!.root.position.lerpVectors(at, back, ease(u)));
-    meSpeed = 0;
-    faceTo(me, 0, GOAL_Z);
+    // Walk back to the mark and turn to face the goal again.
+    me.walkPath([{ x: -1.1, z: SHOT_Z + 1.6 }], () => me?.turnTo(Math.PI), 2.2);
+    await moved(me, 2.5);
   }
 
   async function playPassing(o: Outcome) {
     if (!me) return;
     juggling = false;
     const b = boards[[1, 0, 2, 1, 2, 0][rep % 6]];
-    faceTo(me, b.g.position.x, b.g.position.z);
-    const foot = me.root.position.clone().add(new THREE.Vector3(Math.sin(me.root.rotation.y) * 0.55, BALL_R, Math.cos(me.root.rotation.y) * 0.55));
+    // Square up to the board (a proper turning step when it's well round), then side-foot it.
+    me.turnTo(Math.atan2(b.g.position.x - me.root.position.x, b.g.position.z - me.root.position.z));
+    const rolled = ball.position.clone();
+    await moved(me, 1.6);
+    const h = me.root.rotation.y;
+    const foot = me.partAt('pass', B.RightToeBase, me.contactTime('pass')).add(new THREE.Vector3(Math.sin(h), 0, Math.cos(h)).multiplyScalar(BALL_R * 0.7)).setY(BALL_R);
+    // The ball rolls over to his foot while he turns.
+    if (rolled.distanceTo(foot) > 0.1) await flight(rolled, foot, 0, 0.3, 6);
     ball.position.copy(foot);
-    void kick(me, 0.45);
-    await wait(0.22);
+    me.act('pass', { contactIn: 0.32 });
+    await wait(0.32);
     const target = b.g.position.clone().setY(BALL_R);
     const speed = o === 'perfect' ? 0.55 : o === 'good' ? 0.75 : 0.8;
     if (o === 'miss') {
       const wide = target.clone().add(new THREE.Vector3((Math.random() < 0.5 ? -1 : 1) * 3.5, 0, -2));
       await flight(foot, wide, 0, speed, 18);
       await wait(0.25);
+      ball.position.copy(foot);
     } else {
-      const hit = o === 'perfect' ? target.clone().add(new THREE.Vector3(0, 0, 0)) : target.clone().add(new THREE.Vector3(0.8, 0, 0));
+      const hit = o === 'perfect' ? target.clone() : target.clone().add(new THREE.Vector3(0.8, 0, 0));
       await flight(foot, hit, 0, speed, 18);
       void flash(b.face.material as THREE.MeshStandardMaterial, 0);
       if (o === 'perfect') {
         burst(hit.clone().setY(0.8), [LIME, 0xffffff]);
         ring(hit.clone().setY(0.05));
       }
+      // Back off the board toward him.
       await flight(hit, foot, 0, o === 'perfect' ? 0.55 : 0.8, -18);
     }
-    ball.position.copy(foot);
   }
 
   async function playSprint(o: Outcome) {
@@ -571,7 +607,6 @@ export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
     const gate = gates[rep % gates.length];
     const to = new THREE.Vector3(0, 0, gate.position.z - 1.5);
     const sec = o === 'perfect' ? 0.55 : o === 'good' ? 0.8 : 1.2;
-    meSpeed = o === 'perfect' ? 9 : o === 'good' ? 7 : 4;
     await tween(sec, (u) => {
       me!.root.position.lerpVectors(from, to, o === 'miss' ? ease(u) : u);
       ball.position.copy(me!.root.position).add(new THREE.Vector3(0, BALL_R, -0.7));
@@ -580,8 +615,13 @@ export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
       for (const p of gate.children) void flash((p as THREE.Mesh).material as THREE.MeshStandardMaterial, 0);
       if (o === 'perfect') ring(gate.position.clone().setY(0.05));
     }
-    meSpeed = 0;
-    await wait(0.15);
+    // Pull up over a few strides instead of stopping dead.
+    const brake = me.root.position.clone();
+    const stop = brake.clone().add(new THREE.Vector3(0, 0, -(to.z - from.z === 0 ? 0 : 1.1)));
+    await tween(0.45, (u) => {
+      me!.root.position.lerpVectors(brake, stop, 1 - (1 - u) * (1 - u));
+      ball.position.copy(me!.root.position).add(new THREE.Vector3(0, BALL_R, -0.7));
+    });
   }
 
   async function playDefending(o: Outcome) {
@@ -590,19 +630,26 @@ export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
     const start = new THREE.Vector3(0, 0, -14);
     dummy.root.position.copy(start);
     faceTo(dummy, 0, 0);
-    dummySpeed = 5;
     const meet = new THREE.Vector3(0, 0, -5.2);
-    await tween(0.9, (u) => {
-      dummy.root.position.lerpVectors(start, meet, u);
+    // The attacker runs at him, and he goes to ground just as the ball arrives.
+    const ballMeet = meet.clone().add(new THREE.Vector3(0, BALL_R, 0.9));
+    const heading = Math.PI;
+    const slideTo = standFor(me, 'slide', B.RightToeBase, ballMeet, heading);
+    if (o === 'miss') slideTo.x += 0.9;
+    const contact = 0.35;
+    const meFrom = me.root.position.clone();
+    await tween(0.9 - contact, (u) => {
+      dummy.root.position.lerpVectors(start, meet, (u * (0.9 - contact)) / 0.9);
       ball.position.copy(dummy.root.position).add(new THREE.Vector3(0, BALL_R, 0.9));
     });
-    const meFrom = me.root.position.clone();
-    const slideTo = new THREE.Vector3(o === 'miss' ? 0.3 : 0, 0, -4.4);
-    void tween(0.8, (u) => {
-      me!.pose = 'slide';
-      me!.poseK = u;
-      me!.root.position.lerpVectors(meFrom, slideTo, Math.min(1, u * 1.6));
-      if (u >= 1) me!.pose = '';
+    me.act('slide', { contactIn: contact });
+    const dFrom = dummy.root.position.clone();
+    void tween(contact + 0.25, (u) => {
+      me!.root.position.lerpVectors(meFrom, slideTo, Math.min(1, (u * (contact + 0.25)) / contact));
+    });
+    await tween(contact, (u) => {
+      dummy.root.position.lerpVectors(dFrom, meet, u);
+      ball.position.copy(dummy.root.position).add(new THREE.Vector3(0, BALL_R, 0.9));
     });
     const ballFrom = ball.position.clone();
     if (o === 'miss') {
@@ -613,8 +660,6 @@ export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
         ball.position.copy(dummy.root.position).add(new THREE.Vector3(0, BALL_R, 0.9));
       });
     } else {
-      await wait(0.25);
-      dummySpeed = 0;
       const away = o === 'perfect' ? new THREE.Vector3(6, BALL_R, -6) : new THREE.Vector3(-0.5, BALL_R, -3.6);
       if (o === 'perfect') {
         burst(ballFrom, [LIME, 0xffffff, 0xff7a1a], 60);
@@ -622,51 +667,130 @@ export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
       }
       await flight(ballFrom, away, o === 'perfect' ? 1.2 : 0.2, o === 'perfect' ? 0.7 : 0.4);
     }
-    dummySpeed = 0;
-    await wait(0.4);
-    // Reset for the next attack.
-    me.pose = '';
-    me.root.position.set(0, 0, -2);
-    faceTo(me, 0, -10);
+    // Back on his feet and back to his mark for the next attack.
+    await settle(me, 1.6);
+    me.walkPath([{ x: 0, z: -2 }], () => me?.turnTo(Math.PI), 2.4);
     dummy.root.position.copy(start);
     faceTo(dummy, 0, 0);
     ball.position.copy(start).add(new THREE.Vector3(0, BALL_R, 0.9));
+    await moved(me, 2.5);
   }
 
   async function playKeeper(o: Outcome) {
     if (!me) return;
-    const side = Math.random() < 0.5 ? -1 : 1;
+    const side: 1 | -1 = Math.random() < 0.5 ? -1 : 1;
     const high = Math.random() < 0.5;
     const spot = new THREE.Vector3(0, BALL_R, GOAL_Z + 11);
     ball.position.copy(spot);
-    void kick(dummy, 0.5);
-    await wait(0.24);
-    const aim = new THREE.Vector3(side * 2.6, high ? 1.8 : 0.5, GOAL_Z + 0.2);
-    me.poseSide = side;
-    void tween(0.75, (u) => {
-      me!.pose = 'dive';
-      me!.poseK = u;
-      if (u >= 1) me!.pose = '';
+    // The shooter runs in from his mark and strikes it.
+    const dh = Math.atan2(-spot.x, GOAL_Z - spot.z);
+    const dSpot = standFor(dummy, 'shot', B.RightToeBase, spot, dh);
+    const dFrom = dummy.root.position.clone();
+    const run = 0.55;
+    const flightT = 0.42;
+    dummy.act('shot', { contactIn: run });
+    // The keeper reads it and dives, his hands meeting the ball at full stretch.
+    const kind: ActionKind = high ? 'diveHigh' : 'dive';
+    const ct = me.contactTime(kind, side);
+    const hands = me.partAt(kind, B.LeftHand, ct, side).add(me.partAt(kind, B.RightHand, ct, side)).multiplyScalar(0.5);
+    me.act(kind, { contactIn: run + flightT, side });
+    const d0 = dummy.root.rotation.y;
+    await tween(run, (u) => {
+      dummy.root.position.lerpVectors(dFrom, dSpot, u);
+      dummy.root.rotation.y = d0 + (dh - d0) * Math.min(1, u * 2);
     });
     if (o === 'miss') {
-      await flight(spot, aim.clone().setZ(GOAL_Z - 1.6).setX(side * 2.9), 0.15, 0.5, 14);
-      await wait(0.6);
+      const past = hands.clone().add(new THREE.Vector3(Math.sign(hands.x - me.root.position.x || side) * 1.1, -0.2, -1.6));
+      await flight(spot, past, 0.15, flightT + 0.08, 14);
+      await wait(0.4);
     } else {
-      const meet = new THREE.Vector3(me.root.position.x + side * 1.9, high ? 1.5 : 0.7, GOAL_Z + 0.9);
-      await flight(spot, meet, 0.12, 0.42, 14);
+      await flight(spot, hands, 0.12, flightT, 14);
       if (o === 'perfect') {
-        burst(meet, [LIME, 0xffffff, new THREE.Color(kit.primary).getHex()]);
-        ring(meet, false);
-        // Held: the ball follows the keeper's hands down.
-        await tween(0.4, (u) => ball.position.lerpVectors(meet, meet.clone().setY(0.6), u));
+        burst(hands, [LIME, 0xffffff, new THREE.Color(kit.primary).getHex()]);
+        ring(hands, false);
+        // Held: the ball stays in his hands as he lands and gets up.
+        const l = new THREE.Vector3();
+        const r = new THREE.Vector3();
+        await tween(1.6, () => {
+          me!.bones[B.LeftHand].getWorldPosition(l);
+          me!.bones[B.RightHand].getWorldPosition(r);
+          ball.position.copy(l).add(r).multiplyScalar(0.5);
+          ball.position.y = Math.max(BALL_R, ball.position.y);
+        });
       } else {
-        await flight(meet, new THREE.Vector3(side * 6, 0.5, GOAL_Z + 3), 1.4, 0.6, -10);
+        await flight(hands, new THREE.Vector3(hands.x + Math.sign(hands.x - me.root.position.x || side) * 4, 0.5, GOAL_Z + 3), 1.4, 0.6, -10);
       }
-      await wait(0.25);
     }
-    me.pose = '';
+    // Up again; the shooter jogs back to his mark.
+    dummy.walkPath([{ x: dFrom.x, z: dFrom.z }], () => dummy.turnTo(dh), 2.6);
+    await settle(me, 2.6);
     ball.position.copy(spot);
+    await moved(dummy, 2);
   }
+
+  // ---- Keepy-ups between reps ----
+  // Each touch is a mocap take; the ball rides the knee or the foot through
+  // the touch and flies between touches on a true arc to where the next one meets it.
+  interface Touch { kind: ActionKind; bone: number; at: number; until: number; up: number; flight: number }
+  const FLICK: Touch = { kind: 'kickUp', bone: B.LeftToeBase, at: 1.0, until: 1.13, up: BALL_R, flight: 0.8 };
+  const TOUCHES: Touch[] = [
+    { kind: 'kneeB', bone: B.RightLeg, at: 0.24, until: 0.24, up: BALL_R + 0.12, flight: 0.72 },
+    { kind: 'kneeA', bone: B.LeftLeg, at: 0.5, until: 0.5, up: BALL_R + 0.12, flight: 0.72 },
+    { kind: 'stallB', bone: B.RightToeBase, at: 0.42, until: 1.48, up: BALL_R + 0.05, flight: 1 },
+    { kind: 'stallD', bone: B.RightToeBase, at: 0.5, until: 1.18, up: BALL_R + 0.05, flight: 1 },
+  ];
+  const G = 17;
+  let jug: {
+    touch: Touch;
+    start: number;
+    fly: { a: THREE.Vector3; v: THREE.Vector3; t0: number; t1: number } | null;
+    next: { touch: Touch; at: number } | null;
+    rest: THREE.Vector3;
+  } | null = null;
+  const boneAt = (f: Figure, b: number, out: THREE.Vector3) => f.bones[b].getWorldPosition(out);
+  const juggle = (f: Figure, dt: number) => {
+    if (!jug) {
+      // Flick it up off the grass.
+      f.act(FLICK.kind);
+      const rest = f.partAt(FLICK.kind, FLICK.bone, FLICK.at).setY(BALL_R);
+      jug = { touch: FLICK, start: elapsed, fly: null, next: null, rest };
+    }
+    const j = jug;
+    if (j.next && elapsed >= j.next.at) {
+      f.act(j.next.touch.kind);
+      j.touch = j.next.touch;
+      j.start = j.next.at;
+      j.next = null;
+    }
+    ball.rotation.x += dt * 5;
+    if (j.fly && elapsed < j.fly.t1) {
+      const u = elapsed - j.fly.t0;
+      ball.position.copy(j.fly.a).addScaledVector(j.fly.v, u);
+      ball.position.y -= 0.5 * G * u * u;
+      return;
+    }
+    j.fly = null;
+    const tr = elapsed - j.start;
+    const tc = j.touch;
+    if (tr < tc.at) {
+      if (tc === FLICK) ball.position.copy(j.rest);
+      return;
+    }
+    boneAt(f, tc.bone, ball.position);
+    ball.position.y += tc.up;
+    if (tr <= tc.until) return;
+    // Released: on to the next touch, mostly knee to knee, now and then a catch on the foot.
+    const knees = TOUCHES.slice(0, 2);
+    const nt = Math.random() < 0.22 ? TOUCHES[2 + Math.floor(Math.random() * 2)] : tc.kind === 'kneeB' ? knees[1] : tc.kind === 'kneeA' ? knees[0] : knees[Math.floor(Math.random() * 2)];
+    const T = Math.max(tc.flight, nt.at + 0.05);
+    const a = ball.position.clone();
+    const b = f.partAt(nt.kind, nt.bone, nt.at);
+    b.y += nt.up;
+    const v = b.sub(a).divideScalar(T);
+    v.y += 0.5 * G * T;
+    j.fly = { a, v, t0: elapsed, t1: elapsed + T };
+    j.next = { touch: nt, at: elapsed + T - nt.at };
+  };
 
   // ---- Loop ----
   const resize = () => {
@@ -697,18 +821,11 @@ export function createTrainingGround(initialHost: HTMLElement): TrainingGround {
       const cheering = elapsed < cheerUntil;
       me.celebrate = cheering ? 1 : 0;
       me.star = cheering;
-      if (juggling && mode === 'idle' && !cheering) {
-        const k = elapsed * 1.6;
-        me.pose = 'juggle';
-        me.poseK = k;
-        const fwd = new THREE.Vector3(Math.sin(me.root.rotation.y), 0, Math.cos(me.root.rotation.y));
-        ball.position.copy(me.root.position).addScaledVector(fwd, 0.55);
-        ball.position.y = 0.42 + Math.abs(Math.sin(Math.PI * k)) * 1.05;
-        ball.rotation.x += dt * 4;
-      } else if (me.pose === 'juggle') me.pose = '';
-      me.animate(dt, meSpeed, elapsed);
+      if (juggling && mode === 'idle' && !cheering && !me.busyMoving) juggle(me, dt);
+      else jug = null;
+      me.animate(dt, me.stepWalk(dt), elapsed);
     }
-    if (dummy.root.visible) dummy.animate(dt, dummySpeed, elapsed);
+    if (dummy.root.visible) dummy.animate(dt, dummy.stepWalk(dt), elapsed);
     // Effects.
     let alive = 0;
     chipState.forEach((c, i) => {

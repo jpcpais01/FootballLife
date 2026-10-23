@@ -14,7 +14,9 @@ import { type Clip, Pose, accumulate, clearPose, duration, feetAt, fkFrame, mixP
 import { getClip, hasClip, libraryVersion } from './library.ts';
 import { ANKLE_Y, B, NB, REST } from './skeleton.ts';
 
-export type ActionKind = 'pass' | 'passLong' | 'shot' | 'chip' | 'cross' | 'trap' | 'chest' | 'header' | 'slide' | 'tackle' | 'keeperSet' | 'dive' | 'diveHigh' | 'catch' | 'keeperGather' | 'keeperScoop' | 'keeperHigh' | 'fall' | 'getUp' | 'throwIn' | 'keeperThrow' | 'keeperKick';
+export type ActionKind = 'pass' | 'passLong' | 'shot' | 'chip' | 'cross' | 'trap' | 'chest' | 'header' | 'slide' | 'tackle' | 'keeperSet' | 'dive' | 'diveHigh' | 'catch' | 'keeperGather' | 'keeperScoop' | 'keeperHigh' | 'fall' | 'getUp' | 'throwIn' | 'keeperThrow' | 'keeperKick'
+  | 'keeperPass' | 'keeperMiss' | 'keeperDirect' | 'scissor' | 'jump' | 'turnL90' | 'turnR90' | 'turnL' | 'turnR'
+  | 'kickUp' | 'kneeA' | 'kneeB' | 'stallA' | 'stallB' | 'stallC' | 'stallD';
 
 export interface ActOpts {
   /** Real seconds from now until the contact frame (foot on ball, hands on ball…). */
@@ -54,6 +56,8 @@ interface Running {
   /** Travel already handed to the root (body units), taken off the clip's hips from then on. */
   sx: number;
   sz: number;
+  /** Turn already handed to the root (radians about up), taken off the clip's hips from then on. */
+  syaw: number;
   shifted: boolean;
   /** Legs that keep running underneath the action when the player is moving (0 left, 1 right). */
   legs: number[];
@@ -65,12 +69,17 @@ const LOCO = { fwd: ['walk', 'jog', 'run', 'sprint'], back: ['walkBack', 'runBac
 const CLIP_OF: Partial<Record<ActionKind, string>> = { passLong: 'cross' };
 
 /** Actions the whole body commits to: no running legs underneath. */
-const WHOLE_BODY = new Set<ActionKind>(['slide', 'dive', 'diveHigh', 'fall', 'getUp', 'header', 'keeperScoop', 'keeperSet', 'throwIn', 'keeperThrow']);
+const WHOLE_BODY = new Set<ActionKind>([
+  'slide', 'dive', 'diveHigh', 'fall', 'getUp', 'header', 'keeperScoop', 'keeperSet', 'throwIn', 'keeperThrow',
+  'keeperPass', 'scissor', 'jump', 'turnL90', 'turnR90', 'turnL', 'turnR',
+  'kickUp', 'kneeA', 'kneeB', 'stallA', 'stallB', 'stallC', 'stallD',
+]);
 const LEG_BONES = [[B.LeftUpLeg, B.LeftLeg, B.LeftFoot, B.LeftToeBase], [B.RightUpLeg, B.RightLeg, B.RightFoot, B.RightToeBase]];
 
 /** Which part of the body meets the ball in each action. */
 const EFFECTOR: Partial<Record<ActionKind, 'foot' | 'head' | 'chest' | 'hands'>> = {
   pass: 'foot', passLong: 'foot', shot: 'foot', chip: 'foot', cross: 'foot', trap: 'foot', slide: 'foot', tackle: 'foot', keeperKick: 'foot',
+  scissor: 'foot', keeperPass: 'hands',
   header: 'head', chest: 'chest', catch: 'hands', dive: 'hands', diveHigh: 'hands', keeperGather: 'hands', keeperScoop: 'hands', keeperHigh: 'hands',
 };
 
@@ -95,6 +104,29 @@ const qx = new THREE.Quaternion();
 const X = new THREE.Vector3(1, 0, 0);
 const Y = new THREE.Vector3(0, 1, 0);
 const feetTmp: [number, number] = [0, 0];
+
+/** Takes travel (sx, sz) and a turn (yaw about up) off a pose's hips, once the root has taken them over. */
+function rebase(pose: Pose, sx: number, sz: number, yaw: number) {
+  const x = pose.p[0] - sx;
+  const z = pose.p[2] - sz;
+  if (!yaw) {
+    pose.p[0] = x;
+    pose.p[2] = z;
+    return;
+  }
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  pose.p[0] = x * c - z * s;
+  pose.p[2] = x * s + z * c;
+  // Hips rotation: the inverse turn about up, applied in front.
+  const hy = Math.sin(-yaw / 2);
+  const hw = Math.cos(-yaw / 2);
+  const [qx, qy, qz, qw] = [pose.q[0], pose.q[1], pose.q[2], pose.q[3]];
+  pose.q[0] = hw * qx + hy * qz;
+  pose.q[1] = hw * qy + hy * qw;
+  pose.q[2] = hw * qz - hy * qx;
+  pose.q[3] = hw * qw - hy * qy;
+}
 
 /** Moves one bone of `pose` toward `src` by w (nlerp). */
 function nlerpBone(pose: Pose, src: Pose, b: number, w: number) {
@@ -159,6 +191,8 @@ export class Animator {
   private vF = 0;
   private vS = 0;
   private holdW = 0;
+  /** Each keeper has his own way of waiting. */
+  private keeperIdle = Math.random() < 0.5 || !hasClip('keeperIdle2') ? 'keeperIdle' : 'keeperIdle2';
   /** The locomotion pose on its own, for legs that keep running under an action. */
   private loco = new Pose();
 
@@ -227,12 +261,24 @@ export class Animator {
     const eff = this.effector(clip, contact, part);
     // On the move, the support leg (or both legs for a catch) keeps the stride while the rest plays the action.
     const legs = WHOLE_BODY.has(kind) ? [] : part === 'foot' ? [1 - this.kickSide] : [0, 1];
-    this.action = { clip, t, contact, rate, w: busy && t >= 0 ? 1 : 0, sx: 0, sz: 0, shifted: false, legs };
+    this.action = { clip, t, contact, rate, w: busy && t >= 0 ? 1 : 0, sx: 0, sz: 0, syaw: 0, shifted: false, legs };
     return eff;
   }
 
   /** The striking foot of the last foot action planned (0 left, 1 right). */
   private kickSide = 1;
+
+  /** Where bone `b` is at clip time `t` of an action (body units, in the player's own frame). */
+  pointOf(kind: ActionKind, b: number, t: number, side: 1 | -1 = 1) {
+    const clip = this.clip(CLIP_OF[kind] ?? kind, side === -1);
+    fkFrame(clip, Math.max(0, Math.min(clip.frames - 1, Math.round(t * clip.fps))), fkPos);
+    return new THREE.Vector3(fkPos[b * 3], fkPos[b * 3 + 1], fkPos[b * 3 + 2]);
+  }
+
+  /** Length of an action's clip in seconds. */
+  lengthOf(kind: ActionKind, side: 1 | -1 = 1) {
+    return duration(this.clip(CLIP_OF[kind] ?? kind, side === -1));
+  }
 
   /** Seconds from the start of an action's clip to its contact frame. */
   contactOf(kind: ActionKind, side: 1 | -1 = 1) {
@@ -260,10 +306,17 @@ export class Animator {
    * along the player's own x and z. The figure moves its root by this and clears it.
    */
   shift = new THREE.Vector3();
+  /** Turn an action (a turn on the spot) carried the body, radians about up. The figure turns by this and clears it. */
+  shiftYaw = 0;
 
   /** True while a one-shot action is playing. */
   get acting() {
     return !!this.action;
+  }
+
+  /** True while the whole body is committed to an action (a dive, a slide, on the ground): he can't turn. */
+  get committed() {
+    return !!this.action && this.action.t >= 0 && this.action.legs.length === 0;
   }
 
   update(dt: number, inp: AnimInput) {
@@ -287,9 +340,22 @@ export class Animator {
     const len = Math.hypot(this.vF, this.vS);
     const fx = len > 1e-3 ? this.vF / len : 1;
     const sx = len > 1e-3 ? this.vS / len : 0;
-    const wF = fx > 0 ? fx * fx : 0;
-    const wB = fx < 0 ? fx * fx : 0;
-    const wS = sx * sx;
+    let wF = fx > 0 ? fx * fx : 0;
+    let wB = fx < 0 ? fx * fx : 0;
+    let wS = sx * sx;
+    // At a jog, running at an angle uses the real diagonal takes (forward or back), not a forward and sideways mix.
+    const diag = 2 * Math.abs(fx * sx);
+    const dName = `${fx >= 0 ? 'jogDiag' : 'backDiag'}${sx > 0 ? 'Left' : 'Right'}`;
+    const dClip = hasClip(dName) ? this.clip(dName) : null;
+    let wD = 0;
+    if (dClip && diag > 0.3) {
+      const ds = dClip.speed || 3;
+      const pace = Math.max(0, Math.min(1, (v - ds * 0.55) / (ds * 0.3))) * Math.max(0, Math.min(1, (ds * 1.5 - v) / (ds * 0.3)));
+      wD = pace * Math.min(1, (diag - 0.3) / 0.5);
+      wF *= 1 - wD;
+      wB *= 1 - wD;
+      wS *= 1 - wD;
+    }
     const weights: [Clip, number][] = [];
     let idleW = 0;
     const along = (names: string[], w: number) => {
@@ -317,6 +383,7 @@ export class Animator {
     along(LOCO.back, wB);
     const dir = sx > 0 ? 'Left' : 'Right';
     along(inp.keeper && hasClip(`keeperShuffle${dir}`) ? [`keeperShuffle${dir}`] : [`strafeWalk${dir}`, `strafe${dir}`], wS);
+    if (wD > 1e-3) weights.push([dClip!, wD]);
     for (const [c, w] of weights) {
       if (w <= 1e-3) continue;
       moveW += w;
@@ -334,7 +401,7 @@ export class Animator {
       footR += feetTmp[1] * w;
     }
     if (idleW > 1e-3) {
-      sample(this.clip(inp.keeper ? 'keeperIdle' : 'idle'), this.idleT, this.tmp);
+      sample(this.clip(inp.keeper ? this.keeperIdle : 'idle'), this.idleT, this.tmp);
       accumulate(acc, this.tmp, idleW);
       totalW += idleW;
       // Standing: both feet are planted.
@@ -361,7 +428,9 @@ export class Animator {
     } else this.celW = Math.max(0, this.celW - dt * 4);
     if (this.celW > 0 && this.celName) {
       this.celT += dt;
-      sample(this.clip(this.celName), this.celT, this.tmp);
+      const cc = this.clip(this.celName);
+      // One-off takes (a jump for joy) repeat.
+      sample(cc, cc.loop ? this.celT : this.celT % duration(cc), this.tmp);
       mixPose(pose, pose, this.tmp, this.celW);
     }
 
@@ -392,15 +461,16 @@ export class Animator {
           a.shifted = true;
           a.sx = this.tmp.p[0];
           a.sz = this.tmp.p[2];
-          if (Math.hypot(a.sx, a.sz) > 0.05) {
-            this.shift.set(a.sx, 0, a.sz);
-            // The held pose moves with the body.
-            this.from.p[0] -= a.sx;
-            this.from.p[2] -= a.sz;
-          } else a.sx = a.sz = 0;
+          if (Math.hypot(a.sx, a.sz) > 0.05) this.shift.set(a.sx, 0, a.sz);
+          else a.sx = a.sz = 0;
+          // A turn on the spot: the body now faces where the turn took it.
+          const yaw = 2 * Math.atan2(this.tmp.q[1], this.tmp.q[3]);
+          a.syaw = Math.abs(yaw) > 0.35 ? yaw : 0;
+          this.shiftYaw = a.syaw;
+          // The held pose moves with the body.
+          rebase(this.from, a.sx, a.sz, a.syaw);
         }
-        this.tmp.p[0] -= a.sx;
-        this.tmp.p[2] -= a.sz;
+        rebase(this.tmp, a.sx, a.sz, a.syaw);
         mixPose(pose, pose, this.tmp, a.w);
       }
     }

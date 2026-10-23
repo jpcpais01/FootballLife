@@ -69,6 +69,38 @@ const SPECS: Record<string, Spec> = {
   throwIn: { file: 'throw in', contact: 'hands' },
   keeperThrow: { file: 'goalkeeper overhand throw', contact: 'hands' },
   keeperKick: { file: 'goalkeeper drop kick', contact: 'rfoot' },
+  // Diagonal jogs, forward and back, for running at an angle to where the player faces.
+  jogDiagRight: { file: 'jog forward diagonal', loop: true },
+  jogDiagLeft: { file: 'jog forward diagonal (2)', loop: true },
+  backDiagRight: { file: 'jog backward diagonal', loop: true },
+  backDiagLeft: { file: 'jog backward diagonal (2)', loop: true },
+  // Turning on the spot.
+  turnL90: { file: 'left turn 90' },
+  turnR90: { file: 'right turn 90' },
+  turnL: { file: 'left turn' },
+  turnR: { file: 'right turn' },
+  jump: { file: 'jump', contact: 'flight' },
+  fallenIdle: { file: 'fallen idle', loop: true },
+  // Keepers: organising, waiting, short distribution, setting the ball for a goal kick, beaten, smothering.
+  keeperIdle2: { file: 'goalkeeper idle (2)', loop: true },
+  keeperDirect: { file: 'goalkeeper directing' },
+  keeperPass: { file: 'goalkeeper pass', contact: 'hands' },
+  keeperPlace: { file: 'goalkeeper placing ball', contact: 'hands' },
+  keeperMiss: { file: 'goalkeeper miss' },
+  keeperBlock: { file: 'goalkeeper body block', contact: 'low' },
+  keeperCatchMid: { file: 'goalkeeper catch (3)', contact: 'reach' },
+  // Overhead volley for a ball dropping in the box, and two more sliding tackles.
+  scissor: { file: 'scissor kick', contact: 'rfoot' },
+  slideB: { file: 'soccer tackle', contact: 'rfoot' },
+  slideC: { file: 'soccer tackle (3)', contact: 'rfoot' },
+  // Ball tricks: flick-ups, knee and foot juggling, balancing it on the foot.
+  kickUp: { file: 'kick up soccerball' },
+  kneeA: { file: 'kneeing soccerball' },
+  kneeB: { file: 'kneeing soccerball (2)' },
+  stallA: { file: 'stall soccerball' },
+  stallB: { file: 'stall soccerball (2)' },
+  stallC: { file: 'stall soccerball (3)' },
+  stallD: { file: 'stall soccerball (4)' },
 };
 
 const args = process.argv.slice(2);

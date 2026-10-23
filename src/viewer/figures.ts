@@ -912,6 +912,8 @@ export class Figure {
   visible = true;
   celebrate = 0;
   celStyle = '';
+  /** Team-mates celebrate their own way: some jump for joy, some cheer. */
+  private jumper = Math.random() < 0.4;
   /** True for the goalscorer, who does their own celebration. */
   star = false;
   /** One-shot training pose held at progress `poseK` (0..1; juggling counts beats). */
@@ -1080,6 +1082,11 @@ export class Figure {
     return this.anim.acting;
   }
 
+  /** Mid-dive, mid-slide or on the ground: the body can't turn. */
+  get committed() {
+    return this.anim.committed;
+  }
+
   /** Put straight onto a new spot (a reset between phases): whatever he was doing ends there. */
   teleport(heading: number) {
     this.anim.reset();
@@ -1089,6 +1096,160 @@ export class Figure {
     this.reached.set(0, 0, 0);
     this.faceTo = null;
     this.heading = heading;
+  }
+
+  /**
+   * Where bone `b` will be in the world at clip time `t` of an action, if he
+   * plays it from where he stands now (for putting the ball on a knee or a foot).
+   */
+  partAt(kind: ActionKind, b: number, t: number, side: 1 | -1 = 1) {
+    const p = this.anim.pointOf(kind, b, t, side);
+    p.y += this.lift;
+    return this.root.localToWorld(p);
+  }
+
+  /** Length of an action's clip, seconds. */
+  actLength(kind: ActionKind, side: 1 | -1 = 1) {
+    return this.anim.lengthOf(kind, side);
+  }
+
+  // ---- Moving under its own steam (training, the house) ----
+  private lastPos = new THREE.Vector3();
+  private hasLastPos = false;
+  private path: { x: number; z: number }[] = [];
+  private arrive: (() => void) | null = null;
+  private walkV = 0;
+  private walkTop = 1.4;
+
+  /**
+   * Reads how far the root moved since the last call and sets the gait to
+   * match (speed, forward and sideways), so whatever moves the player, the
+   * feet keep pace with the ground. Returns the speed in m/s for `animate`.
+   */
+  follow(dt: number) {
+    const p = this.root.position;
+    let speed = 0;
+    if (this.hasLastPos && dt > 0) {
+      const vx = (p.x - this.lastPos.x) / dt;
+      const vz = (p.z - this.lastPos.z) / dt;
+      const h = this.root.rotation.y;
+      // Teleports (a reset between reps) are not running.
+      if (Math.hypot(vx, vz) < 14) {
+        this.fwd = vx * Math.sin(h) + vz * Math.cos(h);
+        this.side = vx * Math.cos(h) - vz * Math.sin(h);
+        speed = Math.hypot(vx, vz);
+      } else this.fwd = this.side = 0;
+    }
+    this.lastPos.copy(p);
+    this.hasLastPos = true;
+    return speed;
+  }
+
+  /**
+   * Walks through `points` (world x/z, metres) and calls `onArrive` at the last
+   * one. He turns on the spot first if the way is well behind him, rounds the
+   * corners on the way, and slows to a stop. `speed` is the walking pace in m/s.
+   */
+  walkPath(points: { x: number; z: number }[], onArrive?: () => void, speed = 1.4) {
+    this.path = points.slice();
+    this.faceTarget = null;
+    this.arrive = onArrive ?? null;
+    this.walkTop = speed;
+  }
+
+  walkTo(x: number, z: number, onArrive?: () => void, speed = 1.4) {
+    this.walkPath([{ x, z }], onArrive, speed);
+  }
+
+  /** Turns on the spot to face `heading` (radians), with a proper turning step when it's a big turn. */
+  turnTo(heading: number) {
+    this.faceTarget = heading;
+  }
+
+  /** Still walking or turning to face somewhere. */
+  get busyMoving() {
+    return this.path.length > 0 || this.faceTarget !== null;
+  }
+
+  private faceTarget: number | null = null;
+
+  /** Stops where he is (no arrive call). */
+  stopWalk() {
+    this.path.length = 0;
+    this.arrive = null;
+  }
+
+  get walking() {
+    return this.path.length > 0;
+  }
+
+  /**
+   * Advances a walk started with walkPath. Call once a frame before `animate`,
+   * and pass the speed it returns to `animate`.
+   */
+  stepWalk(dt: number): number {
+    const p = this.root.position;
+    if (!this.path.length) {
+      this.walkV = 0;
+      if (this.faceTarget !== null && !this.anim.acting) {
+        let turn = this.faceTarget - this.root.rotation.y;
+        while (turn > Math.PI) turn -= Math.PI * 2;
+        while (turn < -Math.PI) turn += Math.PI * 2;
+        if (Math.abs(turn) > 1.1) this.act(turn > 0 ? (turn > 2.3 ? 'turnL' : 'turnL90') : turn < -2.3 ? 'turnR' : 'turnR90');
+        else if (Math.abs(turn) < 0.02) this.faceTarget = null;
+        else this.root.rotation.y += Math.max(-4 * dt, Math.min(4 * dt, turn));
+        this.heading = this.root.rotation.y;
+      }
+      return this.follow(dt);
+    }
+    // Mid-turn on the spot: the clip turns him.
+    if (this.anim.acting) return this.follow(dt);
+    const next = this.path[0];
+    const dx = next.x - p.x;
+    const dz = next.z - p.z;
+    const d = Math.hypot(dx, dz);
+    let rest = d;
+    for (let k = 1; k < this.path.length; k++) rest += Math.hypot(this.path[k].x - this.path[k - 1].x, this.path[k].z - this.path[k - 1].z);
+    const last = this.path.length === 1;
+    if (last && d < 0.04) {
+      this.path.length = 0;
+      this.walkV = 0;
+      const cb = this.arrive;
+      this.arrive = null;
+      cb?.();
+      return this.follow(dt);
+    }
+    if (!last && d < Math.max(0.3, this.walkV * 0.45)) {
+      this.path.shift();
+      return this.stepWalk(dt);
+    }
+    let turn = Math.atan2(dx, dz) - this.root.rotation.y;
+    while (turn > Math.PI) turn -= Math.PI * 2;
+    while (turn < -Math.PI) turn += Math.PI * 2;
+    // Standing and the way is well round: a proper turn on the spot first.
+    if (this.walkV < 0.3 && Math.abs(turn) > 1.1 && d > 0.6) {
+      const big = Math.abs(turn) > 2.3;
+      this.act(turn > 0 ? (big ? 'turnL' : 'turnL90') : big ? 'turnR' : 'turnR90');
+      return this.follow(dt);
+    }
+    // Round the corner, easing into the new line.
+    const rate = 3.2 + (this.walkV < 0.5 ? 2 : 0);
+    const step = Math.max(-rate * dt, Math.min(rate * dt, turn));
+    this.root.rotation.y += step;
+    this.heading = this.root.rotation.y;
+    // Speed: build up, and brake in time to stop on the spot.
+    const want = Math.min(this.walkTop, Math.sqrt(2 * 1.6 * rest)) * Math.max(0.25, Math.cos(turn));
+    this.walkV += Math.max(-2.5 * dt, Math.min(1.8 * dt, want - this.walkV));
+    const v = Math.min(this.walkV, d / Math.max(dt, 1e-3));
+    if (last && d < 0.5) {
+      // The last half metre goes straight onto the spot.
+      p.x += (dx / d) * v * dt;
+      p.z += (dz / d) * v * dt;
+    } else {
+      p.x += Math.sin(this.root.rotation.y) * v * dt;
+      p.z += Math.cos(this.root.rotation.y) * v * dt;
+    }
+    return this.follow(dt);
   }
 
   /** Seconds an action takes from its start to the moment it meets the ball, at natural speed. */
@@ -1125,7 +1286,7 @@ export class Figure {
     }
     let cel: string | null = null;
     if (this.celebrate > 0) {
-      const style = this.star && this.celStyle ? `cel_${this.celStyle}` : 'cel_cheer';
+      const style = this.star && this.celStyle ? `cel_${this.celStyle}` : this.jumper && hasClip('jump') ? 'jump' : 'cel_cheer';
       cel = hasClip(style) ? style : 'cel_cheer';
     }
     this.root.getWorldScale(tmpScale);
@@ -1147,6 +1308,13 @@ export class Figure {
       sh.applyQuaternion(this.root.quaternion).multiplyScalar(this.root.scale.x);
       this.carry.add(sh);
       sh.set(0, 0, 0);
+    }
+    if (this.anim.shiftYaw) {
+      // He now faces where the action turned him (a turn on the spot, landing from a dive or a scissor kick).
+      this.heading += this.anim.shiftYaw;
+      this.root.rotation.y += this.anim.shiftYaw;
+      this.root.updateMatrixWorld();
+      this.anim.shiftYaw = 0;
     }
     if (!this.anim.acting && this.carry.lengthSq() > 1e-6) this.carry.multiplyScalar(Math.exp(-dt / CARRY_T));
     tmpOff.copy(this.carry);

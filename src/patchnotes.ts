@@ -7,6 +7,14 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T10:00:00Z',
+    entries: [
+      { title: 'Training comes alive', body: 'Every drill now uses real motion capture. Your player runs in and strikes through the ball with his boot meeting it, side-foots passes after squaring up to the board, slides in to win the ball and gets back up, and keepers dive full stretch, land and get up again. Between reps he does real keepy-ups: knee to knee, catching the ball on his foot and flicking it back up, with the ball riding the touch. He walks back to his mark and turns on the spot properly instead of snapping round.' },
+      { title: 'More motion in matches', body: 'Players running at an angle use real diagonal running instead of crossing their legs. Keepers organise their defence before a corner or free kick, bowl short balls out underarm, and turn away in despair after conceding. A ball dropping in the box can be met with an overhead scissor kick, team-mates jump for joy after a goal, and a player landing from a dive or a scissor kick gets up facing where he fell instead of spinning round.' },
+      { title: 'Set pieces make sense', body: 'Corners and free kicks now show what led to them, like the cross that was headed behind or the foul, instead of the ball suddenly appearing by the corner flag. A shot that flies wide or is parried no longer jumps into the keeper\'s hands for a moment.' },
+    ],
+  },
+  {
     hour: '2026-10-23T09:00:00Z',
     entries: [
       { title: 'No more ice skating', body: 'Players standing, waiting at a set piece or walking back now keep their feet planted on the grass instead of sliding around, and step to a new spot with a proper lift of the foot. A player who passes or shoots on the run keeps running with his standing leg while he strikes, instead of gliding across the grass mid-kick. Team-mates sprinting to the scorer after a goal run there, then celebrate once they arrive. Foot sliding across a match is down by about two thirds.' },
