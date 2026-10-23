@@ -7,6 +7,15 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T11:00:00Z',
+    entries: [
+      { title: 'A brand new home', body: 'Every home has been rebuilt from the ground up. Each one now has a real floor plan with separate rooms: from the studio with its kitchen corner, bed and shower room, up to a villa with its own gym and a penthouse with a roof terrace. Walls have proper doors and windows, and the walls nearest the camera drop down so you can always see inside. The outside is no longer a flat picture: you see the actual street, park, beach or city skyline around your home, with its own sky and lighting, from a sunny townhouse garden to the penthouse lit up at night. The villa has a pool over the beach and the penthouse a hot tub on the terrace.' },
+      { title: 'Walk around your house', body: 'Your player now lives in his home. Tap anywhere to walk there: he finds his way through the doors and around the furniture, and jogs when it is far. Tap a sofa, the TV, the trophy cabinet or a bed and he walks over to it. Leave him alone and he wanders between rooms by himself. Drag to look around and pinch to zoom in close.' },
+      { title: 'Cars and garage, rebuilt', body: 'Every car has been remodelled with a proper shape, glass, wheels and lights. The garage has marked bays, a workbench and tool wall, and your favourite car is parked outside your home in its own paint.' },
+      { title: 'Home screen made for landscape', body: 'The house fills the screen on a sideways phone, with the furnish, move and garage options in a panel beside it. Many old glitches are gone: no more sky showing through walls, floating furniture or grass on top of the pool. It also runs much faster on phones.' },
+    ],
+  },
+  {
     hour: '2026-10-23T10:30:00Z',
     entries: [
       { title: 'Matches play like real football', body: 'The match AI has been retuned against real match data. Players now walk and jog to hold their shape and only sprint when the play needs it, instead of running everywhere. Teams keep the ball with more short passes from team-mates who come close to offer an option, and play far fewer hopeful long balls. The tempo is calmer. Attackers can no longer walk the ball through a defender standing in their way, so they have to take him on, pass or shoot. Players shoot from the edge of the box when they see the goal, and chances get harder to score the further out they are. A typical match now has about 28 shots and three goals, a bit over half of the shots from inside the box. Better teams still win most games, but upsets happen again.' },
