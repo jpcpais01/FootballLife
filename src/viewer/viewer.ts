@@ -15,6 +15,7 @@ import { sanitizeAppearance } from '../../shared/appearance.ts';
 import type { Tactics } from '../../shared/formations.ts';
 import type { MatchEvent } from '../../shared/sim/types.ts';
 import { type ActAim, type ActionKind, Figure, GK_KITS, type Kit } from './figures.ts';
+import { eitherSide, hashOf } from './rig/animator.ts';
 import { B } from './rig/skeleton.ts';
 import { Playback } from './playback.ts';
 import type { Track } from '../../shared/sim/tracks.ts';
@@ -154,7 +155,7 @@ export class MatchViewer {
     for (let side = 0; side < 2; side++) {
       for (let k = 0; k < 11; k++) {
         const p = teams[side].players[k];
-        const f = new Figure(kits[side], sanitizeAppearance(p?.app), k === 0, GK_KITS[side], p?.eq, { base: false, number: p?.number });
+        const f = new Figure(kits[side], sanitizeAppearance(p?.app), k === 0, GK_KITS[side], p?.eq, { base: false, number: p?.number, seed: hashOf(`${p?.name ?? ''}|${p?.number ?? k}|${side * 11 + k}`) });
         this.figures.push(f);
         this.scene.add(f.root);
       }
@@ -266,7 +267,7 @@ export class MatchViewer {
   goal(side: 0 | 1) {
     // The beaten keeper turns away in despair, unless he's still getting up from his dive.
     const gk = this.figures[side === 0 ? 11 : 0];
-    if (!gk.acting) gk.act('keeperMiss');
+    if (!gk.acting) gk.act('keeperMiss', { seed: hashOf(`miss${Math.round(this.lastClock)}`) });
     this.excitement = 1;
     this.shake = 0.6;
     this.stadium.setCheer(side);
@@ -546,7 +547,8 @@ export class MatchViewer {
       }
       // Only a ball he actually keeps ends up in his hands (not a shot that beats him, flies wide or is parried).
       if (plan.save && this.keeps(plan.at)) this.savedAt[i] = plan.at;
-      f.act(plan.kind, { contactIn: Math.max(0, lead), side: plan.side }, plan.aim ?? undefined);
+      // Seeded by the moment, so every replay of it plays the same take the same way.
+      f.act(plan.kind, { contactIn: Math.max(0, lead), side: eitherSide(plan.kind) ? undefined : plan.side, seed: hashOf(key) }, plan.aim ?? undefined);
     }
     // Before the other side's corner or free kick, the keeper organises his defence.
     if (rate > 1.5) return;
@@ -558,7 +560,7 @@ export class MatchViewer {
       const key = `dir${next.t}`;
       if (!this.fired.has(key) && !gk.acting && gk.vel.length() < 1.2) {
         this.fired.add(key);
-        gk.act('keeperDirect');
+        gk.act('keeperDirect', { seed: hashOf(key) });
       }
     }
   }
