@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T22:00:00Z',
+    entries: [
+      { title: 'Free kicks like the real thing', body: 'On a free kick swung in from deep, the defence now holds a line around the edge of the box to catch runners offside. The attackers stand level with it beside their markers, shuffling and waiting, then sprint in behind as the ball is struck, each to his own zone: near post, far post or the penalty spot. Two players wait outside the box for the second ball. On a shooting free kick, a second man stands over the ball with the taker to keep the keeper guessing, and an attacker joins the end of the wall to block his view.' },
+    ],
+  },
+  {
     hour: '2026-10-23T20:00:00Z',
     entries: [
       { title: 'Your season, at a glance', body: 'The league has a new You tab, also on the home screen as My season. It shows your form as a line of every rating this season, with stars for player of the match. It shows your club\'s place and how it has moved round by round, how far you are off the top, and your next fixture. You can see where you stand in the Golden Boot, Playmaker and Player of the Season races and how far behind the leader you are. Milestones count up your appearances, goals, assists and big games, and every match you played is listed with your rating.' },
