@@ -73,7 +73,9 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
   let zoom = 0;
   let zoomTo = 0;
   const camBody = { pos: new THREE.Vector3(0, 2.9, 10.2), look: new THREE.Vector3(0, 1.55, 0) };
-  const camFace = { pos: new THREE.Vector3(0, 3.2, 3.1), look: new THREE.Vector3(0, 3.02, 0) };
+  const eye = new THREE.Vector3();
+  const eyeS = new THREE.Vector3();
+  const camFace = { pos: new THREE.Vector3(0, 2.98, 2.75), look: new THREE.Vector3(0, 2.8, 0) };
   const look = new THREE.Vector3();
 
   const onDown = (e: PointerEvent) => {
@@ -127,19 +129,22 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
         yaw += spin * dt;
       }
     }
-    if (Math.abs(zoom - zoomTo) > 0.001) {
-      zoom += (zoomTo - zoom) * Math.min(1, dt * 4);
-      const k = zoom * zoom * (3 - 2 * zoom);
-      camera.position.lerpVectors(camBody.pos, camFace.pos, k);
-      camera.lookAt(look.lerpVectors(camBody.look, camFace.look, k));
-    }
     if (fig) {
       fig.root.rotation.y = yaw;
       const celebrating = time < celebrateUntil;
       fig.celebrate = celebrating ? 1 : 0;
       fig.star = celebrating;
       fig.animate(dt, 0, time);
+      // The close-up follows the face as the idle sways it, gently.
+      fig.eyes(eye);
+      eyeS.lerp(eye.setY(eye.y - 0.02), eyeS.lengthSq() ? Math.min(1, dt * 3) : 1);
+      camFace.look.copy(eyeS);
+      camFace.pos.set(eyeS.x, eyeS.y + 0.18, eyeS.z + 2.75);
     }
+    zoom += (zoomTo - zoom) * Math.min(1, dt * 4);
+    const k = zoom * zoom * (3 - 2 * zoom);
+    camera.position.lerpVectors(camBody.pos, camFace.pos, k);
+    camera.lookAt(look.lerpVectors(camBody.look, camFace.look, k));
     renderer.render(scene, camera);
   };
   loop();
@@ -147,8 +152,7 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
   return {
     set(app, eq, kit, keeper = false) {
       if (fig) scene.remove(fig.root);
-      fig = new Figure(kit, app, keeper, GK_KITS[0], eq);
-      fig.root.scale.setScalar(SHOWCASE_SCALE);
+      fig = new Figure(kit, app, keeper, GK_KITS[0], eq, { scale: SHOWCASE_SCALE, detail: 'mid', sync: true });
       fig.root.traverse((o) => {
         if ((o as THREE.Mesh).isMesh) o.castShadow = true;
       });

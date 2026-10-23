@@ -4,7 +4,11 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { Appearance } from '../../shared/appearance.ts';
 import type { Equipped } from '../../shared/cosmetics.ts';
+import { loadCharacters } from './character/body.ts';
 import { Figure, GK_KITS, SHOWCASE_SCALE, type Kit } from './figures.ts';
+
+/** Portraits wait for the character bundle. */
+export const portraitsReady = loadCharacters;
 
 let renderer: THREE.WebGLRenderer | null = null;
 let scene: THREE.Scene;
@@ -37,6 +41,8 @@ function setup() {
 
 const shade = (hex: string, k: number) => '#' + new THREE.Color(hex).multiplyScalar(k).getHexString();
 
+const eye = new THREE.Vector3();
+
 export interface PortraitOpts { yaw?: number; keeper?: boolean; full?: boolean }
 
 /** Renders one portrait and returns it as an image URL. */
@@ -44,18 +50,19 @@ export function renderPortrait(app: Appearance, kit: Kit, eq: Equipped | undefin
   if (!renderer) setup();
   const r = renderer!;
   r.setSize(px, px, false);
-  const fig = new Figure(kit, app, !!opts.keeper, GK_KITS[0], eq, { base: false, scale: SHOWCASE_SCALE });
+  const fig = new Figure(kit, app, !!opts.keeper, GK_KITS[0], eq, { base: false, scale: SHOWCASE_SCALE, sync: true, detail: px > 200 ? 'mid' : 'low' });
   fig.root.rotation.y = opts.yaw ?? 0.32;
   fig.animate(0, 0, 0);
   scene.add(fig.root);
   rim.color.set(kit.secondary);
-  // Head centre sits about 2.94 m up the (scaled) figure.
   if (opts.full) {
     camera.position.set(0, 2.1, 9.4);
     camera.lookAt(0, 1.62, 0);
   } else {
-    camera.position.set(0, 3.12, 2.55);
-    camera.lookAt(0, 2.93, 0);
+    // Head and shoulders, framed on the eyes wherever the pose puts them.
+    const e = fig.eyes(eye);
+    camera.position.set(e.x, e.y + 0.08, e.z + 2.2);
+    camera.lookAt(e.x, e.y - 0.07, e.z);
   }
   r.render(scene, camera);
   scene.remove(fig.root);

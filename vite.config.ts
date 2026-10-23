@@ -40,7 +40,7 @@ export default defineConfig({
       workbox: {
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}', 'anims/*.json'],
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2}', 'anims/*.json', 'character/*.json'],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         runtimeCaching: [{ urlPattern: /^\/api\//, handler: 'NetworkOnly' }],
       },

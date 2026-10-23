@@ -7,6 +7,13 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T11:30:00Z',
+    entries: [
+      { title: 'All-new players', body: 'Every footballer has been rebuilt from scratch on a realistic human body. Faces have real eyes that catch the light, lips, brows and skin with warmth and texture, and kits are proper fabric with collars, cuffs, stripes, socks and boots that shine. Your shirt number is printed on the back. Every player still moves with the same motion-captured animation.' },
+      { title: 'A real player creator', body: 'Create your footballer with sliders for every part of the face: head and jaw shape, cheeks, eyes, nose, mouth and ears, plus build and muscle. Pick from 24 hairstyles with real volume, from buzz cuts and fades to curls, an afro, long hair, dreads, twists and a high top, along with beards, marks and accessories. Each group has a reset button, and the camera zooms in on the face while you work on it.' },
+    ],
+  },
+  {
     hour: '2026-10-23T11:00:00Z',
     entries: [
       { title: 'A brand new home', body: 'Every home has been rebuilt from the ground up. Each one now has a real floor plan with separate rooms: from the studio with its kitchen corner, bed and shower room, up to a villa with its own gym and a penthouse with a roof terrace. Walls have proper doors and windows, and the walls nearest the camera drop down so you can always see inside. The outside is no longer a flat picture: you see the actual street, park, beach or city skyline around your home, with its own sky and lighting, from a sunny townhouse garden to the penthouse lit up at night. The villa has a pool over the beach and the penthouse a hot tub on the terrace.' },

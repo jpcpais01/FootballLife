@@ -837,6 +837,8 @@ export function createHomeScene(host: HTMLElement): HomeScene {
 
   const clear = () => {
     scene.remove(world);
+    // The player's meshes and textures are shared through the character caches: not ours to dispose.
+    if (figure) world.remove(figure.root);
     disposeTree(world);
     if (dome) {
       scene.remove(dome);
@@ -1025,7 +1027,7 @@ export function createHomeScene(host: HTMLElement): HomeScene {
     wanderAreas = L.rooms;
 
     if (owner) {
-      figure = new Figure(owner.kit, owner.appearance, owner.keeper, GK_KITS[0], owner.equipped, { base: false });
+      figure = new Figure(owner.kit, owner.appearance, owner.keeper, GK_KITS[0], owner.equipped, { base: false, detail: 'mid' });
       figure.root.traverse((o) => {
         if ((o as THREE.Mesh).isMesh) o.castShadow = true;
       });

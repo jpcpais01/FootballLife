@@ -13,6 +13,14 @@ const jobs = new Map<string, Job>();
 let running = false;
 type Render = typeof import('./viewer/portraitRender.ts').renderPortrait;
 let render: Render | null = null;
+async function renderer(): Promise<Render> {
+  if (!render) {
+    const m = await import('./viewer/portraitRender.ts');
+    await m.portraitsReady();
+    render = m.renderPortrait;
+  }
+  return render;
+}
 
 const keyOf = (j: Job) => JSON.stringify([j.app, j.kit.primary, j.kit.secondary, j.eq ?? null, j.px, j.full]);
 
@@ -38,8 +46,7 @@ export async function portraitUrl(a: Appearance, kit: Kit, px = 128, eq?: Equipp
   const key = keyOf(job);
   const hit = cache.get(key);
   if (hit) return hit;
-  render ??= (await import('./viewer/portraitRender.ts')).renderPortrait;
-  const url = render(job.app, job.kit, job.eq, job.px);
+  const url = (await renderer())(job.app, job.kit, job.eq, job.px);
   cache.set(key, url);
   return url;
 }
@@ -54,7 +61,7 @@ function queue(key: string, job: Job) {
 
 async function drain() {
   try {
-    render ??= (await import('./viewer/portraitRender.ts')).renderPortrait;
+    const render = await renderer();
     while (jobs.size) {
       const [key, job] = jobs.entries().next().value!;
       jobs.delete(key);
