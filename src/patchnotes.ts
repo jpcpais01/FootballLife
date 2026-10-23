@@ -7,6 +7,13 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T16:30:00Z',
+    entries: [
+      { title: 'Defenders who read the game', body: 'Midfielders and forwards with nobody to mark now step into the passing lane between the ball and the most dangerous player near them, so the forward pass is cut off instead of left open. When a team is caught outnumbered on the break, defenders no longer dive in: the back line backs off and the nearest man stands the attacker up a few metres away, slowing him down until help gets back.' },
+      { title: 'Corners set up like the pros', body: 'When defending a corner, teams now leave their striker up near halfway as an outlet for the counter, put one player on the near post and two on the six-yard line, and mark the rest man to man.' },
+    ],
+  },
+  {
     hour: '2026-10-23T15:00:00Z',
     entries: [
       { title: 'Clever movement in attack', body: 'Attackers now make the runs real players make. As a pass travels, a team-mate further up reads where the next ball will go and runs into the space beyond the man receiving it, the classic third-man run. A player with a defender tight on him takes a couple of steps away to drag his marker, then darts back towards the ball, and the gap that opens is the pass. Players around the ball also stay out of the lane in front of the dribbler, so he has grass to run into.' },

@@ -407,6 +407,11 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
     const g = ownGoal(D);
     const tac = w.tactics[D];
     const pressK = tac.pressing === 'high' ? 1.25 : tac.pressing === 'low' ? 0.75 : 1;
+    // Outnumbered on the break: nobody dives in. The line backs off and the
+    // man on the ball is shown away and slowed down until help gets back.
+    const ahead = outs[A].filter((i) => frame(w.px[i], w.py[i], A).u > ballA.u - 0.02).length;
+    const goalSide = outs[D].filter((i) => frame(w.px[i], w.py[i], D).u < ballD.u).length;
+    const delay = carrier >= 0 && ballD.u < 0.62 && ahead + 1 >= goalSide;
     // Back line moves as one: flat, and drops off when the man on the ball can play over it.
     const back = outfield(D).filter((i) => role(i) === 'CB' || role(i) === 'FB');
     if (back.length >= 3) {
@@ -421,6 +426,7 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       const held = mind.line[D];
       if (!Number.isNaN(held) && line < held + 0.022 && line > held - 0.016 && held <= Math.max(0.06, ballD.u - 0.02)) line = held;
       mind.line[D] = line;
+      if (delay) line = Math.max(0.05, line - 0.04);
       for (const i of back) {
         const p = frame(tx[i], ty[i], D);
         set(i, { u: line * 0.9 + p.u * 0.1, v: p.v }, D, 0.18 + 0.3 * clamp((0.5 - ballD.u) / 0.3, 0, 1));
@@ -471,7 +477,12 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
           ay += (my / ml) * 0.9;
         }
         // Close down fast, then slow and jockey: the last few metres are a stalk, not a charge.
-        if (carrier >= 0 && dist < 4.5) {
+        if (delay && carrier >= 0 && dist < 9 && ballD.u > 0.2) {
+          // Stand him up three metres off, goal-side, and backpedal with him.
+          ax = target.x + (gx / gl) * 3;
+          ay = target.y + (gy / gl) * 3;
+          setAbs(press, ax, ay, 0.6);
+        } else if (carrier >= 0 && dist < 4.5) {
           ax = target.x + (gx / gl) * 1.7;
           ay = target.y + (gy / gl) * 1.7;
           setAbs(press, ax, ay, trigger ? 0.7 : 0.55);
@@ -550,6 +561,31 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       const my = ay + (gy / gl) * gap;
       const k = inBox ? 0.85 : deep ? 0.6 : 0.4;
       setAbs(i, tx[i] * (1 - k) + mx * k, ty[i] * (1 - k) + my * k, inBox ? 0.7 : deep ? 0.4 : 0.22);
+    }
+    // Screening: a midfielder or forward with nobody to mark doesn't just hold
+    // his spot. He edges into the passing lane from the ball to the most
+    // dangerous man in his area, so the pass forward is shadowed.
+    if (carrier >= 0) {
+      for (const i of defenders) {
+        if (taken.has(i) || mind.mark[i] >= 0 || busy[i]) continue;
+        const r = role(i);
+        if (r === 'CB' || r === 'FB') continue;
+        let best = -1;
+        let bs = 0;
+        for (const a of outs[A]) {
+          if (a === carrier || claimed.has(a)) continue;
+          const da = hyp(w.px[a] - tx[i], w.py[a] - ty[i]);
+          // Further forward (towards our goal) is more dangerous.
+          const fwd = ballD.u - frame(w.px[a], w.py[a], D).u;
+          if (da > 15 || fwd < -0.04) continue;
+          const sc = fwd * 10 + (15 - da) * 0.2;
+          if (sc > bs) { bs = sc; best = a; }
+        }
+        if (best < 0) continue;
+        const lx = w.bx + (w.px[best] - w.bx) * 0.55;
+        const ly = w.by + (w.py[best] - w.by) * 0.55;
+        setAbs(i, tx[i] * 0.5 + lx * 0.5, ty[i] * 0.5 + ly * 0.5, 0.28);
+      }
     }
     // Caught upfield of the ball: get back goal-side. Defenders and midfielders near the play sprint;
     // forwards and anyone far from it jog back and pick up the shape.
@@ -923,9 +959,20 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       });
       if (gkS >= 0) set(gkS, { u: 0.14, v: 0 }, S, urgAll);
       if (gkO >= 0) set(gkO, { u: 0.008, v: 0 }, O, urgAll);
+      // The defending side leaves its quickest forward up as an outlet for the counter,
+      // puts one on the near post, two zonal on the six-yard line, and marks the rest.
       const def = outfield(O);
+      const outletIdx = def.findIndex((i) => role(i) === 'ST') >= 0 ? def.findIndex((i) => role(i) === 'ST') : def.findIndex((i) => role(i) === 'WG');
+      if (outletIdx >= 0) {
+        const o = def.splice(outletIdx, 1)[0];
+        set(o, { u: 0.4, v: -sgn * 0.15 }, O, urgAll);
+      }
       const nearPost = def.pop();
       if (nearPost !== undefined) set(nearPost, { u: 0.012, v: -sgn * 0.11 }, O, urgAll);
+      for (const zv of [-0.02, 0.16]) {
+        const z = def.pop();
+        if (z !== undefined) set(z, { u: 0.05, v: -sgn * zv }, O, urgAll);
+      }
       def.forEach((i, k) => {
         if (k < inBox.length) {
           const a = inBox[k];
