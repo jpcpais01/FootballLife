@@ -5,7 +5,8 @@
 // shading only (alpha 0) and toned per player in the shader, so a whole team
 // shares one texture. A second texture carries fabric weave and creases as
 // bump (red), roughness (green) and clearcoat (blue).
-import { A, Region, SHORTS_TOP, regionAt } from './body.ts';
+import { A, Region, SHORTS_TOP, regionAt, type Cut } from './body.ts';
+import { casualTexel, type CasualPaint } from './casual.ts';
 import { dilate, rasterize } from './raster.ts';
 import { fbm, mixN, smooth, vnoise } from './noise.ts';
 import { write, type RGB } from './paint.ts';
@@ -19,6 +20,9 @@ export interface BodyPaint {
   attr: Float32Array;
   k: number;
   keeper: boolean;
+  cut: Cut;
+  /** Off the pitch: his own clothes instead of the kit. */
+  casual: CasualPaint | null;
   pattern: Pattern;
   shirt: RGB;
   trim: RGB;
@@ -52,14 +56,23 @@ export function paintBody(inp: BodyPaint): { color: Uint8Array; detail: Uint8Arr
     w.leg = a[A.leg];
     w.foot = a[A.foot];
     w.head = a[A.head];
-    const reg = regionAt(x, y, z, armT, w, keeper);
+    const reg = regionAt(x, y, z, armT, w, inp.cut);
+    let reg2: Region = reg;
     const ax = Math.abs(x);
     let c: RGB;
     let bump = 0.5;
     let rough = 0.8;
     let fabric = true;
     let coat = 0;
-    switch (reg) {
+    if (inp.casual && reg !== Region.Skin) {
+      const t = casualTexel(inp.casual, reg, x, y, z, armT, a, w, inp.cut, seed);
+      if (t) {
+        writeT(o, t.c, t.bump, t.rough, a[A.cav], t.coat, 1);
+        return;
+      }
+      reg2 = Region.Skin;
+    }
+    switch (reg2) {
       case Region.Shirt: {
         c = inp.shirt;
         const onArm = w.arm > 0.5;

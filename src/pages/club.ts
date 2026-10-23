@@ -9,7 +9,8 @@ import { navigate } from '../router.ts';
 import { refreshMe, state } from '../state.ts';
 import { confirmModal, errorBox, promptModal, relTime, skeleton, toast } from '../ui.ts';
 import { TROPHY_KINDS, type TrophyKind } from '../../shared/achievements.ts';
-import { trophyArt } from '../gearArt.ts';
+import { nameTag, trophyArt } from '../gearArt.ts';
+import { gear } from '../../shared/cosmetics.ts';
 import { EMOJI_SETS, jumboCount, recentEmoji, rememberEmoji } from '../emoji.ts';
 import { LEVELS, MAX_LEVEL, PERKS, UPGRADES, type UpgradeId } from '../../shared/clubUpgrades.ts';
 import { hashSeed } from '../../shared/rng.ts';
@@ -243,7 +244,7 @@ export async function clubPage(el: HTMLElement, [id]: string[]) {
     const mineMsg = m.author?.id === state.player?.id;
     return html`<div class="chat-msg ${mineMsg ? 'me' : ''}">
       ${mineMsg ? '' : html`<a href="/player/${m.author.id}">${avatar(m.author.appearance, d.club.colors, 32, undefined, { eq: m.author.equipped })}</a>`}
-      <div class="bubble ${jumboCount(m.text) ? `jumbo j${jumboCount(m.text)}` : ''}">${mineMsg ? '' : html`<div class="who">${m.author.name}${m.author.role && m.author.role !== 'player' ? html` <span class="dim">· ${roleLabel(m.author.role)}</span>` : ''}</div>`}<div class="txt">${m.text}</div><div class="at">${relTime(m.at)}</div></div>
+      <div class="bubble ${jumboCount(m.text) ? `jumbo j${jumboCount(m.text)}` : ''}">${mineMsg ? '' : html`<div class="who">${nameTag(m.author.name, gear(m.author.equipped).border)}${m.author.role && m.author.role !== 'player' ? html` <span class="dim">· ${roleLabel(m.author.role)}</span>` : ''}</div>`}<div class="txt">${m.text}</div><div class="at">${relTime(m.at)}</div></div>
     </div>`;
   };
 

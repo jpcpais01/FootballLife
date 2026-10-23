@@ -15,11 +15,12 @@ import { currentSeason, placeNewClub, standings, tick, type LineupSnapshot } fro
 import { drillMultiplier, trainingSession, TRAINING_FOCI, type TrainingFocus } from './progression.ts';
 import { botName, clubPlayers, clubStrength, resolveLineup, syncSquad, type ClubRow, type PlayerRow } from './squads.ts';
 import { ACHIEVEMENTS, ACH_BY_ID } from '../shared/achievements.ts';
-import { featured, ITEM_BY_ID, ITEMS, priceOf, sanitizeEquipped, shopDay, SLOTS, type Slot } from '../shared/cosmetics.ts';
-import { achStats, checkAchievements, notify } from './rewards.ts';
+import { BOX_ODDS, boxKey, boxSlot, featured, ITEM_BY_ID, ITEMS, nextBoxAt, priceOf, rollBox, sanitizeEquipped, shopDay, SLOTS, type BoxPrize, type Slot } from '../shared/cosmetics.ts';
+import { AD_DAILY_LIMIT, AD_SECONDS, AD_STARS, dayKey, PAYMENTS_LIVE, STAR_PACKS } from '../shared/stars.ts';
+import { addStars, spendStars } from './stars.ts';
+import { achStats, checkAchievements, grantItem, notify } from './rewards.ts';
 import { addFame, bump, checkIn, claimGoal, dailyBrief, dailyDto } from './daily.ts';
 import type { GoalEvent } from '../shared/daily.ts';
-import { spendStars } from './stars.ts';
 import { LEVELS, MAX_LEVEL, PERK_BY_ID, PERKS, readFacilities, rushCost, UPGRADE_BY_ID, UPGRADES, clubEffects } from '../shared/clubUpgrades.ts';
 import { CHAT_MAX, clubMessage, defaultShirt, leaveClub, MAX_HUMANS, moveToClub, notifyStaff } from './social.ts';
 import { CAR_BY_ID, CAR_COLORS, DEFAULT_HOME, FLOOR_STYLES, FURNITURE, FURNITURE_BY_ID, FURNITURE_SLOTS, HOUSE_BY_ID, HOUSES, RESPRAY_COST, sanitizeHome, WALL_COLORS, type FurnitureSlot } from '../shared/life.ts';
@@ -838,6 +839,19 @@ async function ownedIds(db: Db, playerId: string) {
   return new Set((await db.query<{ item_id: string }>('SELECT item_id FROM inventory WHERE player_id = $1', [playerId])).map((r) => r.item_id));
 }
 
+interface Perks { box?: string; ads?: { day: string; n: number }; adStart?: number }
+
+/** Today's free box and rewarded ads, for the shop. */
+function perksBrief(p: PlayerRow) {
+  const pk = (p.perks ?? {}) as Perks;
+  const now = new Date();
+  const ads = pk.ads?.day === dayKey(now) ? pk.ads.n : 0;
+  return {
+    box: { ready: pk.box !== boxKey(now), slot: boxSlot(now), next: nextBoxAt(now).toISOString(), odds: BOX_ODDS },
+    ads: { left: Math.max(0, AD_DAILY_LIMIT - ads), limit: AD_DAILY_LIMIT, reward: AD_STARS, seconds: AD_SECONDS },
+  };
+}
+
 route('GET', '/api/shop', async (c) => {
   const p = await myPlayer(c);
   const day = shopDay();
@@ -849,12 +863,16 @@ route('GET', '/api/shop', async (c) => {
     kit: club ? club.colors : { primary: '#1d2329', secondary: '#c6ff3d' },
     shirt: p.shirt,
     coins: p.coins,
+    stars: p.stars ?? 0,
     featured: f.ids,
     deal: f.deal,
     prices: Object.fromEntries(ITEMS.map((i) => [i.id, priceOf(i, day)])),
     nextRotation: new Date((day + 1) * 86_400_000).toISOString(),
     owned: [...owned],
     equipped: sanitizeEquipped(p.equipped, owned),
+    ...perksBrief(p),
+    packs: STAR_PACKS,
+    paymentsLive: PAYMENTS_LIVE,
   };
 });
 
@@ -862,18 +880,79 @@ route('POST', '/api/shop/buy', async (c) => {
   const p = await myPlayer(c);
   const item = ITEM_BY_ID[String(c.body.itemId ?? '')];
   if (!item) throw notFound('Item not found');
-  const price = priceOf(item);
-  if (price <= 0) throw bad(`${item.name} cannot be bought. ${item.source ?? ''}`.trim());
-  const coins = await c.db.tx(async (db) => {
+  const withStars = c.body.currency === 'stars';
+  const price = withStars ? item.stars ?? 0 : priceOf(item);
+  if (price <= 0) throw bad(withStars ? `${item.name} is not sold for stars.` : `${item.name} cannot be bought with coins. ${item.source ?? (item.stars ? 'It costs stars.' : '')}`.trim());
+  const balance = await c.db.tx(async (db) => {
     const have = await db.query('SELECT 1 FROM inventory WHERE player_id = $1 AND item_id = $2', [p.id, item.id]);
     if (have.length) throw bad('You already own this');
-    const r = await db.query<{ coins: number }>('UPDATE players SET coins = coins - $2 WHERE id = $1 AND coins >= $2 RETURNING coins', [p.id, price]);
-    if (!r.length) throw bad('Not enough coins');
-    await db.query("INSERT INTO inventory (player_id, item_id, source, price) VALUES ($1, $2, 'shop', $3)", [p.id, item.id, price]);
-    return r[0].coins;
+    let left: number;
+    if (withStars) {
+      const r = await spendStars(db, p.id, price, `shop:${item.id}`);
+      if (r === null) throw bad('Not enough stars');
+      left = r;
+    } else {
+      const r = await db.query<{ coins: number }>('UPDATE players SET coins = coins - $2 WHERE id = $1 AND coins >= $2 RETURNING coins', [p.id, price]);
+      if (!r.length) throw bad('Not enough coins');
+      left = r[0].coins;
+    }
+    await db.query("INSERT INTO inventory (player_id, item_id, source, price) VALUES ($1, $2, $3, $4)", [p.id, item.id, withStars ? 'stars' : 'shop', price]);
+    return left;
   });
   const achievements = await checkAchievements(c.db, p.id);
-  return { ok: true, coins, achievements };
+  const [me] = await c.db.query<{ coins: number; stars: number }>('SELECT coins, stars FROM players WHERE id = $1', [p.id]);
+  return { ok: true, coins: me?.coins ?? balance, stars: me?.stars ?? 0, achievements };
+});
+
+// The free box: one in the morning half of the day, one in the evening half (UTC).
+route('POST', '/api/box/open', async (c) => {
+  const p = await myPlayer(c);
+  const key = boxKey();
+  const owned = await ownedIds(c.db, p.id);
+  const prize: BoxPrize = rollBox(Math.random, owned);
+  await c.db.tx(async (db) => {
+    const r = await db.query("UPDATE players SET perks = jsonb_set(perks, '{box}', to_jsonb($2::text)) WHERE id = $1 AND coalesce(perks->>'box', '') <> $2 RETURNING id", [p.id, key]);
+    if (!r.length) throw bad('This box is already open. The next one is ready soon.');
+    if (prize.kind === 'coins') await db.query('UPDATE players SET coins = coins + $2 WHERE id = $1', [p.id, prize.amount]);
+    else if (prize.kind === 'stars') await addStars(db, p.id, prize.amount, 'box');
+    else if (prize.dupe) await db.query('UPDATE players SET coins = coins + $2 WHERE id = $1', [p.id, prize.dupe]);
+    else await grantItem(db, p.id, prize.itemId, 'box');
+  });
+  const achievements = prize.kind === 'item' && !prize.dupe ? await checkAchievements(c.db, p.id) : [];
+  const me = (await c.db.query<PlayerRow>('SELECT * FROM players WHERE id = $1', [p.id]))[0];
+  return { ok: true, prize, coins: me.coins, stars: me.stars, achievements, ...perksBrief(me) };
+});
+
+// Rewarded ads: start one, then claim its stars once it has run. Capped per day.
+route('POST', '/api/stars/ad/start', async (c) => {
+  const p = await myPlayer(c);
+  if (perksBrief(p).ads.left <= 0) throw bad("That's all the ads for today. More tomorrow.");
+  await c.db.query("UPDATE players SET perks = jsonb_set(perks, '{adStart}', to_jsonb($2::bigint)) WHERE id = $1", [p.id, Date.now()]);
+  return { ok: true, seconds: AD_SECONDS };
+});
+
+route('POST', '/api/stars/ad/claim', async (c) => {
+  const p = await myPlayer(c);
+  const stars = await c.db.tx(async (db) => {
+    const [row] = await db.query<{ perks: Perks }>('SELECT perks FROM players WHERE id = $1 FOR UPDATE', [p.id]);
+    const pk = row?.perks ?? {};
+    if (!pk.adStart || Date.now() - pk.adStart < (AD_SECONDS - 1) * 1000) throw bad('Watch the whole ad to earn the stars.');
+    const today = dayKey();
+    const n = pk.ads?.day === today ? pk.ads.n : 0;
+    if (n >= AD_DAILY_LIMIT) throw bad("That's all the ads for today. More tomorrow.");
+    const next: Perks = { ...pk, ads: { day: today, n: n + 1 } };
+    delete next.adStart;
+    await db.query('UPDATE players SET perks = $2 WHERE id = $1', [p.id, JSON.stringify(next)]);
+    return addStars(db, p.id, AD_STARS, 'ad');
+  });
+  const me = (await c.db.query<PlayerRow>('SELECT * FROM players WHERE id = $1', [p.id]))[0];
+  return { ok: true, stars, reward: AD_STARS, ...perksBrief(me) };
+});
+
+// Buying stars with real money waits on a payment provider.
+route('POST', '/api/stars/buy', async () => {
+  if (!PAYMENTS_LIVE) throw bad('Buying stars is coming soon.');
+  return { ok: false };
 });
 
 route('POST', '/api/locker/equip', async (c) => {

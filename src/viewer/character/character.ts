@@ -6,8 +6,9 @@
 import * as THREE from 'three';
 import { EYE_COLORS, HAIR_COLORS, SKIN_TONES, type Appearance } from '../../../shared/appearance.ts';
 import { B, makeBones, setBindPose } from '../rig/skeleton.ts';
-import { baseLand, buildBody, type BodyBuild } from './body.ts';
+import { baseLand, buildBody, type BodyBuild, type Cut } from './body.ts';
 import { SKIN_GREY, type Pattern } from './bodyPaint.ts';
+import type { CasualPaint } from './casual.ts';
 import { eyeballs, eyeTexture } from './eyes.ts';
 import { buildHair } from './hair.ts';
 import { morphWeights } from './look.ts';
@@ -33,6 +34,23 @@ export interface CharacterKit {
   earring: boolean;
   number?: number;
   numberColor: string;
+  /** How the clothes sit on the body (kit, keeper's kit or a casual outfit). */
+  cut: Cut;
+  /** Off the pitch: his own clothes, painted instead of the kit. */
+  casual?: CasualLook | null;
+  /** Hat and glasses (on the head). */
+  hat?: HatSpec | null;
+  glasses?: GlassesSpec | null;
+}
+
+export interface CasualPieceSpec { style: string; print?: string; c1: string; c2: string; c3: string }
+export interface CasualLook { top: CasualPieceSpec; bottom: CasualPieceSpec; shoes: CasualPieceSpec; sock: string }
+export interface HatSpec { style: string; c1: string; c2: string; print?: string; metal?: boolean }
+export interface GlassesSpec { style: string; c1: string; c2: string; metal?: boolean }
+
+function casualPaint(c: CasualLook): CasualPaint {
+  const piece = (p: CasualPieceSpec) => ({ style: p.style, print: p.print ?? '', c1: linear(p.c1), c2: linear(p.c2), c3: linear(p.c3) });
+  return { top: piece(c.top), bottom: piece(c.bottom), shoes: piece(c.shoes), sock: linear(c.sock) };
 }
 
 export interface Character {
@@ -108,7 +126,7 @@ class LRU<T> {
 }
 
 /** The body depends only on its shape weights, so colours, hair and the like reuse it. */
-const shapeKey = (a: Appearance, keeper: boolean) => JSON.stringify([morphWeights(a), keeper]);
+const shapeKey = (a: Appearance, cut: Cut) => JSON.stringify([morphWeights(a), cut]);
 /** Per-player texture seed: skin and face only, so trying hairstyles keeps the same skin detail. */
 const seedOf = (a: Appearance) => (a.skin * 131 + a.face * 7 + a.marks) % 997;
 const bodies = new LRU<BodyBuild>(40, (b) => {
@@ -212,8 +230,12 @@ const sizes = (detail: Detail) => ({ body: detail === 'high' ? 1024 : 512, head:
 function paintJobs(a: Appearance, keeper: boolean, kit: CharacterKit, detail: Detail, body: BodyBuild): [string, PaintJob][] {
   const sz = sizes(detail);
   const seed = seedOf(a);
-  const kitKey = JSON.stringify([kit.primary, kit.secondary, kit.shorts, kit.pattern, kit.boot, kit.bootAccent, kit.sole, kit.glove, kit.wrist]);
-  const headKey = JSON.stringify([sz.head, kit.primary, kit.secondary, skinHex(a), a.hairColor, a.hair, a.beard, a.brows, a.marks, seed, keeper]);
+  const cas = kit.casual ?? null;
+  const kitKey = JSON.stringify(cas ? [cas, kit.cut] : [kit.primary, kit.secondary, kit.shorts, kit.pattern, kit.boot, kit.bootAccent, kit.sole, kit.glove, kit.wrist, kit.cut]);
+  // Round the neck: the shirt (the kit, or the casual top; a suit shows its dress shirt).
+  const collar = cas ? (cas.top.style === 'suit' ? cas.top.c2 : cas.top.c1) : kit.primary;
+  const collarTrim = cas ? (cas.top.print === 'ringer' || cas.top.style === 'polo' || cas.top.style === 'jersey' || cas.top.style === 'suit' ? cas.top.c2 : cas.top.c1) : kit.secondary;
+  const headKey = JSON.stringify([sz.head, collar, collarTrim, kit.cut.collar, kit.cut.dip, kit.cut.sleeve, skinHex(a), a.hairColor, a.hair, a.beard, a.brows, a.marks, seed, keeper]);
   return [
     [`b|${sz.body}|${keeper}|${kitKey}`, {
       kind: 'body',
@@ -223,6 +245,8 @@ function paintJobs(a: Appearance, keeper: boolean, kit: CharacterKit, detail: De
       attr: body.paint.attr,
       k: body.paint.k,
       keeper,
+      cut: kit.cut,
+      casual: cas ? casualPaint(cas) : null,
       pattern: kit.pattern,
       shirt: linear(kit.primary),
       trim: linear(kit.secondary),
@@ -249,9 +273,10 @@ function paintJobs(a: Appearance, keeper: boolean, kit: CharacterKit, detail: De
       beard: a.beard,
       brows: a.brows,
       marks: a.marks,
-      collar: linear(kit.primary),
-      trim: linear(kit.secondary),
+      collar: linear(collar),
+      trim: linear(collarTrim),
       keeper,
+      cut: kit.cut,
       seed,
       lite: detail === 'low',
     }],
@@ -314,14 +339,14 @@ function paintOff(key: string, job: PaintJob): Promise<void> {
  * same look afterwards is quick.
  */
 export function prepareCharacter(a: Appearance, keeper: boolean, kit: CharacterKit, detail: Detail): Promise<void> {
-  const body = bodies.get(shapeKey(a, keeper), () => buildBody(a, keeper));
+  const body = bodies.get(shapeKey(a, kit.cut), () => buildBody(a, kit.cut));
   const waits = paintJobs(a, keeper, kit, detail, body).filter(([key]) => !textures.has(key)).map(([key, job]) => paintOff(key, job));
   return waits.length ? Promise.all(waits).then(() => undefined) : Promise.resolve();
 }
 
 export function buildCharacter(a: Appearance, keeper: boolean, kit: CharacterKit, detail: Detail): Character {
-  const sk = shapeKey(a, keeper);
-  const body = bodies.get(sk, () => buildBody(a, keeper));
+  const sk = shapeKey(a, kit.cut);
+  const body = bodies.get(sk, () => buildBody(a, kit.cut));
   const skin = linear(skinHex(a));
   const hair = linear(hairHex(a));
   const hi = detail !== 'low';
@@ -329,7 +354,7 @@ export function buildCharacter(a: Appearance, keeper: boolean, kit: CharacterKit
   const [bodyMap, bodyDetail] = textures.get(bodyKey, () => texturesOf(bodyJob, runPaintJob(bodyJob)));
   const [headMap, headDetail] = textures.get(headKey, () => texturesOf(headJob, runPaintJob(headJob)));
 
-  const bodyMat = bodyMaterial(bodyMap, bodyDetail, skin, kit.number !== undefined ? numberTexture(kit.number) : null, linear(kit.numberColor), hi);
+  const bodyMat = bodyMaterial(bodyMap, bodyDetail, skin, kit.number !== undefined && !kit.casual ? numberTexture(kit.number) : null, linear(kit.numberColor), hi);
   const headMat = new THREE.MeshPhysicalMaterial({
     map: headMap,
     bumpMap: headDetail,
@@ -346,7 +371,7 @@ export function buildCharacter(a: Appearance, keeper: boolean, kit: CharacterKit
   // Head parts move with the Head bone. Their geometry is shared through the caches.
   const head = new THREE.Group();
   const eyes = new THREE.Mesh(eyeGeos.get(`${sk}|${hi}`, () => eyeballs(body.eyes, hi)), eyeMaterial(EYE_COLORS[a.eyeColor] ?? EYE_COLORS[0]));
-  const hairKey = JSON.stringify([sk, hi, a.hair, a.hairColor, a.beard, kit.band, kit.earring]);
+  const hairKey = JSON.stringify([sk, hi, a.hair, a.hairColor, a.beard, kit.band, kit.earring, kit.hat ?? null, kit.glasses ?? null]);
   const hairParts = hairs.get(hairKey, () => buildHair(a, body, hair, kit, hi).map((m) => ({ geometry: m.geometry, material: m.material as THREE.Material })));
   for (const m of [eyes, ...hairParts.map((h) => new THREE.Mesh(h.geometry, h.material))]) {
     m.applyMatrix4(HEAD_BIND);

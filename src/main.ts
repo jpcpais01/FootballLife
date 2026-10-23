@@ -185,6 +185,7 @@ function meTop() {
   const p = state.player;
   if (!p) return html``;
   return html`<a href="/shop" class="coin-chip" aria-label="Coins">${icon('coin', 15)}<b>${p.coins.toLocaleString()}</b></a>
+    <a href="/shop/stars" class="coin-chip star-chip" aria-label="Stars">${icon('star', 15)}<b>${(p.stars ?? 0).toLocaleString()}</b></a>
     <button class="top-icon ${dailyDue() ? 'has-dot' : ''}" aria-label="Today: daily goals and rewards" title="Today" data-daily>${icon('target', 19)}</button>
     <button class="top-icon" aria-label="Refresh the game" title="Refresh for updates" data-refresh>${icon('refresh', 18)}</button>
     <button class="top-icon ${state.unread ? 'has-dot' : ''}" aria-label="Inbox" data-inbox>${icon('bell', 19)}</button>

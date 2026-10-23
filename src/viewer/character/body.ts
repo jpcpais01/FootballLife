@@ -233,16 +233,49 @@ const GROUP = BONES.map((n: BoneName) => {
   return n === 'Head' ? 5 : 0;
 });
 
+/**
+ * How the clothes are cut: where sleeves, hems, socks and shoes end, and how
+ * thick the cloth sits. The club kit and the keeper's kit are two cuts; casual
+ * outfits make their own (shared/cosmetics.ts → figures.ts).
+ */
+export interface Cut {
+  /** Sleeve end down the arm (armT): 0.14 short, about 0.45 to the wrist. */
+  sleeve: number;
+  gloves: boolean;
+  /** Bottoms' hem height at the centre line, and how much it rises toward the outside of the leg. */
+  hem: number;
+  hemSide: number;
+  /** Top of the socks and of the shoes (y). */
+  sock: number;
+  shoe: number;
+  /** Where the top meets the bottoms. */
+  waist: number;
+  /** Collar height at the back, and how far it drops toward the front. */
+  collar: number;
+  dip: number;
+  /** Cloth thickness of the top and the bottoms, and how much the bottoms widen below the waist. */
+  puffTop: number;
+  puffBottom: number;
+  flare: number;
+  /** Shoes: upper thickness, sole height and how far the sole stands proud of the upper. */
+  puffShoe: number;
+  sole: number;
+  puffSole: number;
+}
+
+export const KIT_CUT: Cut = { sleeve: SLEEVE, gloves: false, hem: 0.8, hemSide: 0.15, sock: 0.52, shoe: 0.13, waist: SHORTS_TOP, collar: 1.775, dip: 0.6, puffTop: 0.013, puffBottom: 0.02, flare: 0.05, puffShoe: 0.012, sole: 0.028, puffSole: 0.004 };
+export const KEEPER_CUT: Cut = { ...KIT_CUT, sleeve: SLEEVE + 0.45, gloves: true };
+
 /** Kit region for a bind-pose point, given how much of it is arm/hand/leg/foot. */
-export function regionAt(x: number, y: number, z: number, armT: number, w: { arm: number; hand: number; leg: number; foot: number; head: number }, keeper: boolean): Region {
-  if (w.hand > 0.5) return keeper ? Region.Glove : Region.Skin;
-  if (w.arm > 0.5) return armT < SLEEVE + (keeper ? 0.45 : 0) ? Region.Shirt : Region.Skin;
-  if (w.foot > 0.5 || y < 0.13) return Region.Boot;
-  if (y < 0.52) return Region.Sock;
-  if (y < 0.8 - Math.abs(x) * 0.15) return Region.Skin;
-  if (y < SHORTS_TOP + (z > 0 ? 0 : 0.01)) return Region.Shorts;
+export function regionAt(x: number, y: number, z: number, armT: number, w: { arm: number; hand: number; leg: number; foot: number; head: number }, cut: Cut): Region {
+  if (w.hand > 0.5) return cut.gloves ? Region.Glove : Region.Skin;
+  if (w.arm > 0.5) return armT < cut.sleeve ? Region.Shirt : Region.Skin;
+  if (w.foot > 0.5 || y < cut.shoe) return Region.Boot;
+  if (y < cut.sock) return Region.Sock;
+  if (y < cut.hem - Math.abs(x) * cut.hemSide) return Region.Skin;
+  if (y < cut.waist + (z > 0 ? 0 : 0.01)) return Region.Shorts;
   // The collar dips at the front.
-  const collar = 1.775 - Math.max(0, z) * 0.6 - Math.max(0, 0.05 - Math.abs(x)) * 0.4;
+  const collar = cut.collar - Math.max(0, z) * cut.dip - Math.max(0, 0.05 - Math.abs(x)) * 0.4;
   return y < collar ? Region.Shirt : Region.Skin;
 }
 
@@ -270,7 +303,37 @@ export interface BodyBuild {
   /** Club crest spot on the left chest, and the neck's ring at the collar (bind space). */
   crestAt: THREE.Vector3;
   neck: { y: number; z: number; r: number };
+  /** Front surface depth of the chest (bind z on a grid), for draping chains over the clothes. */
+  chest: { x0: number; y0: number; step: number; nx: number; ny: number; z: Float32Array };
+  /** The same for the back (its outermost, most negative z). */
+  back: { x0: number; y0: number; step: number; nx: number; ny: number; z: Float32Array };
+  /** Each wrist (left, right): centre, along the forearm toward the hand, and girth. */
+  wrists: { c: THREE.Vector3; dir: THREE.Vector3; r: number }[];
+  /** Each foot (left, right) sliced heel to toe: its outline per slice, for fitting shoes round it. */
+  feet: FootShape[];
   s0: number;
+}
+
+export interface FootShape {
+  z0: number;
+  z1: number;
+  /** Per slice along z: min x, max x, max y. */
+  x0: Float32Array;
+  x1: Float32Array;
+  y1: Float32Array;
+  /** Lowest point of the foot. */
+  bottom: number;
+}
+
+/** The chest's front depth at (x, y), from the grid in a BodyBuild. */
+export function chestZ(b: BodyBuild, x: number, y: number, back = false) {
+  const c = back ? b.back : b.chest;
+  const fx = Math.max(0, Math.min(c.nx - 1.001, (x - c.x0) / c.step));
+  const fy = Math.max(0, Math.min(c.ny - 1.001, (y - c.y0) / c.step));
+  const i = Math.floor(fx), j = Math.floor(fy);
+  const u = fx - i, v = fy - j;
+  const at = (a: number, b2: number) => c.z[b2 * c.nx + a];
+  return (at(i, j) * (1 - u) + at(i + 1, j) * u) * (1 - v) + (at(i, j + 1) * (1 - u) + at(i + 1, j + 1) * u) * v;
 }
 
 /**
@@ -286,7 +349,7 @@ export const A = { base: 0, pos: 3, nrm: 6, armT: 9, arm: 10, hand: 11, leg: 12,
 export const INNER_V = 0.003;
 export const INNER_EYE_V = 0.011;
 
-export function buildBody(a: Appearance, keeper: boolean): BodyBuild {
+export function buildBody(a: Appearance, cut: Cut): BodyBuild {
   const bd = bundle!;
   const nv = bd.nv;
   // 1. Shape: the baked base plus the look's targets.
@@ -350,14 +413,16 @@ export function buildBody(a: Appearance, keeper: boolean): BodyBuild {
     v.set(Q[i * 3], Q[i * 3 + 1], Q[i * 3 + 2]).sub(jArm[side]);
     armT[i] = v.dot(dirArm[side]);
     for (let c = 0; c < 5; c++) groupW[i * 5 + c] = gw[c + 1];
-    region[i] = regionAt(Q[i * 3], Q[i * 3 + 1], Q[i * 3 + 2], armT[i], g, keeper);
+    region[i] = regionAt(Q[i * 3], Q[i * 3 + 1], Q[i * 3 + 2], armT[i], g, cut);
   }
+  const P0 = Q.slice();
   const puff = new Float32Array(nv);
   const cloth = new Float32Array(nv);
   for (let i = 0; i < nv; i++) {
-    let p = PUFF[region[i]];
-    // Shorts flare toward the hem; the shirt hangs a little off the belly and back.
-    if (region[i] === Region.Shorts) p += Math.max(0, SHORTS_TOP - Q[i * 3 + 1]) * 0.05;
+    const rg = region[i];
+    let p = rg === Region.Shirt ? cut.puffTop : rg === Region.Shorts ? cut.puffBottom : rg === Region.Boot ? cut.puffShoe + (Q[i * 3 + 1] < cut.sole ? cut.puffSole : 0) : PUFF[rg];
+    // Shorts flare toward the hem (trousers only a little); the shirt hangs a little off the belly and back.
+    if (rg === Region.Shorts) p += Math.min(0.35, Math.max(0, cut.waist - Q[i * 3 + 1])) * cut.flare;
     if (region[i] === Region.Shirt && Q[i * 3 + 1] < 1.45) p += 0.004;
     puff[i] = p;
     cloth[i] = p > 0 ? 1 : 0;
@@ -587,7 +652,77 @@ export function buildBody(a: Appearance, keeper: boolean): BodyBuild {
     const x = Q[i * 3], y = Q[i * 3 + 1], z = Q[i * 3 + 2];
     if (Math.abs(y - 1.785) < 0.012 && Math.abs(x) < 0.12) neckR += Math.hypot(x, z - nz);
   }
+  // Chest and back depth (chains, the hood): the outermost torso surface on a grid.
+  const depthGrid = (sgn: number) => {
+    const gr = { x0: -0.2, y0: 1.36, step: 0.01, nx: 41, ny: 50, z: new Float32Array(41 * 50).fill(-9) };
+    for (let i = 0; i < nv; i++) {
+      const x = Q[i * 3], y = Q[i * 3 + 1], z = Q[i * 3 + 2] * sgn;
+      if (z <= 0 || groupW[i * 5] > 0.5 || groupW[i * 5 + 4] > 0.6) continue;
+      const a = Math.round((x - gr.x0) / gr.step), b = Math.round((y - gr.y0) / gr.step);
+      if (a < 0 || b < 0 || a >= gr.nx || b >= gr.ny) continue;
+      const k = b * gr.nx + a;
+      if (z > gr.z[k]) gr.z[k] = z;
+    }
+    // Gaps (between the arms and body, above the shoulders) take their nearest row-mate.
+    for (let b = 0; b < gr.ny; b++) {
+      for (let pass = 0; pass < 2; pass++) for (let a0 = 0; a0 < gr.nx; a0++) {
+        const a = pass ? gr.nx - 1 - a0 : a0;
+        const k = b * gr.nx + a;
+        if (gr.z[k] > -9) continue;
+        const n = pass ? k + 1 : k - 1;
+        if ((pass ? a < gr.nx - 1 : a > 0) && gr.z[n] > -9) gr.z[k] = gr.z[n];
+      }
+    }
+    for (let k = 0; k < gr.z.length; k++) gr.z[k] = gr.z[k] <= -9 ? nz + 0.05 * sgn : gr.z[k] * sgn;
+    return gr;
+  };
+  const chest = depthGrid(1);
+  const back = depthGrid(-1);
+  // Wrist girth where a watch or bracelet sits.
+  const wrists = (['Left', 'Right'] as const).map((sd) => {
+    const hand = BIND[`${sd}Hand`], fore = BIND[`${sd}ForeArm`];
+    const dir = hand.clone().sub(fore).normalize();
+    const c = hand.clone().addScaledVector(dir, -0.045);
+    let r = 0, n = 0;
+    for (let i = 0; i < nv; i++) {
+      v.set(Q[i * 3], Q[i * 3 + 1], Q[i * 3 + 2]).sub(c);
+      const along = v.dot(dir);
+      if (Math.abs(along) > 0.008) continue;
+      const d = v.addScaledVector(dir, -along).length();
+      if (d > 0.08 || groupW[i * 5] + groupW[i * 5 + 1] < 0.5) continue;
+      r += d;
+      n++;
+    }
+    return { c, dir, r: n ? (r / n) * 1.02 : 0.03 };
+  });
+  // Foot outlines for shoes (skin positions, before any cloth).
+  const feet = (['Left', 'Right'] as const).map((sd): FootShape => {
+    const sx = Math.sign(BIND[`${sd}Foot`].x);
+    const NZ = 24;
+    let z0 = 1e9, z1 = -1e9, bottom = 1e9;
+    const ids: number[] = [];
+    for (let i = 0; i < nv; i++) {
+      if (groupW[i * 5 + 3] < 0.5 || Math.sign(P0[i * 3]) !== sx) continue;
+      ids.push(i);
+      z0 = Math.min(z0, P0[i * 3 + 2]);
+      z1 = Math.max(z1, P0[i * 3 + 2]);
+      bottom = Math.min(bottom, P0[i * 3 + 1]);
+    }
+    const x0 = new Float32Array(NZ).fill(1e9), x1 = new Float32Array(NZ).fill(-1e9), y1 = new Float32Array(NZ).fill(-1e9);
+    for (const i of ids) {
+      const k = Math.min(NZ - 1, Math.floor(((P0[i * 3 + 2] - z0) / (z1 - z0 + 1e-6)) * NZ));
+      x0[k] = Math.min(x0[k], P0[i * 3]);
+      x1[k] = Math.max(x1[k], P0[i * 3]);
+      y1[k] = Math.max(y1[k], P0[i * 3 + 1]);
+    }
+    for (let k = 0; k < NZ; k++) if (x0[k] > 1e8) { const n = k ? k - 1 : k + 1; x0[k] = x0[n]; x1[k] = x1[n]; y1[k] = y1[n]; }
+    return { z0, z1, x0, x1, y1, bottom };
+  });
   return {
+    feet,
+    chest,
+    back,
+    wrists,
     geometry,
     lashes,
     eyes,

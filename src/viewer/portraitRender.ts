@@ -43,14 +43,14 @@ const shade = (hex: string, k: number) => '#' + new THREE.Color(hex).multiplySca
 
 const eye = new THREE.Vector3();
 
-export interface PortraitOpts { yaw?: number; keeper?: boolean; full?: boolean }
+export interface PortraitOpts { yaw?: number; keeper?: boolean; full?: boolean; casual?: boolean }
 
 /**
  * Renders one portrait and returns it as an image URL. The player is painted
  * off the main thread and built between frames, so the page never stalls on it.
  */
 export async function renderPortrait(app: Appearance, kit: Kit, eq: Equipped | undefined, px: number, opts: PortraitOpts = {}): Promise<string> {
-  const fig = new Figure(kit, app, !!opts.keeper, GK_KITS[0], eq, { base: false, scale: SHOWCASE_SCALE, detail: px > 200 ? 'mid' : 'low' });
+  const fig = new Figure(kit, app, !!opts.keeper, GK_KITS[0], eq, { base: false, scale: SHOWCASE_SCALE, detail: px > 200 ? 'mid' : 'low', casual: !!opts.casual });
   await fig.ready;
   if (!renderer) setup();
   const r = renderer!;

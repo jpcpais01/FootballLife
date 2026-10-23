@@ -5,6 +5,8 @@
 /** Stars per rewarded ad, and how many ads count each UTC day. */
 export const AD_STARS = 2;
 export const AD_DAILY_LIMIT = 5;
+/** How long a rewarded ad runs before it pays out. */
+export const AD_SECONDS = 15;
 
 export interface StarPack {
   id: string;
