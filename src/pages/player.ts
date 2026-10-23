@@ -5,7 +5,7 @@ import { api } from '../api.ts';
 import { avatar } from '../art.ts';
 import { attrBars, badge, posChip, roleLabel } from '../components.ts';
 import { html, mount, type Raw } from '../dom.ts';
-import { cardBackground, trophyArt } from '../gearArt.ts';
+import { cardBackground, nameTag, trophyArt } from '../gearArt.ts';
 import { icon } from '../icons.ts';
 import { state } from '../state.ts';
 import { errorBox, relTime, skeleton } from '../ui.ts';
@@ -48,9 +48,9 @@ export async function playerPage(el: HTMLElement, [id]: string[]) {
         <div class="pcard profile-card ${g.card?.style === 'holo' ? 'holo' : ''}" style="background:${cardBackground(g.card)}">
           <div class="row between" style="align-items:flex-start">
             <div><div class="big-ovr">${p.ovr}</div><div style="margin-top:6px">${posChip(p.position)}</div></div>
-            ${avatar(p.appearance, kit, 128, d.club ? p.shirt : undefined, { eq: p.equipped, offPitch: !!g.outfit })}
+            ${avatar(p.appearance, kit, 128, d.club ? p.shirt : undefined, { eq: p.equipped, offPitch: true })}
           </div>
-          <div class="pname" style="margin-top:12px">${p.name}</div>
+          <div class="pname" style="margin-top:12px">${nameTag(p.name, g.border)}</div>
           ${g.title ? html`<div class="title-tag" style="--rc:${RARITY_COLORS[g.title.rarity]}">${g.title.name}</div>` : ''}
           <div class="muted small" style="margin-top:2px">${POSITION_NAMES[p.position as keyof typeof POSITION_NAMES]}${p.isBot ? ' · AI player' : ''}${mine ? ' · You' : ''}</div>
           ${p.transferOpen ? html`<div class="chip lime" style="margin-top:8px">${icon('swap', 12)} Open to offers</div>` : ''}

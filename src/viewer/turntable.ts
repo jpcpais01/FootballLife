@@ -8,10 +8,13 @@ import type { Equipped } from '../../shared/cosmetics.ts';
 import { Figure, GK_KITS, SHOWCASE_SCALE, type Kit } from './figures.ts';
 
 export interface Turntable {
-  set(app: Appearance, eq: Equipped, kit: Kit, keeper?: boolean): void;
+  /** `casual` dresses him in his own clothes instead of the kit. */
+  set(app: Appearance, eq: Equipped, kit: Kit, keeper?: boolean, casual?: boolean): void;
   celebrate(): void;
   /** Resolves once the first player is standing on the stage. */
   shown: Promise<void>;
+  /** Holds him still in his current pose (he can still be turned). */
+  freeze(on: boolean): void;
   /** Frames the face (for the look studio) or the whole player. */
   focus(mode: 'face' | 'body'): void;
   /** Moves the canvas into a new container (after the page re-renders). */
@@ -169,6 +172,8 @@ export function createTurntable(initialHost: HTMLElement, opts: TurntableOpts = 
 
   const clock = new THREE.Timer();
   let raf = 0;
+  let frozen = false;
+  let posed: Figure | null = null;
   const loop = () => {
     raf = requestAnimationFrame(loop);
     clock.update();
@@ -191,7 +196,9 @@ export function createTurntable(initialHost: HTMLElement, opts: TurntableOpts = 
       const celebrating = time < celebrateUntil;
       fig.celebrate = celebrating ? 1 : 0;
       fig.star = celebrating;
-      fig.animate(dt, 0, time);
+      // Frozen: keep the pose he has; a newly arrived player gets one pose to stand in.
+      if (!frozen || posed !== fig) fig.animate(frozen ? 0 : dt, 0, time);
+      posed = fig;
       // The close-up follows the face as the idle sways it, gently.
       fig.eyes(eye);
       eyeS.lerp(eye.setY(eye.y - 0.02), eyeS.lengthSq() ? Math.min(1, dt * 3) : 1);
@@ -208,17 +215,20 @@ export function createTurntable(initialHost: HTMLElement, opts: TurntableOpts = 
 
   return {
     shown,
-    set(app, eq, kit, keeper = false) {
+    freeze(on) {
+      frozen = on;
+    },
+    set(app, eq, kit, keeper = false, casual = opts.casual ?? false) {
       // Same kit and gear: he changes his look in place, without a pause or a restart of his idle.
-      const key = JSON.stringify([kit, eq ?? null, keeper]);
+      const key = JSON.stringify([kit, eq ?? null, keeper, casual]);
       const cur = coming ?? fig;
       if (cur && key === figKey) {
         void cur.restyle(app);
         return;
       }
       figKey = key;
-      const fo = { scale: SHOWCASE_SCALE, detail: 'mid' as const, base: !floor, casual: opts.casual };
-      const next = new Figure(kit, app, keeper, GK_KITS[0], eq, fo);
+      const fo = { scale: SHOWCASE_SCALE, detail: 'mid' as const, base: !floor, casual };
+      const next = new Figure(kit, app, keeper && !casual, GK_KITS[0], eq, fo);
       next.onStand = true;
       coming = next;
       // The old player stays on the stand until the new one is ready.

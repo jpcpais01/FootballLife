@@ -150,7 +150,7 @@ export function badgeSvg(colors: { primary: string; secondary: string }, badge: 
  * for call sites that pass a shirt number; the kit itself shows it.)
  */
 export function avatar(a: Appearance, kit?: { primary: string; secondary: string }, size = 48, _number?: number, opts: { eq?: Equipped; offPitch?: boolean } = {}): Raw {
-  return portrait(a, kit, size, { eq: opts.eq });
+  return portrait(a, kit, size, { eq: opts.eq, casual: opts.offPitch });
 }
 
 export function bootColor(a: Appearance) {

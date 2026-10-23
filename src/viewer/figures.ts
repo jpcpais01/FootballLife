@@ -6,9 +6,12 @@
 // actions, head tracking and foot IK.
 import * as THREE from 'three';
 import { BOOT_COLORS, sanitizeAppearance, type Appearance } from '../../shared/appearance.ts';
-import { gear, type Equipped } from '../../shared/cosmetics.ts';
+import { gear, ITEM_BY_ID, type Equipped, type Item } from '../../shared/cosmetics.ts';
 import { type Pattern } from './character/bodyPaint.ts';
-import { whenCharacterReady } from './character/body.ts';
+import { KEEPER_CUT, KIT_CUT, whenCharacterReady } from './character/body.ts';
+import { casualCut } from './character/casual.ts';
+import { buildHood, buildNeckwear, buildShoes, buildWristwear, shoeMaterial } from './character/wear.ts';
+import { linear } from './character/paint.ts';
 import { buildCharacter, prepareCharacter, type CharacterKit, type Detail } from './character/character.ts';
 import { type ActOpts, type ActionKind, type AnimInput, Animator, seeded } from './rig/animator.ts';
 import { duration } from './rig/clip.ts';
@@ -164,6 +167,8 @@ export class Figure {
   private eq: Equipped | undefined;
   private number: number | undefined;
   private detail: Detail;
+  /** Off the pitch: his own clothes instead of the kit. */
+  private casual: boolean;
   /** What dress() last added to the bones, to take off on a restyle. */
   private parts: THREE.Object3D[] = [];
   private styleRun = 0;
@@ -196,7 +201,7 @@ export class Figure {
   /** A keeper with the ball in his hands. Set by the match viewer. */
   hold = false;
 
-  constructor(kit: Kit, look: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped, opts: { base?: boolean; number?: number; scale?: number; detail?: Detail; sync?: boolean; seed?: number } = {}) {
+  constructor(kit: Kit, look: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped, opts: { base?: boolean; number?: number; scale?: number; detail?: Detail; sync?: boolean; seed?: number; casual?: boolean } = {}) {
     loadMocap(`${import.meta.env.BASE_URL}anims/mocap.json`);
     // Older and bot looks may lack newer features; fill them in consistently.
     const app = sanitizeAppearance(look);
@@ -210,6 +215,7 @@ export class Figure {
     this.gkKit = gkKit;
     this.eq = eq;
     this.number = opts.number;
+    this.casual = !!opts.casual;
     // Base (team-coloured puck) and a selection ring.
     if (withBase) {
       const base = new THREE.Mesh(geo.base, gloss(k.secondary));
@@ -258,6 +264,7 @@ export class Figure {
   private kitFor(app: Appearance): CharacterKit {
     const isKeeper = this.keeper;
     const g = gear(this.eq);
+    if (this.casual) return casualKit(app, this.eq, this.kit);
     const k = isKeeper ? this.gkKit : this.kit;
     const boot = g.boots?.c1 ?? BOOT_COLORS[app.boots] ?? BOOT_COLORS[0];
     const pattern = isKeeper ? 'plain' : kitPattern(this.kit);
@@ -270,11 +277,12 @@ export class Figure {
       bootAccent: g.boots?.c2 ?? contrast(boot),
       sole: g.boots?.c2 ?? mix(boot, '#101010', 0.55),
       glove: '#eef2f4',
-      wrist: g.wrist ? g.wrist.c1 ?? k.secondary : app.accessory === 3 ? k.secondary : null,
-      band: g.head ? g.head.c1 ?? k.secondary : app.accessory === 1 ? k.secondary : null,
+      wrist: g.sweat ? g.sweat.c1 ?? k.secondary : app.accessory === 3 ? k.secondary : null,
+      band: g.band ? g.band.c1 ?? k.secondary : app.accessory === 1 ? k.secondary : null,
       earring: app.accessory === 2,
       number: this.number,
       numberColor: isKeeper ? '#111111' : contrast(k.primary) === '#141414' && pattern === 'plain' ? k.secondary : contrast(k.primary),
+      cut: isKeeper ? KEEPER_CUT : KIT_CUT,
     };
   }
 
@@ -298,13 +306,36 @@ export class Figure {
       this.bones[b].add(o);
       this.parts.push(o);
     };
-    if (!isKeeper) {
+    if (this.casual) {
+      // Chains, wrists and a hood, draped over his own clothes.
+      const hi = this.detail !== 'low';
+      const cas = ck.casual!;
+      const top = cas.top;
+      // Modelled shoes, skinned to the feet.
+      const sh = cas.shoes;
+      const piece = { style: sh.style, print: sh.print ?? '', c1: linear(sh.c1), c2: linear(sh.c2), c3: linear(sh.c3) };
+      const shoeGeo = buildShoes(piece, linear(cas.sock), ch.body, ck.cut, JSON.stringify([ch.body.feet[0].z0, ch.body.feet[0].x1[3], ch.body.feet[1].x0[3], sh, cas.sock, ck.cut.sole, ck.cut.shoe]), hi);
+      const shoes = new THREE.SkinnedMesh(shoeGeo, shoeMaterial(sh.style, !!g.shoes?.metal));
+      shoes.bind(mesh.skeleton, mesh.bindMatrix);
+      shoes.castShadow = true;
+      shoes.frustumCulled = false;
+      this.body.add(shoes);
+      this.parts.push(shoes);
+      if (top.style === 'hoodie') toBone(B.Spine2, buildHood(top.c1, ch.body, hi));
+      const neck = g.neck ?? (app.accessory === 4 ? ITEM_BY_ID['neck-chain-gold'] : undefined);
+      if (neck) toBone(B.Spine2, buildNeckwear(neck.style ?? 'chain', neck.c1 ?? '#ffcf3d', neck.c2, ch.body, hi));
+      const w = g.wrist;
+      if (w) {
+        // Watches go on the left wrist, bracelets on the right.
+        const watch = /watch/.test(w.style ?? '');
+        const side = watch ? 0 : 1;
+        toBone(side ? B.RightForeArm : B.LeftForeArm, buildWristwear(w.style ?? 'cuff', w.c1 ?? '#ffcf3d', w.c2, ch.body, side, 0, hi));
+      }
+    } else if (!isKeeper) {
       const crest = new THREE.Mesh(geo.crest, gloss(k.secondary));
       crest.position.copy(ch.body.crestAt);
       toBone(B.Spine2, crest);
     }
-    const neckIt = g.neck ?? (app.accessory === 4 ? { style: 'chain', c1: '#ffcf3d', metal: true } : undefined);
-    if (neckIt) toBone(B.Spine2, neckwear(neckIt.style ?? 'chain', neckIt.c1 ?? '#ffcf3d', !!neckIt.metal || !g.neck, k.secondary, ch.body.neck, ch.body.crestAt.z));
     this.markReady();
   }
 
@@ -644,23 +675,34 @@ export const GK_KITS: Kit[] = [
 ];
 
 /** A chain, snood or medal round the neck, in bind space. */
-function neckwear(style: string, color: string, metal: boolean, trim: string, n: { y: number; z: number; r: number }, chestZ: number) {
-  const m = metal ? gloss(color, true) : gloss(color);
-  if (style === 'snood') {
-    const s = new THREE.Mesh(new THREE.CylinderGeometry(n.r * 1.12, n.r * 1.3, 0.12, 24, 1, true), m);
-    s.position.set(0, n.y + 0.04, n.z);
-    return s;
-  }
-  const g = new THREE.Group();
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(n.r * 1.08, style === 'medal' ? 0.01 : 0.008, 6, 32), style === 'medal' ? gloss(trim) : m);
-  // Resting on the collarbones: tilted down at the front.
-  ring.rotation.x = Math.PI / 2 - 0.55;
-  ring.position.set(0, n.y - 0.03, n.z + 0.02);
-  g.add(ring);
-  if (style === 'medal') {
-    const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.014, 20).rotateX(Math.PI / 2), m);
-    disc.position.set(0, 1.6, chestZ + 0.012);
-    g.add(disc);
-  }
-  return g;
+
+/** Pieces worn when nothing is equipped in a casual slot. */
+const CASUAL_DEFAULTS = { top: 'outfit-tee', bottom: 'bot-joggers-black', shoes: 'shoe-court-white' } as const;
+
+/** What he wears off the pitch: his equipped clothes and accessories, or plain basics. */
+function casualKit(app: Appearance, eq: Equipped | undefined, kit: Kit): CharacterKit {
+  const g = gear(eq);
+  const pick = (s: 'top' | 'bottom' | 'shoes'): Item => g[s] ?? ITEM_BY_ID[CASUAL_DEFAULTS[s]];
+  const top = pick('top'), bottom = pick('bottom'), shoes = pick('shoes');
+  const piece = (it: Item) => ({ style: it.style ?? 'tee', print: it.print, c1: it.c1 ?? '#888888', c2: it.c2 ?? it.c1 ?? '#888888', c3: it.c3 ?? it.c2 ?? it.c1 ?? '#888888' });
+  const cut = casualCut({ top: top.style ?? 'tee', bottom: bottom.style ?? 'joggers', shoes: shoes.style ?? 'court' });
+  const dark = shoes.style === 'loafer' || bottom.style === 'suit';
+  return {
+    primary: kit.primary,
+    secondary: kit.secondary,
+    shorts: bottom.c1 ?? '#222222',
+    pattern: 'plain',
+    boot: shoes.c1 ?? '#f4f4f0',
+    bootAccent: shoes.c2 ?? '#888888',
+    sole: shoes.c3 ?? '#f4f4f0',
+    glove: '#eef2f4',
+    wrist: null,
+    band: null,
+    earring: app.accessory === 2,
+    numberColor: '#ffffff',
+    cut,
+    casual: { top: piece(top), bottom: piece(bottom), shoes: piece(shoes), sock: dark ? '#16181b' : shoes.style === 'slide' ? shoes.c2 ?? '#f4f4f0' : '#eeeeea' },
+    hat: g.head ? { style: g.head.style ?? 'cap', c1: g.head.c1 ?? '#222222', c2: g.head.c2 ?? g.head.c1 ?? '#222222', print: g.head.print, metal: g.head.metal } : null,
+    glasses: g.eyes ? { style: g.eyes.style ?? 'round', c1: g.eyes.c1 ?? '#222222', c2: g.eyes.c2 ?? '#222222', metal: g.eyes.metal } : null,
+  };
 }

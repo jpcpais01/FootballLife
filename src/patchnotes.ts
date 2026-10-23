@@ -7,6 +7,16 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T14:40:00Z',
+    entries: [
+      { title: 'Streetwear', body: 'Your player now has a life off the pitch. Over a hundred new items to wear away from the club: tees, hoodies, puffers, jackets, jeans, cargos, shorts, sneakers, caps, beanies, glasses, chains and bracelets, all modelled on your 3D player. Your club kit stays for matchday. Your profile and home show your street look.' },
+      { title: 'New shop and rarities', body: 'The shop is rebuilt with Streetwear, Accessories, Matchday and Profile sections, filters, a daily featured drop and five rarities: Common, Rare, Epic, Legendary and the new animated Mythic. Switch the stage between Street and Matchday to see your outfit or your kit, and tap Hold still to stop his idle and turn him around to look closely.' },
+      { title: 'Daily box', body: 'Open a free box twice a day, once in the morning and once in the evening (UTC). It can hold coins, stars or an item, from Common up to Legendary. The odds are shown in the box tab. Duplicates turn into coins.' },
+      { title: 'Stars', body: 'Stars are the new premium currency, shown next to your coins. The rarest items cost stars. Earn 2 stars by watching a short video, up to 5 times a day. Star packs are coming soon.' },
+      { title: 'Name borders', body: 'Name borders now frame your name on your profile and in club chat, from Steel and Neon up to animated Fire, Galaxy and the crowned Legend border.' },
+    ],
+  },
+  {
     hour: '2026-10-23T14:30:00Z',
     entries: [
       { title: 'Try before you buy', body: 'Tap any sofa, TV, rug or other piece you do not own yet and it appears in your home straight away, with the camera moving in and your player walking over to have a look. Buy it from the bar under the picture, or close the preview. You can also look inside any house before buying it, and see any car in your garage, in the paint you pick, before you pay. Respraying a car shows the new colour while you decide.' },

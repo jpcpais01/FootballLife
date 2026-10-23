@@ -1,6 +1,6 @@
 // Texture painting as plain-data jobs, so they can run on a worker (paintWorker.ts)
 // and keep the page responsive, or right here when they're needed at once.
-import { A, Region, regionAt, type FaceLand } from './body.ts';
+import { A, Region, regionAt, type Cut, type FaceLand } from './body.ts';
 import { paintBody, type BodyPaint } from './bodyPaint.ts';
 import { paintHead, type RGB } from './paint.ts';
 import { BEARD, SCALP } from './styles.ts';
@@ -23,6 +23,7 @@ export interface HeadJob {
   collar: RGB;
   trim: RGB;
   keeper: boolean;
+  cut: Cut;
   seed: number;
   lite: boolean;
 }
@@ -56,7 +57,7 @@ export function runPaintJob(j: PaintJob): Painted {
       w.foot = t[A.foot];
       w.head = t[A.head];
       const x = t[A.pos], y = t[A.pos + 1], z = t[A.pos + 2];
-      if (regionAt(x, y, z, t[A.armT], w, j.keeper) !== Region.Shirt) return null;
+      if (regionAt(x, y, z, t[A.armT], w, j.cut) !== Region.Shirt) return null;
       // The collar band shows the trim colour where it turns in.
       return y > 1.74 ? j.trim : j.collar;
     },

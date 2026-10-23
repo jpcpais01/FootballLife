@@ -5,7 +5,7 @@ import type { Equipped } from '../shared/cosmetics.ts';
 import { esc, raw, type Raw } from './dom.ts';
 
 type Kit = { primary: string; secondary: string };
-interface Job { app: Appearance; kit: Kit; eq?: Equipped; px: number; full: boolean }
+interface Job { app: Appearance; kit: Kit; eq?: Equipped; px: number; full: boolean; casual?: boolean }
 
 const DEFAULT_KIT: Kit = { primary: '#2a313a', secondary: '#c6ff3d' };
 const cache = new Map<string, string>();
@@ -22,7 +22,7 @@ async function renderer(): Promise<Render> {
   return render;
 }
 
-const keyOf = (j: Job) => JSON.stringify([j.app, j.kit.primary, j.kit.secondary, j.eq ?? null, j.px, j.full]);
+const keyOf = (j: Job) => JSON.stringify([j.app, j.kit.primary, j.kit.secondary, j.eq ?? null, j.px, j.full, !!j.casual]);
 
 /** Image size to render for a portrait shown at `size` CSS pixels. */
 const bucket = (size: number) => (size * Math.min(2, window.devicePixelRatio || 1) > 200 ? 512 : size > 56 ? 256 : 128);
@@ -31,8 +31,8 @@ const bucket = (size: number) => (size * Math.min(2, window.devicePixelRatio || 
  * A player portrait. Returns an <img> right away; until the 3D shot is ready it
  * shows a soft disc in the club colour, then fills in.
  */
-export function portrait(a: Appearance, kit: Kit = DEFAULT_KIT, size = 48, opts: { eq?: Equipped; full?: boolean; cls?: string } = {}): Raw {
-  const job: Job = { app: a, kit: kit ?? DEFAULT_KIT, eq: opts.eq, px: bucket(size), full: !!opts.full };
+export function portrait(a: Appearance, kit: Kit = DEFAULT_KIT, size = 48, opts: { eq?: Equipped; full?: boolean; cls?: string; casual?: boolean } = {}): Raw {
+  const job: Job = { app: a, kit: kit ?? DEFAULT_KIT, eq: opts.eq, px: bucket(size), full: !!opts.full, casual: !!opts.casual };
   const key = keyOf(job);
   const src = cache.get(key);
   if (!src) queue(key, job);
@@ -68,7 +68,7 @@ async function drain() {
       let url = cache.get(key);
       if (!url) {
         try {
-          url = await render(job.app, job.kit, job.eq, job.px, { full: job.full });
+          url = await render(job.app, job.kit, job.eq, job.px, { full: job.full, casual: job.casual });
         } catch {
           continue;
         }

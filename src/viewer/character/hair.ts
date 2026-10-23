@@ -11,6 +11,8 @@ import { A, baseLand, type BodyBuild } from './body.ts';
 import { hash3, mixN, rng, smooth, vnoise } from './noise.ts';
 import type { RGB } from './paint.ts';
 import { BEARD, SCALP, beardCover, scalpCover } from './styles.ts';
+import type { GlassesSpec, HatSpec } from './character.ts';
+import { buildGlasses, buildHat, hatRim, HAT_SQUASH } from './wear.ts';
 
 type Tex = 'straight' | 'wavy' | 'curly' | 'coily';
 type V3 = [number, number, number];
@@ -317,6 +319,8 @@ function ball(m: Mesh, c: V3, r: number, squash: number, segs: number, seed: num
 export interface HairKit {
   band: string | null;
   earring: boolean;
+  hat?: HatSpec | null;
+  glasses?: GlassesSpec | null;
 }
 
 /** Hair, beard volume and head accessories for a look, in bind space. */
@@ -337,6 +341,7 @@ export function buildHair(a: Appearance, body: BodyBuild, hair: RGB, kit: HairKi
   const spec = SCALP[a.hair] ?? SCALP[0];
   const seed = a.hair * 31 + a.hairColor * 7;
   const nShell = hi ? 14 : 6;
+  const hat = kit.hat && kit.hat.style !== 'crown' ? kit.hat : null;
 
   const thick = (x: number, y: number, z: number, cov: number, s: Style, ga: number, gr: number) => {
     const sideK = smooth(0.075, 0.0, y);
@@ -393,7 +398,10 @@ export function buildHair(a: Appearance, body: BodyBuild, hair: RGB, kit: HairKi
           const end = L.eyeY + 0.05 + Math.abs(x) * 0.25 + (vnoise(x * 90 + seed, 1, 2) - 0.5) * 0.014;
           cov = Math.max(cov, smooth(0.075, 0.05, Math.abs(x)) * smooth(end - 0.004, end + 0.02, y) * smooth(0.02, 0.06, z));
         }
-        grid.push({ s: [x, y, z], dir: [d.x, d.y, d.z], t: thick(x, y, z, 1, st, i / NA, j / NR), c: cov });
+        let t0 = thick(x, y, z, 1, st, i / NA, j / NR);
+        // Under a hat the hair is pressed flat; below its rim it shows as usual.
+        if (hat) t0 *= 1 - (1 - HAT_SQUASH) * smooth(-0.012, 0.008, y - hatRim(hat.style, Math.atan2(x, z)));
+        grid.push({ s: [x, y, z], dir: [d.x, d.y, d.z], t: t0, c: cov });
       }
     }
     // Hair thins toward its edge: thickness follows the coverage a little way further out
@@ -497,6 +505,8 @@ export function buildHair(a: Appearance, body: BodyBuild, hair: RGB, kit: HairKi
     switch (st.extra) {
       case 'bun':
       case 'manbun': {
+        // A bun on top would push through a hat.
+        if (hat && st.extra === 'manbun') break;
         const at = st.extra === 'bun' ? surf(0, 0.45, -0.89, 0.035) : surf(0, 0.86, -0.5, 0.03);
         ball(m, at, 0.042, 0.82, hi ? 20 : 10, seed);
         break;
@@ -606,6 +616,23 @@ export function buildHair(a: Appearance, body: BodyBuild, hair: RGB, kit: HairKi
     }
     out.push(finish(m, hairMaterial([hair[0] * 0.85, hair[1] * 0.85, hair[2] * 0.85], 'wavy')));
   }
+
+  // ---- Hat and glasses ----
+  if (kit.hat) {
+    const capT = st ? (x: number, y: number, z: number) => thick(x, y, z, scalpCover(x, y, z, spec), st, 0, 0) : () => 0;
+    for (const m of buildHat(kit.hat, R, capT, L, hi)) {
+      const p = m.geometry.attributes.position.array as Float32Array;
+      for (let i = 0; i < p.length; i += 3) {
+        p[i] = p[i] / kc + C.x;
+        p[i + 1] = p[i + 1] / kc + C.y;
+        p[i + 2] = p[i + 2] / kc + C.z;
+      }
+      m.geometry.computeVertexNormals();
+      m.geometry.computeBoundingSphere();
+      out.push(m);
+    }
+  }
+  if (kit.glasses) out.push(...buildGlasses(kit.glasses, body));
 
   // ---- Headband and earring ----
   if (kit.band) {
