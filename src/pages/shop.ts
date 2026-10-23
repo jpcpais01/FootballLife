@@ -136,8 +136,6 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
   const render = () => {
     const g = gear(preview());
     mount(el, html`
-      <div class="page-head"><div><div class="eyebrow">Style</div><div class="h1">Shop & locker</div></div>
-        <span class="coin-pill">${icon('coin', 18)} <b id="coins">${d.coins.toLocaleString()}</b></span></div>
       <div class="shop-layout">
         <div class="shop-stage-col">
           <div class="shop-stage card flush">
@@ -151,6 +149,8 @@ export async function shopPage(el: HTMLElement, params: string[], initial: Tab =
           <div style="margin-top:12px">${profilePreview()}</div>
         </div>
         <div class="shop-main">
+          <div class="page-head"><div><div class="eyebrow">Style</div><div class="h1">Shop & locker</div></div>
+            <span class="coin-pill">${icon('coin', 18)} <b id="coins">${d.coins.toLocaleString()}</b></span></div>
           <div class="tabs">${(['shop', 'locker', 'look'] as Tab[]).map((t) => html`<button class="${t === tab ? 'on' : ''}" data-tab="${t}">${t === 'shop' ? 'Shop' : t === 'locker' ? 'Locker' : 'Look'}</button>`)}</div>
           <div id="detail">${detail()}</div>
           <div class="fade-in">${tab === 'shop' ? shopTab() : tab === 'locker' ? lockerTab() : lookTab()}</div>

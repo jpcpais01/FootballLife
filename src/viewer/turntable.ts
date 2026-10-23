@@ -64,6 +64,8 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
   scene.add(podium);
 
   let fig: Figure | null = null;
+  let coming: Figure | null = null;
+  let figKey = '';
   let spin = 0.4;
   let yaw = 0.35;
   let dragging = false;
@@ -139,7 +141,7 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
       fig.eyes(eye);
       eyeS.lerp(eye.setY(eye.y - 0.02), eyeS.lengthSq() ? Math.min(1, dt * 3) : 1);
       camFace.look.copy(eyeS);
-      camFace.pos.set(eyeS.x, eyeS.y + 0.18, eyeS.z + 2.75);
+      camFace.pos.set(eyeS.x, eyeS.y + 0.12, eyeS.z + 1.95);
     }
     zoom += (zoomTo - zoom) * Math.min(1, dt * 4);
     const k = zoom * zoom * (3 - 2 * zoom);
@@ -151,12 +153,31 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
 
   return {
     set(app, eq, kit, keeper = false) {
-      if (fig) scene.remove(fig.root);
-      fig = new Figure(kit, app, keeper, GK_KITS[0], eq, { scale: SHOWCASE_SCALE, detail: 'mid', sync: true });
-      fig.root.traverse((o) => {
-        if ((o as THREE.Mesh).isMesh) o.castShadow = true;
+      // Same kit and gear: he changes his look in place, without a pause or a restart of his idle.
+      const key = JSON.stringify([kit, eq ?? null, keeper]);
+      const cur = coming ?? fig;
+      if (cur && key === figKey) {
+        void cur.restyle(app);
+        return;
+      }
+      figKey = key;
+      const next = new Figure(kit, app, keeper, GK_KITS[0], eq, { scale: SHOWCASE_SCALE, detail: 'mid' });
+      next.onStand = true;
+      coming = next;
+      // The old player stays on the stand until the new one is ready.
+      void next.ready.then(() => {
+        if (coming !== next) return;
+        coming = null;
+        next.root.traverse((o) => {
+          if ((o as THREE.Mesh).isMesh) o.castShadow = true;
+        });
+        if (fig) {
+          scene.remove(fig.root);
+          next.root.rotation.y = yaw;
+        }
+        fig = next;
+        scene.add(fig.root);
       });
-      scene.add(fig.root);
     },
     attach(next) {
       if (next === host && raf) return;

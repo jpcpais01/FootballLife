@@ -123,9 +123,9 @@ export function paintHead(inp: HeadPaint): { color: Uint8Array; detail: Uint8Arr
     b *= 1 - redK * 0.45;
     // Darker, cooler skin round the eyes; lighter on the forehead and the nose bridge.
     const eyeA = gau2(ax - L.eyeX, y - L.eyeY + 0.004, 0.026) * front;
-    r *= 1 - eyeA * 0.14;
-    g *= 1 - eyeA * 0.17;
-    b *= 1 - eyeA * 0.1;
+    r *= 1 - eyeA * 0.06;
+    g *= 1 - eyeA * 0.08;
+    b *= 1 - eyeA * 0.04;
     const hi = (gau2(x, y - 0.06, 0.035) * 0.05 + gau2(x, y - (L.eyeY - 0.02), 0.012) * 0.05) * front;
     r *= 1 + hi;
     g *= 1 + hi;
@@ -139,14 +139,14 @@ export function paintHead(inp: HeadPaint): { color: Uint8Array; detail: Uint8Arr
     if (lid > 0.02) {
       const ex = x > 0 ? L.eyeX : -L.eyeX;
       const d = Math.hypot(x - ex, y - L.eyeY, z - L.eyeZ) / eyeR;
-      const up = y > L.eyeY ? 1 : 0.3;
+      const up = y > L.eyeY ? 1 : 0.2;
       r *= 1 - lid * 0.05;
       g *= 1 - lid * 0.1;
       b *= 1 - lid * 0.08;
       const line = smooth(1.11, 1.03, d) * lid * up;
-      r = mixN(r, 0.012, line * 0.85);
-      g = mixN(g, 0.009, line * 0.85);
-      b = mixN(b, 0.008, line * 0.85);
+      r = mixN(r, 0.012, line * 0.6);
+      g = mixN(g, 0.009, line * 0.6);
+      b = mixN(b, 0.008, line * 0.6);
       rough = mixN(rough, 0.35, smooth(1.1, 1.0, d) * lid);
     }
 
