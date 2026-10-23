@@ -37,11 +37,11 @@ const tap = (k: string, d: Record<string, unknown>) => (globalThis as { __simTap
 const GROUND_K = 0.6;
 // Calibration of the decision model against real match numbers.
 const SHOOT_K = 0.55; // how keen players are to shoot
-const CROSS_K = 1; // how keen wide players are to cross
+const CROSS_K = 1.6; // how keen wide players are to cross
 const PASS_K = 1.04; // overall pass completion
 const BOX_K = 0.8; // completion of passes into the box
 const FINAL_K = 0.95; // completion of passes into the final third
-const XG_A = -0.47; // base of the shot-quality curve
+const XG_A = -0.75; // base of the shot-quality curve
 const XG_D = 0.13; // how fast chances fade with distance
 /** Duels a close defender forces per second on the man on the ball. */
 const TACKLE_RATE = 0.13;
@@ -358,8 +358,7 @@ class Engine {
     while (this.n < maxTicks) {
       if (this.t >= this.halfEnd && !this.flight && this.phase !== 'celebrate' && !(this.restart && this.restart.announced)) {
         if (this.half === 1) {
-          this.t = Math.ceil(this.t);
-          this.n = Math.round(this.t / DT);
+          this.holdTo(Math.ceil(this.t));
           this.emit('halftime', 0, 0, 0);
           this.halftimeAt = this.t;
           this.record();
@@ -370,7 +369,7 @@ class Engine {
           this.kickoffSetup((1 - this.firstKickoff) as Side, true);
           continue;
         }
-        this.t = Math.ceil(this.t);
+        this.holdTo(Math.ceil(this.t));
         this.emit('fulltime', 0, this.bx, this.by, { sc: [...this.score] as [number, number] });
         this.record();
         break;
@@ -378,6 +377,16 @@ class Engine {
       this.tick();
     }
     return this.result();
+  }
+
+  /** Jumps the clock forward to `t`, holding the picture still for the steps in between. */
+  private holdTo(t: number) {
+    const n1 = Math.round(t / DT);
+    while (this.n < n1) {
+      this.record();
+      this.n++;
+    }
+    this.t = t;
   }
 
   private tick() {
@@ -435,7 +444,7 @@ class Engine {
     if (this.owner >= 0 && this.sideOf(this.owner) === A && this.runner[A] < 0 && this.phase === 'play') {
       const b = this.fr(this.bx, this.by, A);
       const press = this.nearest((1 - A) as Side, this.bx, this.by).d;
-      if (b.u > 0.38 && press > 4 && this.rng.chance(0.08)) {
+      if (b.u > 0.33 && press > 3 && this.rng.chance(0.2)) {
         const cands = this.active(A).filter((i) => i !== this.owner && ['ST', 'WG', 'AM'].includes(this.role(i)));
         if (cands.length) {
           this.runner[A] = cands[this.rng.weighted(cands.map((i) => this.a(i, 'offPositioning') ** 2))];
@@ -833,7 +842,9 @@ class Engine {
     const yBias = -this.by / 34;
     // In the final third, wide players cut inside toward goal.
     const f = this.fr(this.px[i], this.py[i], side);
-    const inside = f.u > 0.68 ? -Math.sign(f.v) * Math.min(1, Math.abs(f.v) * 1.5) * this.dir(side) : 0;
+    // Crossers (full-backs, and wingers who cross better than they shoot) go down the line instead.
+    const crosser = this.role(i) === 'FB' || (this.role(i) === 'WG' && this.a(i, 'crossing') > this.a(i, 'shooting'));
+    const inside = f.u > 0.68 ? -Math.sign(f.v) * Math.min(1, Math.abs(f.v) * 1.5) * this.dir(side) * (crosser && Math.abs(f.v) > 0.45 && f.u < 0.93 ? -0.6 : 1) : 0;
     for (let k = -3; k <= 3; k++) {
       const ang = k * 0.38 + this.rng.range(-0.1, 0.1);
       const x = this.px[i] + Math.cos(ang) * len * d;
@@ -956,7 +967,7 @@ class Engine {
 
     // Cross: worth it with bodies in the box.
     label = 'cross';
-    if (b.u > 0.72 && Math.abs(b.v) > 0.42) {
+    if (b.u > 0.72 && Math.abs(b.v) > 0.5) {
       let n = 0;
       for (const j of this.active(side)) {
         if (j === h) continue;
@@ -1206,7 +1217,7 @@ class Engine {
     this.lastTouch = side;
 
     if (this.rng.chance(p)) {
-      const mistimed = through && this.rng.chance(0.08 * (oppTac.mentality === 'attacking' || oppTac.pressing === 'high' ? 1.5 : 1));
+      const mistimed = through && this.rng.chance(0.18 * (oppTac.mentality === 'attacking' || oppTac.pressing === 'high' ? 1.5 : 1));
       this.passInfo = { to, x: tgt.x, y: tgt.y, cross: false };
       // Played so he can get there: the ball and the runner arrive together.
       const reachT = this.reach(to, tgt.x, tgt.y);

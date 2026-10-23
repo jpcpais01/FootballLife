@@ -7,6 +7,13 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T12:30:00Z',
+    entries: [
+      { title: 'Real wing play', body: 'Full-backs and wingers who are better crossers than shooters now take the ball down the line and cross from out wide, instead of everyone cutting inside. There are about twice as many crosses and more corners. Forwards make runs in behind far more often, so you see more through balls and the odd offside.' },
+      { title: 'Clean half-time', body: 'Fixed a split-second flash where everyone jumped to the centre spot when a highlight ran right up to the half-time whistle.' },
+    ],
+  },
+  {
     hour: '2026-10-23T12:00:00Z',
     entries: [
       { title: 'Instant player creator', body: 'Changing your look no longer freezes the screen. Faces and kits are now painted in the background, only the part you changed is rebuilt, and your player updates in place without restarting his pose. Trying hairstyles, eye colours or face sliders now feels immediate, and the option previews fill in without stalling the page. Players also load more smoothly in matches and at home.' },
