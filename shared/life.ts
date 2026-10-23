@@ -14,11 +14,11 @@ export interface HouseTier {
 }
 
 export const HOUSES: HouseTier[] = [
-  { id: 'studio', name: 'Studio flat', price: 0, garage: 1, size: [7, 6], view: 'city', desc: 'Where every career starts. Small, but it is yours.' },
-  { id: 'apartment', name: 'City apartment', price: 2500, garage: 1, size: [8.5, 7], view: 'park', desc: 'Big windows over the park and room for a proper sofa.' },
-  { id: 'townhouse', name: 'Townhouse', price: 8000, garage: 2, size: [10, 8], view: 'city', desc: 'Two floors, a double garage and the neighbours know your name.' },
-  { id: 'villa', name: 'Seaside villa', price: 20000, garage: 3, size: [12, 9], view: 'sea', desc: 'Ocean view, sunsets and space for the trophy collection.' },
-  { id: 'penthouse', name: 'Sky penthouse', price: 45000, garage: 4, size: [14, 10], view: 'skyline', desc: 'Top floor of the tallest tower in town.' },
+  { id: 'studio', name: 'Studio flat', price: 0, garage: 1, size: [7.5, 6], view: 'city', desc: 'Where every career starts. Small, but it is yours.' },
+  { id: 'apartment', name: 'City apartment', price: 2500, garage: 1, size: [9.5, 7], view: 'park', desc: 'Big windows over the park and room for a proper sofa.' },
+  { id: 'townhouse', name: 'Townhouse', price: 8000, garage: 2, size: [11, 8], view: 'city', desc: 'A walled garden, a double garage and the neighbours know your name.' },
+  { id: 'villa', name: 'Seaside villa', price: 20000, garage: 3, size: [13, 9], view: 'sea', desc: 'A pool over the beach, sunsets and space for the trophy collection.' },
+  { id: 'penthouse', name: 'Sky penthouse', price: 45000, garage: 4, size: [15, 10], view: 'skyline', desc: 'Top floor of the tallest tower in town, with a hot tub on the terrace.' },
 ];
 export const HOUSE_BY_ID: Record<string, HouseTier> = Object.fromEntries(HOUSES.map((h) => [h.id, h]));
 

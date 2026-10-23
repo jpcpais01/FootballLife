@@ -150,12 +150,14 @@ export async function housePage(el: HTMLElement, params: string[]) {
 
   const panel = (): Raw => (tab === 'furnish' ? furnishTab() : tab === 'move' ? moveTab() : tab === 'garage' ? garageTab() : collectionTab());
 
-  const stageTitle = (): Raw => html`<div class="stage-title"><div class="eyebrow">${showGarage() ? 'Garage' : tier().name}</div>
-    <div style="font-weight:800">${showGarage() ? `${d.cars.length} of ${tier().garage} spaces` : `${tier().size[0]} × ${tier().size[1]} m · ${tier().view} view`}</div></div>`;
+  const VIEW_NAME: Record<string, string> = { city: 'City view', park: 'Park view', sea: 'Sea view', skyline: 'Skyline view' };
+  const stageTitle = (): Raw => html`<div class="stage-title"><div class="eyebrow">${d.mine ? 'My home' : `${d.player.name}'s place`}</div>
+    <div class="st-name">${showGarage() ? 'Garage' : tier().name}</div>
+    <div class="st-meta">${showGarage() ? `${d.cars.length} of ${tier().garage} spaces` : `${tier().size[0]} × ${tier().size[1]} m · ${VIEW_NAME[tier().view] ?? ''}`}</div></div>`;
 
   // The layout is drawn once; only the side panel and stage labels change, so
   // the 3D canvas never has to move.
-  mount(el, html`
+  mount(el, html`<div class="house-page">
     <div class="page-head"><div class="row" style="gap:12px">${avatar(d.player.appearance, kit, 52, d.club ? d.player.shirt : undefined, { eq: d.player.equipped })}<div><div class="eyebrow">Off the pitch</div><div class="h1">${d.mine ? 'My home' : `${d.player.name}'s place`}</div></div></div>
       <div class="row" style="gap:10px">${d.club ? html`<a href="/club/${d.club.id}" class="chip">${badge(d.club as never, 18)} ${d.club.short}</a>` : ''}${!d.mine ? html`<a class="btn sm" href="/player/${d.player.id}">${icon('user', 14)} Profile</a>` : ''}${coinsPill()}</div></div>
     <div class="house-layout">
@@ -163,21 +165,18 @@ export async function housePage(el: HTMLElement, params: string[]) {
         <div id="h3d" class="h3d-host"></div>
         <div id="stage-title">${stageTitle()}</div>
         <div class="stage-switch"><button data-stage="room" class="${showGarage() ? '' : 'on'}">${icon('sofa', 14)} Home</button><button data-stage="garage" class="${showGarage() ? 'on' : ''}">${icon('car', 14)} Garage</button></div>
-        <div class="tiny dim stage-hint">Drag to look around</div>
+        <div class="stage-hint">${icon('arrow', 13)} Tap to walk · drag to look around</div>
+        ${d.mine ? html`<span class="coin-pill sm house-coins">${icon('coin', 15)} <b class="coins-n">${(d.coins ?? 0).toLocaleString()}</b></span>` : ''}
       </div>
       <div class="house-main">
-        <div class="tabs" id="htabs">${tabs.map((t) => html`<button class="${t === tab ? 'on' : ''}" data-tab="${t}">${TAB_LABEL[t]}</button>`)}</div>
+        <div class="house-main-head"><div class="tabs" id="htabs">${tabs.map((t) => html`<button class="${t === tab ? 'on' : ''}" data-tab="${t}">${TAB_LABEL[t]}</button>`)}</div></div>
         <div id="hpanel" class="fade-in">${panel()}</div>
       </div>
-    </div>`);
+    </div></div>`);
 
-  const roomData = () => ({
-    home: d.home,
-    trophies: d.trophies,
-    collectibles: d.collectibles,
-    owner: { appearance: d.player.appearance, equipped: d.player.equipped, kit, keeper: d.player.position === 'GK' },
-  });
-  const garageData = () => ({ cars: d.cars, capacity: tier().garage, fav: d.home.favCar });
+  const owner = { appearance: d.player.appearance, equipped: d.player.equipped, kit, keeper: d.player.position === 'GK' };
+  const roomData = () => ({ home: d.home, trophies: d.trophies, collectibles: d.collectibles, owner, cars: d.cars });
+  const garageData = () => ({ cars: d.cars, capacity: tier().garage, fav: d.home.favCar, view: tier().view, owner });
 
   let lastStage = '';
   const drawStage = (force = false) => {
@@ -196,6 +195,7 @@ export async function housePage(el: HTMLElement, params: string[]) {
     el.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) => b.classList.toggle('on', (b.dataset.stage === 'garage') === showGarage()));
     const c = el.querySelector('#coins');
     if (c) c.textContent = (d.coins ?? 0).toLocaleString();
+    el.querySelectorAll('.coins-n').forEach((n) => (n.textContent = (d.coins ?? 0).toLocaleString()));
     drawStage();
   };
 
