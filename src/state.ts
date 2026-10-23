@@ -15,6 +15,8 @@ export interface MePlayer {
   ovr: number;
   attrs: Attributes;
   coins: number;
+  /** Premium currency. */
+  stars: number;
   equipped: Equipped;
   motto: string;
 }
