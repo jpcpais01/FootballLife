@@ -7,7 +7,7 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
-    hour: '2026-10-23T22:00:00Z',
+    hour: '2026-10-23T21:00:00Z',
     entries: [
       { title: 'Free kicks like the real thing', body: 'On a free kick swung in from deep, the defence now holds a line around the edge of the box to catch runners offside. The attackers stand level with it beside their markers, shuffling and waiting, then sprint in behind as the ball is struck, each to his own zone: near post, far post or the penalty spot. Two players wait outside the box for the second ball. On a shooting free kick, a second man stands over the ball with the taker to keep the keeper guessing, and an attacker joins the end of the wall to block his view.' },
     ],
