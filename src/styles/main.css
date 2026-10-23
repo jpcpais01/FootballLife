@@ -635,6 +635,18 @@ img.av3d { display: block; object-fit: cover; transition: opacity .3s; }
   .life-card { padding: 12px; }
 }
 
+.preview-bar { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; max-width: calc(100% - 24px); padding: 6px 6px 6px 8px; border-radius: 999px;
+  background: rgba(var(--ink-rgb),.78); backdrop-filter: blur(14px); border: 1px solid rgba(var(--accent-rgb),.45); box-shadow: 0 14px 40px -12px rgba(0,0,0,.7); animation: pv-in .35s var(--ease); }
+@keyframes pv-in { from { opacity: 0; transform: translate(-50%, 10px); } }
+.pv-tag { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: 999px; background: rgba(var(--accent-rgb),.16); color: var(--lime); font: 700 11px var(--font); letter-spacing: .06em; text-transform: uppercase; flex: none; }
+.pv-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pv-x { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; border: 0; background: rgba(255,255,255,.08); color: var(--muted); cursor: pointer; }
+.pv-x:hover { color: var(--text); background: rgba(255,255,255,.14); }
+.house-stage.previewing .stage-switch, .house-stage.previewing .stage-hint { display: none; }
+.life-card.peek { border-color: rgba(var(--accent-rgb),.7); background: linear-gradient(160deg, rgba(var(--accent-rgb),.12), var(--panel) 60%); box-shadow: 0 0 0 3px rgba(var(--accent-rgb),.12); }
+.life-card .peek-hint { display: inline-flex; align-items: center; gap: 4px; }
+.house-acts { display: flex; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.btn.on { border-color: rgba(var(--accent-rgb),.6); color: var(--lime); }
 .house-main-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .house-main-head .tabs { margin: 0; flex: 1; min-width: 0; }
 .house-coins { display: none; position: absolute; right: 12px; top: 12px; }
@@ -661,6 +673,11 @@ img.av3d { display: block; object-fit: cover; transition: opacity .3s; }
   .house-stage .stage-hint { display: inline-flex; left: 12px; transform: none; bottom: 14px; }
   @keyframes hint-out { to { opacity: 0; } }
   .stage-title .st-name { font-size: 19px; }
+  .house-row { flex-wrap: wrap; gap: 10px; }
+  .house-row .house-thumb { width: 48px; height: 48px; }
+  .house-acts { width: 100%; justify-content: flex-start; }
+  .house-acts .btn { flex: 1; }
+  .life-grid { grid-template-columns: 1fr; }
 }
 
 /* ---------- cup ---------- */

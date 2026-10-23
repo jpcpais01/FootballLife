@@ -4,7 +4,9 @@
 // tall stands far out, beyond the camera.
 import * as THREE from 'three';
 import type { Outdoor } from './plans.ts';
-import { at, box, canvasTex, cyl, mat, rand, worldUV } from './kit.ts';
+import { CAR_BY_ID } from '../../../shared/life.ts';
+import { car } from './cars.ts';
+import { at, box, canvasTex, mat, rand, worldUV } from './kit.ts';
 import { subtract, type Rect } from './nav.ts';
 import { palm, tree } from './props.ts';
 
@@ -23,10 +25,10 @@ export interface Mood {
 
 export const MOODS: Record<Outdoor, Mood> = {
   street: { sky: ['#2c4a86', '#e9906a', '#ffd7a0'], fog: '#e8a882', sun: { color: '#ffc78f', intensity: 2.6, dir: [-0.55, 0.42, 0.6] }, hemi: ['#ffe1c2', '#3a2e2a', 0.65], env: 0.45, exposure: 1.0, night: 0.45, fill: 1.0 },
-  park: { sky: ['#3d86d8', '#9fd0f5', '#e6f5ff'], fog: '#cfe7f7', sun: { color: '#fff3dc', intensity: 3.0, dir: [0.45, 0.8, 0.45] }, hemi: ['#e8f4ff', '#4a5a3a', 0.8], env: 0.5, exposure: 1.0, night: 0, fill: 0.7 },
-  townhouse: { sky: ['#4b7fc7', '#b7d6ee', '#f6e9d2'], fog: '#dfe6e8', sun: { color: '#ffe9c4', intensity: 2.8, dir: [0.6, 0.62, 0.42] }, hemi: ['#f2f4ff', '#4a4038', 0.75], env: 0.5, exposure: 1.0, night: 0.1, fill: 0.8 },
+  park: { sky: ['#3d86d8', '#9fd0f5', '#e6f5ff'], fog: '#cfe7f7', sun: { color: '#fff1d8', intensity: 2.5, dir: [0.5, 0.62, 0.5] }, hemi: ['#e8f4ff', '#4a5a3a', 0.5], env: 0.42, exposure: 0.92, night: 0, fill: 0.55 },
+  townhouse: { sky: ['#4b7fc7', '#b7d6ee', '#f6e9d2'], fog: '#dfe6e8', sun: { color: '#ffe6bd', intensity: 2.5, dir: [0.6, 0.58, 0.42] }, hemi: ['#f2f4ff', '#4a4038', 0.5], env: 0.42, exposure: 0.94, night: 0.1, fill: 0.65 },
   beach: { sky: ['#3a5fa5', '#f2a26e', '#ffd99a'], fog: '#f4c08e', sun: { color: '#ffbf80', intensity: 2.7, dir: [0.15, 0.3, 1.0] }, hemi: ['#ffe2c4', '#5a4030', 0.7], env: 0.5, exposure: 1.02, night: 0.55, fill: 1.0 },
-  tower: { sky: ['#070b1f', '#1b1f4a', '#5a3d7a'], fog: '#1e1a3c', sun: { color: '#9fb4ff', intensity: 0.75, dir: [-0.4, 0.75, -0.35] }, hemi: ['#6a78b8', '#2a2030', 0.75], env: 0.3, exposure: 1.1, night: 1, fill: 1.6 },
+  tower: { sky: ['#070b1f', '#1b1f4a', '#5a3d7a'], fog: '#1e1a3c', sun: { color: '#9fb4ff', intensity: 0.75, dir: [-0.4, 0.75, -0.35] }, hemi: ['#6a78b8', '#2a2030', 0.6], env: 0.26, exposure: 1.05, night: 1, fill: 1.25 },
 };
 
 /** A big gradient dome with a sun or moon, and stars at night. */
@@ -81,11 +83,31 @@ export function groundTex(kind: string): THREE.Texture {
   const r = rand(kind.length * 31);
   const paint: Record<string, (g: CanvasRenderingContext2D) => void> = {
     grass: (g) => {
-      g.fillStyle = '#5f9e45';
-      g.fillRect(0, 0, 256, 256);
-      for (let i = 0; i < 2600; i++) {
-        g.fillStyle = r() < 0.5 ? `rgba(40,90,30,${r() * 0.35})` : `rgba(160,210,110,${r() * 0.25})`;
-        g.fillRect(r() * 256, r() * 256, 1.5, 3 + r() * 3);
+      g.fillStyle = '#5b9a42';
+      g.fillRect(0, 0, 512, 512);
+      // Broad patches of lighter and darker lawn, wrapped so the tile repeats cleanly.
+      for (let i = 0; i < 46; i++) {
+        const x = r() * 512;
+        const y = r() * 512;
+        const rad = 30 + r() * 90;
+        const c = r() < 0.5 ? '38,88,30' : '150,196,92';
+        for (const [ox, oy] of [[0, 0], [-512, 0], [512, 0], [0, -512], [0, 512]]) {
+          const gr = g.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, rad);
+          gr.addColorStop(0, `rgba(${c},${0.12 + r() * 0.12})`);
+          gr.addColorStop(1, `rgba(${c},0)`);
+          g.fillStyle = gr;
+          g.fillRect(x + ox - rad, y + oy - rad, rad * 2, rad * 2);
+        }
+      }
+      // Blades.
+      for (let i = 0; i < 9000; i++) {
+        const k = r();
+        g.fillStyle = k < 0.45 ? `rgba(34,78,26,${0.15 + r() * 0.3})` : k < 0.9 ? `rgba(150,205,100,${0.1 + r() * 0.22})` : `rgba(210,220,140,${r() * 0.25})`;
+        g.save();
+        g.translate(r() * 512, r() * 512);
+        g.rotate((r() - 0.5) * 0.8);
+        g.fillRect(0, 0, 1.4, 3 + r() * 5);
+        g.restore();
       }
     },
     deck: (g) => {
@@ -165,8 +187,8 @@ export function groundTex(kind: string): THREE.Texture {
     },
   };
   // Size in metres one texture tile covers.
-  const metres: Record<string, number> = { grass: 3, deck: 2.4, paving: 1.6, pavement: 1.6, road: 4, sand: 3, tile: 1.2, stone: 1.2 };
-  t = canvasTex(256, 256, paint[kind] ?? paint.paving);
+  const metres: Record<string, number> = { grass: 5, deck: 2.4, paving: 1.6, pavement: 1.6, road: 4, sand: 3, tile: 1.2, stone: 1.2 };
+  t = kind === 'grass' ? canvasTex(512, 512, paint.grass) : canvasTex(256, 256, paint[kind] ?? paint.paving);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.userData.shared = true;
   t.userData.metres = metres[kind] ?? 2;
@@ -259,13 +281,9 @@ function skyline(g: THREE.Group, seed: number, r0: number, r1: number, hMin: num
   }
 }
 
-function parkedCar(color: string) {
-  const g = new THREE.Group();
-  const paint = mat(color, { rough: 0.25, metal: 0.3, clear: true });
-  g.add(at(box(1.7, 0.6, 4.0, paint, 0.22), 0, 0.55, 0));
-  g.add(at(box(1.5, 0.5, 2.0, mat('#1b2630', { rough: 0.05, metal: 0.4 }), 0.18), 0, 1.05, -0.2));
-  for (const x of [-0.78, 0.78]) for (const z of [-1.3, 1.3]) g.add(at(cyl(0.32, 0.32, 0.22, mat('#141516', { rough: 0.9 }), 16), x, 0.32, z).rotateZ(Math.PI / 2));
-  return g;
+const PARKED = ['car-hatch', 'car-suv', 'car-coupe', 'car-classic'];
+function parkedCar(color: string, i: number) {
+  return car(CAR_BY_ID[PARKED[i % PARKED.length]], color);
 }
 
 export interface OutdoorOpts {
@@ -303,7 +321,7 @@ export function buildOutdoor(o: OutdoorOpts): { group: THREE.Group; water: THREE
     // Parked cars across the street, trees along the far pavement.
     const cols = ['#e8ecef', '#2f6bff', '#8a8f96', '#16181b', '#ff3d5a'];
     for (let i = 0; i < 4; i++) {
-      const c = parkedCar(cols[i % cols.length]);
+      const c = parkedCar(cols[i % cols.length], i);
       c.position.set(-13 + i * 8.5 + r() * 2, -0.1, front + 6.4);
       c.rotation.y = Math.PI / 2;
       g.add(c);

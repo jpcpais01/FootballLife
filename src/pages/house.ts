@@ -13,6 +13,8 @@ import { achievementToasts, confirmModal, errorBox, relTime, skeleton, toast } f
 import type { HomeScene } from '../viewer/home3d.ts';
 
 type Tab = 'furnish' | 'move' | 'garage' | 'collection';
+/** Something shown in the 3D home before you buy it. */
+type Preview = { kind: 'furn'; id: string } | { kind: 'house'; id: string } | { kind: 'car'; id: string; color: string };
 
 interface HouseData {
   mine: boolean;
@@ -46,12 +48,16 @@ export async function housePage(el: HTMLElement, params: string[]) {
   let scene: HomeScene | null = null;
   let disposed = false;
   let busy = false;
+  let preview: Preview | null = null;
 
   const kit = d.club?.colors ?? { primary: '#1d2329', secondary: '#c6ff3d' };
   const tier = () => HOUSE_BY_ID[d.home.tier];
+  const shownTier = () => HOUSE_BY_ID[preview?.kind === 'house' ? preview.id : d.home.tier];
   const showGarage = () => tab === 'garage';
 
   const coinsPill = (): Raw => (d.mine ? html`<span class="coin-pill">${icon('coin', 18)} <b id="coins">${(d.coins ?? 0).toLocaleString()}</b></span>` : html``);
+
+  const buyBtn = (price: number, size = '') => html`<button class="btn primary ${size}" data-buy ${price > (d.coins ?? 0) ? 'disabled' : ''}>${price === 0 ? 'Take it' : html`${icon('coin', 14)} Buy · ${price.toLocaleString()}`}</button>`;
 
   const swatch = (c1: string, c2?: string) => html`<span class="life-sw" style="--c1:${c1};--c2:${c2 ?? c1}"></span>`;
 
@@ -72,10 +78,14 @@ export async function housePage(el: HTMLElement, params: string[]) {
       ${items.map((f) => {
         const has = owned.has(f.id);
         const placed = cur === f.id;
-        return html`<button class="life-card ${placed ? 'sel' : ''}" data-furn="${f.id}">
+        const peek = preview?.kind === 'furn' && preview.id === f.id;
+        return html`<div class="life-card ${placed ? 'sel' : ''} ${peek ? 'peek' : ''}" data-furn="${f.id}" role="button" tabindex="0">
           <div class="row" style="gap:10px">${swatch(f.c1, f.c2)}<div class="grow" style="min-width:0"><div class="nm ellipsis">${f.name}</div><div class="tiny muted">${FURNITURE_LABELS[f.slot]}</div></div></div>
-          <div class="row between" style="margin-top:10px">${placed ? html`<span class="chip lime">${icon('check', 12)} In your home</span>` : has ? html`<span class="chip">Owned · place it</span>` : f.price === 0 ? html`<span class="chip">Free</span>` : html`<span class="price ${f.price > (d.coins ?? 0) ? 'short' : ''}">${icon('coin', 14)} ${f.price.toLocaleString()}</span>`}</div>
-        </button>`;
+          <div class="row between" style="margin-top:10px">${placed ? html`<span class="chip lime">${icon('check', 12)} In your home</span>`
+            : has ? html`<span class="chip">Owned · place it</span>`
+            : peek ? buyBtn(f.price, 'sm')
+            : html`<span class="row" style="gap:8px">${f.price === 0 ? html`<span class="chip">Free</span>` : html`<span class="price ${f.price > (d.coins ?? 0) ? 'short' : ''}">${icon('coin', 14)} ${f.price.toLocaleString()}</span>`}<span class="tiny dim peek-hint">${icon('eye', 12)} Try it</span></span>`}</div>
+        </div>`;
       })}
       ${cur ? html`<button class="life-card ghost" data-clear="${s}"><div class="nm">Remove ${FURNITURE_LABELS[s].toLowerCase()}</div><div class="tiny muted">Keep it in storage</div></button>` : ''}
     </div>`;
@@ -91,9 +101,11 @@ export async function housePage(el: HTMLElement, params: string[]) {
         <div class="small muted" style="margin-top:2px">${h.desc}</div>
         <div class="row wrap tiny dim" style="gap:12px;margin-top:6px"><span>${h.size[0]} × ${h.size[1]} m</span><span>${icon('car', 12)} ${h.garage} car${h.garage === 1 ? '' : 's'}</span><span>${h.view === 'sea' ? 'Sea view' : h.view === 'park' ? 'Park view' : h.view === 'skyline' ? 'Skyline view' : 'City view'}</span></div>
       </div>
-      ${here ? '' : has ? html`<button class="btn" data-house="${h.id}">Move in</button>` : html`<button class="btn primary" data-house="${h.id}" ${h.price > (d.coins ?? 0) ? 'disabled' : ''}>${icon('coin', 16)} ${h.price.toLocaleString()}</button>`}
+      ${here ? '' : html`<div class="house-acts"><button class="btn ${preview?.kind === 'house' && preview.id === h.id ? 'on' : ''}" data-peek-house="${h.id}">${icon('eye', 15)} Look inside</button>${has ? html`<button class="btn" data-house="${h.id}">Move in</button>` : html`<button class="btn primary" data-house="${h.id}" ${h.price > (d.coins ?? 0) ? 'disabled' : ''}>${icon('coin', 16)} ${h.price.toLocaleString()}</button>`}</div>`}
     </div>`;
   })}</div>`;
+
+  const carPaint = (id: string) => paint[id] ?? CAR_COLORS[(CAR_BY_ID[id].price / 100) % CAR_COLORS.length | 0];
 
   const garageTab = (): Raw => {
     const cap = tier().garage;
@@ -114,14 +126,15 @@ export async function housePage(el: HTMLElement, params: string[]) {
       ${d.mine ? html`<div class="h2" style="margin:22px 0 10px">Dealership</div>
         ${d.cars.length >= cap ? html`<div class="small muted" style="margin-bottom:10px">Your garage is full. A bigger home has more space.</div>` : ''}
         <div class="life-grid">${CARS.map((m) => {
-          const pick = paint[m.id] ?? CAR_COLORS[(m.price / 100) % CAR_COLORS.length | 0];
+          const pick = carPaint(m.id);
           const has = ownedIds.has(m.id);
-          return html`<div class="life-card static">
+          const peek = preview?.kind === 'car' && preview.id === m.id;
+          return html`<div class="life-card static ${peek ? 'peek' : ''}">
             <div class="row between"><div class="nm">${m.name}</div><span class="tiny muted">${m.kmh} km/h</span></div>
             <div class="tiny muted" style="margin:4px 0 10px">${m.desc}</div>
             ${has ? html`<span class="chip lime">${icon('check', 12)} In your garage</span>` : html`
               <div class="row wrap" style="gap:6px;margin-bottom:10px">${CAR_COLORS.map((col) => html`<button class="color-dot sm ${pick === col ? 'on' : ''}" style="--c:${col}" data-paint="${m.id}" data-color="${col}" aria-label="Paint"></button>`)}</div>
-              <button class="btn primary sm" data-car="${m.id}" ${m.price > (d.coins ?? 0) || d.cars.length >= cap ? 'disabled' : ''}>${icon('coin', 14)} ${m.price.toLocaleString()}</button>`}
+              <div class="row" style="gap:8px"><button class="btn sm ${peek ? 'on' : ''}" data-peek-car="${m.id}">${icon('eye', 14)} ${peek ? 'In your garage' : 'Try it'}</button><button class="btn primary sm" data-car="${m.id}" ${m.price > (d.coins ?? 0) || d.cars.length >= cap ? 'disabled' : ''}>${icon('coin', 14)} ${m.price.toLocaleString()}</button></div>`}
           </div>`;
         })}</div>` : ''}`;
   };
@@ -151,9 +164,9 @@ export async function housePage(el: HTMLElement, params: string[]) {
   const panel = (): Raw => (tab === 'furnish' ? furnishTab() : tab === 'move' ? moveTab() : tab === 'garage' ? garageTab() : collectionTab());
 
   const VIEW_NAME: Record<string, string> = { city: 'City view', park: 'Park view', sea: 'Sea view', skyline: 'Skyline view' };
-  const stageTitle = (): Raw => html`<div class="stage-title"><div class="eyebrow">${d.mine ? 'My home' : `${d.player.name}'s place`}</div>
-    <div class="st-name">${showGarage() ? 'Garage' : tier().name}</div>
-    <div class="st-meta">${showGarage() ? `${d.cars.length} of ${tier().garage} spaces` : `${tier().size[0]} × ${tier().size[1]} m · ${VIEW_NAME[tier().view] ?? ''}`}</div></div>`;
+  const stageTitle = (): Raw => html`<div class="stage-title"><div class="eyebrow">${preview?.kind === 'house' ? 'Looking around' : d.mine ? 'My home' : `${d.player.name}'s place`}</div>
+    <div class="st-name">${showGarage() ? 'Garage' : shownTier().name}</div>
+    <div class="st-meta">${showGarage() ? `${d.cars.length} of ${tier().garage} spaces` : `${shownTier().size[0]} × ${shownTier().size[1]} m · ${VIEW_NAME[shownTier().view] ?? ''}`}</div></div>`;
 
   // The layout is drawn once; only the side panel and stage labels change, so
   // the 3D canvas never has to move.
@@ -166,6 +179,7 @@ export async function housePage(el: HTMLElement, params: string[]) {
         <div id="stage-title">${stageTitle()}</div>
         <div class="stage-switch"><button data-stage="room" class="${showGarage() ? '' : 'on'}">${icon('sofa', 14)} Home</button><button data-stage="garage" class="${showGarage() ? 'on' : ''}">${icon('car', 14)} Garage</button></div>
         <div class="stage-hint">${icon('arrow', 13)} Tap to walk · drag to look around</div>
+        <div id="pv"></div>
         ${d.mine ? html`<span class="coin-pill sm house-coins">${icon('coin', 15)} <b class="coins-n">${(d.coins ?? 0).toLocaleString()}</b></span>` : ''}
       </div>
       <div class="house-main">
@@ -175,13 +189,42 @@ export async function housePage(el: HTMLElement, params: string[]) {
     </div></div>`);
 
   const owner = { appearance: d.player.appearance, equipped: d.player.equipped, kit, keeper: d.player.position === 'GK' };
-  const roomData = () => ({ home: d.home, trophies: d.trophies, collectibles: d.collectibles, owner, cars: d.cars });
-  const garageData = () => ({ cars: d.cars, capacity: tier().garage, fav: d.home.favCar, view: tier().view, owner });
+  // A preview swaps the piece, the house or the car into the 3D scene without buying it.
+  const roomData = () => {
+    let home = d.home;
+    let focus: string | undefined;
+    if (preview?.kind === 'furn') {
+      const f = FURNITURE_BY_ID[preview.id];
+      home = { ...home, furniture: { ...home.furniture, [f.slot]: f.id } };
+      focus = f.slot;
+    } else if (preview?.kind === 'house') home = { ...home, tier: preview.id };
+    return { home, trophies: d.trophies, collectibles: d.collectibles, owner, cars: d.cars, focus };
+  };
+  const garageData = () => {
+    const p = preview?.kind === 'car' ? preview : null;
+    const cars = p ? [...d.cars.filter((c) => c.id !== p.id), { id: p.id, color: p.color }] : d.cars;
+    return { cars, capacity: Math.max(tier().garage, cars.length), fav: d.home.favCar, view: tier().view, owner, focus: p?.id };
+  };
+
+  const previewBar = (): Raw => {
+    if (!preview) return html``;
+    if (preview.kind === 'furn') {
+      const f = FURNITURE_BY_ID[preview.id];
+      return html`<div class="preview-bar"><span class="pv-tag">${icon('eye', 13)} Preview</span><span class="pv-name">${f.name}</span>${buyBtn(f.price, 'sm')}<button class="pv-x" data-unpeek aria-label="Close preview">${icon('x', 15)}</button></div>`;
+    }
+    if (preview.kind === 'house') {
+      const h = HOUSE_BY_ID[preview.id];
+      const has = d.houses.includes(h.id);
+      return html`<div class="preview-bar"><span class="pv-tag">${icon('eye', 13)} Preview</span><span class="pv-name">${h.name}</span><button class="btn primary sm" data-house="${h.id}" ${!has && h.price > (d.coins ?? 0) ? 'disabled' : ''}>${has ? 'Move in' : html`${icon('coin', 14)} ${h.price.toLocaleString()}`}</button><button class="pv-x" data-unpeek aria-label="Close preview">${icon('x', 15)}</button></div>`;
+    }
+    const m = CAR_BY_ID[preview.id];
+    return html`<div class="preview-bar"><span class="pv-tag">${icon('eye', 13)} Preview</span><span class="pv-name">${m.name}</span><button class="btn primary sm" data-car="${m.id}" ${m.price > (d.coins ?? 0) || d.cars.length >= tier().garage ? 'disabled' : ''}>${icon('coin', 14)} ${m.price.toLocaleString()}</button><button class="pv-x" data-unpeek aria-label="Close preview">${icon('x', 15)}</button></div>`;
+  };
 
   let lastStage = '';
   const drawStage = (force = false) => {
     const which = showGarage() ? 'garage' : 'room';
-    const key = which + JSON.stringify(which === 'garage' ? garageData() : [d.home, d.trophies.length, d.collectibles.length]);
+    const key = which + JSON.stringify(which === 'garage' ? garageData() : [roomData().home, roomData().focus, d.trophies.length, d.collectibles.length]);
     if (!scene || (!force && key === lastStage)) return;
     lastStage = key;
     if (which === 'garage') scene.garage(garageData());
@@ -192,6 +235,8 @@ export async function housePage(el: HTMLElement, params: string[]) {
     el.querySelector('#htabs')!.innerHTML = tabs.map((t) => html`<button class="${t === tab ? 'on' : ''}" data-tab="${t}">${TAB_LABEL[t]}</button>`.html).join('');
     el.querySelector('#hpanel')!.innerHTML = panel().html;
     el.querySelector('#stage-title')!.innerHTML = stageTitle().html;
+    el.querySelector('#pv')!.innerHTML = previewBar().html;
+    el.querySelector('.house-stage')!.classList.toggle('previewing', !!preview);
     el.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) => b.classList.toggle('on', (b.dataset.stage === 'garage') === showGarage()));
     const c = el.querySelector('#coins');
     if (c) c.textContent = (d.coins ?? 0).toLocaleString();
@@ -233,32 +278,55 @@ export async function housePage(el: HTMLElement, params: string[]) {
   el.addEventListener('click', async (e) => {
     const t = e.target as HTMLElement;
     const tb = t.closest('[data-tab]') as HTMLElement | null;
-    if (tb) { tab = tb.dataset.tab as Tab; return refresh(); }
+    if (tb) { tab = tb.dataset.tab as Tab; preview = null; return refresh(); }
     const st = t.closest('[data-stage]') as HTMLElement | null;
     if (st) {
       const g = st.dataset.stage === 'garage';
-      if (g !== showGarage()) tab = g ? 'garage' : d.mine ? 'furnish' : 'collection';
+      if (g !== showGarage()) {
+        tab = g ? 'garage' : d.mine ? 'furnish' : 'collection';
+        preview = null;
+      }
       return refresh();
     }
     if (!d.mine) return;
     const sl = t.closest('[data-slot]') as HTMLElement | null;
-    if (sl) { slot = sl.dataset.slot as FurnitureSlot | 'style'; return refresh(); }
+    if (sl) { slot = sl.dataset.slot as FurnitureSlot | 'style'; preview = null; return refresh(); }
+    if (t.closest('[data-unpeek]')) { preview = null; return refresh(); }
+    const buy = t.closest('[data-buy]');
+    if (buy && preview?.kind === 'furn') {
+      const f = FURNITURE_BY_ID[preview.id];
+      return act(async () => {
+        const r = await api.post('/api/house/furniture', { itemId: f.id });
+        d.home = r.home;
+        d.furniture.push(f.id);
+        d.coins = r.coins;
+        preview = null;
+        toast(`${f.name} delivered!`, 'ok');
+        await syncCoins();
+      });
+    }
     const fu = t.closest('[data-furn]') as HTMLElement | null;
     if (fu) {
       const f = FURNITURE_BY_ID[fu.dataset.furn!];
-      if (d.home.furniture[f.slot] === f.id) return;
-      const has = d.furniture.includes(f.id);
-      if (!has && !(await confirmModal(`Buy ${f.name}?`, `${f.price.toLocaleString()} coins. It goes straight into your home.`, 'Buy'))) return;
+      if (d.home.furniture[f.slot] === f.id) { preview = null; return refresh(); }
+      // Not yours yet: try it in the room first, buy from there.
+      if (!d.furniture.includes(f.id)) { preview = { kind: 'furn', id: f.id }; return refresh(); }
       return act(async () => {
-        const r = has ? await api.post('/api/house/arrange', { itemId: f.id }) : await api.post('/api/house/furniture', { itemId: f.id });
-        d.home = r.home;
-        if (!has) {
-          d.furniture.push(f.id);
-          d.coins = r.coins;
-          toast(`${f.name} delivered!`, 'ok');
-          await syncCoins();
-        }
+        preview = null;
+        d.home = (await api.post('/api/house/arrange', { itemId: f.id })).home;
       });
+    }
+    const ph = t.closest('[data-peek-house]') as HTMLElement | null;
+    if (ph) {
+      const id = ph.dataset.peekHouse!;
+      preview = preview?.kind === 'house' && preview.id === id ? null : { kind: 'house', id };
+      return refresh();
+    }
+    const pc = t.closest('[data-peek-car]') as HTMLElement | null;
+    if (pc) {
+      const id = pc.dataset.peekCar!;
+      preview = preview?.kind === 'car' && preview.id === id ? null : { kind: 'car', id, color: carPaint(id) };
+      return refresh();
     }
     const cl = t.closest('[data-clear]') as HTMLElement | null;
     if (cl) return act(async () => { d.home = (await api.post('/api/house/arrange', { clear: cl.dataset.clear })).home; });
@@ -282,19 +350,27 @@ export async function housePage(el: HTMLElement, params: string[]) {
           await syncCoins();
         }
         tab = 'furnish';
+        preview = null;
       });
     }
     const pt = t.closest('[data-paint]') as HTMLElement | null;
-    if (pt) { paint[pt.dataset.paint!] = pt.dataset.color!; return refresh(); }
+    if (pt) {
+      const id = pt.dataset.paint!;
+      paint[id] = pt.dataset.color!;
+      // Picking a colour shows the car in your garage in that paint.
+      preview = { kind: 'car', id, color: paint[id] };
+      return refresh();
+    }
     const cb = t.closest('[data-car]') as HTMLElement | null;
     if (cb) {
       const m = CAR_BY_ID[cb.dataset.car!];
-      const color = paint[m.id] ?? CAR_COLORS[(m.price / 100) % CAR_COLORS.length | 0];
+      const color = carPaint(m.id);
       if (!(await confirmModal(`Buy the ${m.name}?`, `${m.price.toLocaleString()} coins. Purely for style: it lives in your garage for everyone to see.`, 'Buy'))) return;
       return act(async () => {
         const r = await api.post('/api/garage/buy', { carId: m.id, color });
         d.coins = r.coins;
         d.cars.push({ id: m.id, color, at: new Date().toISOString() });
+        preview = null;
         if (!d.home.favCar) d.home.favCar = m.id;
         toast(`The ${m.name} is in your garage!`, 'ok');
         achievementToasts(r.achievements);
@@ -305,7 +381,13 @@ export async function housePage(el: HTMLElement, params: string[]) {
     if (rs) {
       const car = d.cars.find((c) => c.id === rs.dataset.respray)!;
       if (car.color === rs.dataset.color) return;
-      if (!(await confirmModal('Respray?', `A new coat of paint costs ${RESPRAY_COST} coins.`, 'Respray'))) return;
+      // Show the new paint on the car while you decide.
+      const was = car.color;
+      car.color = rs.dataset.color!;
+      drawStage();
+      const ok = await confirmModal('Respray?', `A new coat of paint costs ${RESPRAY_COST} coins.`, 'Respray');
+      car.color = was;
+      if (!ok) return drawStage();
       return act(async () => {
         const r = await api.post('/api/garage/respray', { carId: car.id, color: rs.dataset.color });
         car.color = rs.dataset.color!;

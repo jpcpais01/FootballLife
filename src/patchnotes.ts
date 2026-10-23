@@ -7,6 +7,13 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T14:30:00Z',
+    entries: [
+      { title: 'Try before you buy', body: 'Tap any sofa, TV, rug or other piece you do not own yet and it appears in your home straight away, with the camera moving in and your player walking over to have a look. Buy it from the bar under the picture, or close the preview. You can also look inside any house before buying it, and see any car in your garage, in the paint you pick, before you pay. Respraying a car shows the new colour while you decide.' },
+      { title: 'A better looking home', body: 'Rooms now have soft shadows in the corners and under every piece of furniture, the lighting is no longer washed out, the lawn has real texture, and lamps and windows glow in the penthouse at night. All cars have been remodelled with rounded bodywork, flared wheel arches, proper glass, brake discs and lights, in your garage and on the street. On slower phones the home lowers its quality by itself to stay smooth.' },
+    ],
+  },
+  {
     hour: '2026-10-23T14:00:00Z',
     entries: [
       { title: 'Club facilities', body: 'Clubs now have a treasury and five facilities to build: Stadium (a bigger home edge in the league), Head coach (team chemistry), Match balls & kit (more training XP for every member), Academy (better AI teammates) and Sponsors lounge (more coins from matches). Each has five levels, and works take a few hours to finish. Every bonus is small, so a well-run club gets an edge without matches being decided off the pitch.' },

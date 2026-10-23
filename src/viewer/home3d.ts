@@ -5,6 +5,11 @@
 // The walls nearest the camera drop down so you can always see inside.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Appearance } from '../../shared/appearance.ts';
 import type { Equipped } from '../../shared/cosmetics.ts';
@@ -24,6 +29,8 @@ export interface RoomData {
   owner?: { appearance: Appearance; equipped: Equipped; kit: Kit; keeper: boolean };
   /** Your cars, so the favourite can be parked outside in its own paint. */
   cars?: { id: string; color: string }[];
+  /** A furniture slot to frame and highlight, for a preview before buying. */
+  focus?: string;
 }
 
 export interface GarageData {
@@ -33,6 +40,8 @@ export interface GarageData {
   /** The home's view, so the garage sits in the same neighbourhood and light. */
   view?: string;
   owner?: RoomData['owner'];
+  /** A car to frame and highlight, for a preview before buying. */
+  focus?: string;
 }
 
 export interface HomeScene {
@@ -240,7 +249,7 @@ function buildWall(def: WallDef, h: number, center: THREE.Vector2, paint: THREE.
   const nz = new THREE.Vector2(Math.sin(theta), Math.cos(theta));
   const mid = new THREE.Vector2((ax + bx) / 2, (az + bz) / 2);
   const outIsPlus = nz.dot(mid.clone().sub(center)) > 0;
-  const cap = mat('#1b1e23', { rough: 0.7 });
+  const cap = mat('#2c3036', { rough: 0.7 });
   const outer = def.ext ? facadeMat(facade) : paint;
   const mats = [cap, cap, cap, cap, outIsPlus ? outer : paint, outIsPlus ? paint : outer];
   const skirt = mat('#f2efe9', { rough: 0.45 });
@@ -366,6 +375,10 @@ interface Layout {
   holes: Rect[];
   /** Extra decoration added straight to the world. */
   extra?: (world: THREE.Group) => void;
+  /** Same key as the last scene: keep the camera and the player where they are. */
+  key: string;
+  /** A spot to frame and highlight (a preview). */
+  focus?: { x: number; z: number; y: number; r: number; face: number; reach: number };
 }
 
 const VIEW_OUTDOOR: Record<string, Outdoor> = { city: 'street', park: 'park', sea: 'beach', skyline: 'tower' };
@@ -423,7 +436,13 @@ function roomLayout(d: RoomData): Layout {
     spawn: plan.spawn,
     cam: plan.cam,
     holes,
+    key: `room:${tierId}`,
+    focus: focusOn(d.focus ? (plan.slots as Record<string, Place>)[d.focus] : undefined, d.focus === 'rug' ? 1.6 : d.focus === 'art' ? 0.8 : 1, d.focus === 'rug' ? 0.4 : d.focus === 'art' ? 1.1 : 1.3),
   };
+}
+
+function focusOn(p: Place | undefined, r: number, reach: number) {
+  return p ? { x: p.x, z: p.z, y: Math.min(p.y ?? 0.5, 1.4), r, face: p.r, reach } : undefined;
 }
 
 function garageLayout(d: GarageData, carColor: (id: string) => string): Layout {
@@ -449,12 +468,14 @@ function garageLayout(d: GarageData, carColor: (id: string) => string): Layout {
   ];
   const placed: Placed[] = [];
   let spawn: Place = { x: x0 + tool / 2, z: 1.2, r: PI * 0.8 };
+  let focus: Layout['focus'];
   for (let i = 0; i < bays; i++) {
     const c = d.cars[i];
     const model = c && CAR_BY_ID[c.id];
     if (!model) continue;
     const sz = carSize(model);
     placed.push({ prop: { obj: car(model, carColor(c.id)), foot: sz, use: { x: -sz[0] / 2 - 0.55, z: 0.5, face: PI / 2 } }, x: bayX(i), z: -0.2, r: 0 });
+    if (c.id === d.focus) focus = { x: bayX(i), z: -0.2, y: 0.6, r: 2.4, face: 0, reach: sz[1] / 2 + 0.7 };
     if (c.id === d.fav) spawn = { x: bayX(i) - sz[0] / 2 - 0.6, z: 0.9, r: PI / 2 + 0.3 };
   }
   // Tool corner: workbench with a pegboard, a tool chest and a stack of tyres.
@@ -530,6 +551,8 @@ function garageLayout(d: GarageData, carColor: (id: string) => string): Layout {
     spawn,
     holes: [],
     extra,
+    key: `garage:${bays}:${d.view ?? 'city'}`,
+    focus,
   };
 }
 
@@ -636,9 +659,23 @@ function bakeWall(w: WallObj) {
   w.upper = [...bake(upperM, w.group), ...keep];
 }
 
-export function createHomeScene(host: HTMLElement): HomeScene {
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+export interface HomeSceneOptions {
+  /** Keep the top quality even if frames come slowly (screenshots, fast desktops). */
+  fixedQuality?: boolean;
+}
+
+/** Quality steps, best first: the scene steps down while frames are slow. */
+const QUALITY = [
+  { dpr: 2, ao: true, shadow: 2048 },
+  { dpr: 1.5, ao: true, shadow: 2048 },
+  { dpr: 1.5, ao: false, shadow: 2048 },
+  { dpr: 1, ao: false, shadow: 1024 },
+];
+
+export function createHomeScene(host: HTMLElement, opts: HomeSceneOptions = {}): HomeScene {
+  const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+  let q = 0;
+  renderer.setPixelRatio(Math.min(QUALITY[q].dpr, window.devicePixelRatio));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -651,6 +688,25 @@ export function createHomeScene(host: HTMLElement): HomeScene {
   scene.environment = env;
 
   const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 500);
+
+  // Post: ambient occlusion grounds every piece of furniture and darkens the
+  // corners; a little bloom makes lamps and windows glow after dark.
+  const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
+  composer.addPass(new RenderPass(scene, camera));
+  const gtao = new GTAOPass(scene, camera, 1, 1);
+  gtao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.5, thickness: 0.9, scale: 1.35, samples: 12 });
+  gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 10 });
+  gtao.blendIntensity = 1;
+  composer.addPass(gtao);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.3, 0.5, 0.9);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+  const applyQuality = () => {
+    const Q = QUALITY[q];
+    renderer.setPixelRatio(Math.min(Q.dpr, window.devicePixelRatio));
+    gtao.enabled = Q.ao;
+    resize();
+  };
   let world = new THREE.Group();
   scene.add(world);
   let dome: THREE.Mesh | null = null;
@@ -663,6 +719,13 @@ export function createHomeScene(host: HTMLElement): HomeScene {
   const center = new THREE.Vector2();
   let fit = 12;
   let houseH = 2.8;
+  let lastKey = '';
+  let focusPt: Layout['focus'] | null = null;
+  // A pulsing ring under whatever is being previewed.
+  const focusRing = new THREE.Mesh(new THREE.RingGeometry(0.92, 1, 64), new THREE.MeshBasicMaterial({ color: '#c6ff3d', transparent: true, opacity: 0, depthWrite: false, toneMapped: false }));
+  focusRing.rotation.x = -PI / 2;
+  focusRing.renderOrder = 5;
+  scene.add(focusRing);
 
   // Camera orbit: drag to swing round, pinch or scroll to zoom, tap to walk.
   let yaw = 0.62;
@@ -812,6 +875,8 @@ export function createHomeScene(host: HTMLElement): HomeScene {
     const w = host.clientWidth || 320;
     const h = host.clientHeight || 300;
     renderer.setSize(w, h, false);
+    composer.setPixelRatio(renderer.getPixelRatio());
+    composer.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   };
@@ -855,10 +920,20 @@ export function createHomeScene(host: HTMLElement): HomeScene {
   };
 
   function mount(L: Layout, owner?: RoomData['owner']) {
+    // Rebuilding the same place (a preview, a new sofa): the camera and the player stay put.
+    const same = L.key === lastKey;
+    lastKey = L.key;
+    const was = same && figure ? { x: figure.root.position.x, z: figure.root.position.z, r: figure.root.rotation.y } : null;
     clear();
     houseH = L.h;
     const m = L.mood;
     renderer.toneMappingExposure = m.exposure;
+    // Only after dark, and only the brightest things (lamps, windows): bloom
+    // runs before tone mapping, so a sunlit white wall would glow too.
+    bloom.enabled = m.night > 0.8;
+    bloom.strength = 0.22;
+    bloom.threshold = 2.6;
+    settle = 2;
     scene.environmentIntensity = m.env;
     scene.fog = new THREE.Fog(m.fog, 70, 260);
     dome = skyDome(m);
@@ -877,7 +952,7 @@ export function createHomeScene(host: HTMLElement): HomeScene {
     sun.position.copy(sd.multiplyScalar(40));
     sun.target.position.set(0, 0, 0);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.setScalar(QUALITY[q].shadow);
     sun.shadow.camera.left = sun.shadow.camera.bottom = -span;
     sun.shadow.camera.right = sun.shadow.camera.top = span;
     sun.shadow.camera.near = 1;
@@ -1033,14 +1108,42 @@ export function createHomeScene(host: HTMLElement): HomeScene {
       });
       world.add(figure.root);
     }
-    const sp = nav.nearest(L.spawn.x, L.spawn.z) ?? [0, 0];
+    const sp = (was && nav.nearest(was.x, was.z)) || nav.nearest(L.spawn.x, L.spawn.z) || [0, 0];
     const [sx, sz] = nav.center(...sp);
     if (figure) {
+      const r = was?.r ?? L.spawn.r;
       figure.root.position.set(sx, 0, sz);
-      figure.root.rotation.y = L.spawn.r;
-      figure.teleport(L.spawn.r);
+      figure.root.rotation.y = r;
+      figure.teleport(r);
     }
     nextWander = clockT + 6;
+
+    const hadFocus = !!focusPt;
+    focusPt = L.focus ?? null;
+    if (focusPt) {
+      focusRing.position.set(focusPt.x, 0.02, focusPt.z);
+      focusRing.scale.setScalar(focusPt.r);
+      // He goes over to have a look.
+      const f = focusPt;
+      const near = nav.nearest(f.x + Math.sin(f.face) * f.reach, f.z + Math.cos(f.face) * f.reach, 2.5);
+      if (near && figure) {
+        const [nx, nz] = nav.center(...near);
+        walkTo(nx, nz, Math.atan2(f.x - nx, f.z - nz), true);
+        lastUser = clockT;
+      }
+    }
+    (focusRing.material as THREE.MeshBasicMaterial).opacity = 0;
+    if (same) {
+      if (focusPt) {
+        distT = Math.min(distT, fit * 0.55);
+        elevT = Math.max(elevT, 0.62);
+      } else if (hadFocus) distT = Math.max(distT, fit * 0.86);
+      for (const w of walls) {
+        w.s = cutFor(w) ? CUT_H / houseH : 1;
+        applyCut(w);
+      }
+      return;
+    }
 
     // Frame the house: fit its footprint whatever the screen shape.
     const radius = 0.5 * Math.hypot(L.w, L.d) + 1.2;
@@ -1055,6 +1158,7 @@ export function createHomeScene(host: HTMLElement): HomeScene {
       w.s = cutFor(w) ? CUT_H / houseH : 1;
       applyCut(w);
     }
+    if (focusPt) dist = distT = fit * 0.55;
   }
 
   const camDir = new THREE.Vector2();
@@ -1108,11 +1212,12 @@ export function createHomeScene(host: HTMLElement): HomeScene {
     // The camera looks between the middle of the house and you, more at you when zoomed in.
     const zoomK = clamp((fit * 1.3 - dist) / (fit * 1.0), 0, 1);
     const follow = 0.3 + 0.6 * zoomK;
-    const tx = center.x + ((me?.x ?? center.x) - center.x) * follow;
-    const tz = center.y + ((me?.z ?? center.y) - center.y) * follow;
+    const tx = focusPt ? focusPt.x : center.x + ((me?.x ?? center.x) - center.x) * follow;
+    const tz = focusPt ? focusPt.z : center.y + ((me?.z ?? center.y) - center.y) * follow;
     target.x += (tx - target.x) * Math.min(1, dt * 3);
     target.z += (tz - target.z) * Math.min(1, dt * 3);
-    target.y = 0.6 + 0.4 * zoomK;
+    target.y += ((focusPt ? focusPt.y : 0.6 + 0.4 * zoomK) - target.y) * Math.min(1, dt * 3);
+    if (focusPt) (focusRing.material as THREE.MeshBasicMaterial).opacity = 0.5 + Math.sin(clockT * 3) * 0.3;
     camera.position.set(target.x + Math.sin(yaw) * Math.cos(elev) * dist, target.y + Math.sin(elev) * dist, target.z + Math.cos(yaw) * Math.cos(elev) * dist);
     camera.lookAt(target);
     if (dome) dome.position.set(camera.position.x, 0, camera.position.z);
@@ -1134,7 +1239,26 @@ export function createHomeScene(host: HTMLElement): HomeScene {
       if (w.userData.foam) (mm as THREE.MeshBasicMaterial).opacity = 0.35 + Math.sin(clockT * 0.8) * 0.15;
       else if (mm.map) mm.map.offset.set(Math.sin(clockT * 0.25) * 0.03, clockT * 0.012);
     }
-    renderer.render(scene, camera);
+    composer.render(dt);
+    govern(dt);
+  };
+
+  // Slow frames for a couple of seconds: step quality down, never back up.
+  let slowT = 0;
+  let settle = 2;
+  const govern = (dt: number) => {
+    if (opts.fixedQuality || q >= QUALITY.length - 1) return;
+    if (settle > 0) {
+      settle -= dt;
+      return;
+    }
+    slowT = dt > 1 / 40 ? slowT + dt : Math.max(0, slowT - dt * 0.5);
+    if (slowT > 1.5) {
+      q++;
+      slowT = 0;
+      settle = 1.5;
+      applyQuality();
+    }
   };
   loop();
 
@@ -1158,6 +1282,11 @@ export function createHomeScene(host: HTMLElement): HomeScene {
       ro.disconnect();
       clear();
       renderer.domElement.removeEventListener('wheel', onWheel);
+      composer.dispose();
+      gtao.dispose();
+      bloom.dispose();
+      focusRing.geometry.dispose();
+      (focusRing.material as THREE.Material).dispose();
       renderer.dispose();
       env.dispose();
       pmrem.dispose();
