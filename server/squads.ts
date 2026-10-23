@@ -55,6 +55,10 @@ export interface ClubRow {
   active: boolean;
   last_friendly_at: Date | null;
   created_at: Date;
+  bank_coins: number;
+  bank_stars: number;
+  /** Upgrade levels, works in progress and rare perks (shared/clubUpgrades.ts). */
+  facilities: Record<string, unknown>;
 }
 
 /** Squad shape the bots fill toward: enough cover in every position. */

@@ -48,6 +48,13 @@ const P: Record<string, string> = {
   star: '<path d="m12 3.5 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>',
   lock: '<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
   whistle: '<path d="M3 11a5 5 0 1 0 10 0l8-3V5l-9 3.2A5 5 0 0 0 3 11z"/>',
+  stadium: '<path d="M3 9c0-2 4-3.5 9-3.5S21 7 21 9v8c0 2-4 3.5-9 3.5S3 19 3 17z"/><path d="M3 9c0 2 4 3.5 9 3.5S21 11 21 9M7 12v8M17 12v8M12 12.5v8"/>',
+  academy: '<path d="M2.5 9 12 4.5 21.5 9 12 13.5z"/><path d="M6.5 11v4.5c1.5 1.6 3.4 2.3 5.5 2.3s4-.7 5.5-2.3V11M21.5 9v5"/>',
+  briefcase: '<rect x="3.5" y="7.5" width="17" height="12" rx="2"/><path d="M9 7.5V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3.5 12.5h17M11 12.5v2h2v-2"/>',
+  bank: '<path d="M3 10 12 4l9 6M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>',
+  hammer: '<path d="M14 4.5l5.5 5.5-2 2L12 6.5zM12.8 7.3 4 16.1 7.9 20l8.8-8.8"/>',
+  flag: '<path d="M5 21V4M5 4h12l-2.5 4L17 12H5"/>',
+  bus: '<rect x="4" y="4" width="16" height="13" rx="2.5"/><path d="M4 11h16M8 17v2.5M16 17v2.5M7.5 14h1M15.5 14h1"/>',
 };
 
 export function icon(name: string, size = 20): Raw {

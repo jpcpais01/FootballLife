@@ -310,6 +310,19 @@ CREATE TABLE IF NOT EXISTS star_ledger (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS star_ledger_player ON star_ledger(player_id, created_at DESC);
+ALTER TABLE clubs ADD COLUMN IF NOT EXISTS bank_coins INT NOT NULL DEFAULT 0;
+ALTER TABLE clubs ADD COLUMN IF NOT EXISTS bank_stars INT NOT NULL DEFAULT 0;
+ALTER TABLE clubs ADD COLUMN IF NOT EXISTS facilities JSONB NOT NULL DEFAULT '{}';
+CREATE TABLE IF NOT EXISTS club_donations (
+  id TEXT PRIMARY KEY,
+  club_id TEXT NOT NULL REFERENCES clubs(id) ON DELETE CASCADE,
+  player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  coins INT NOT NULL DEFAULT 0,
+  stars INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS club_donations_club ON club_donations(club_id, created_at DESC);
+UPDATE players SET club_role = 'player' WHERE club_role = 'coach'
 `;
 
 async function migrate(db: Db) {

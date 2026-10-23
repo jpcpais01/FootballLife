@@ -7,6 +7,15 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T14:00:00Z',
+    entries: [
+      { title: 'Club facilities', body: 'Clubs now have a treasury and five facilities to build: Stadium (a bigger home edge in the league), Head coach (team chemistry), Match balls & kit (more training XP for every member), Academy (better AI teammates) and Sponsors lounge (more coins from matches). Each has five levels, and works take a few hours to finish. Every bonus is small, so a well-run club gets an edge without matches being decided off the pitch.' },
+      { title: 'Donate to your club', body: 'Members can donate coins and stars from the new Facilities tab. Top donors are listed in the treasury, and every donation shows in the club chat. Levels 4 and 5 need stars, stars can finish works early, and three rare items are bought with stars only: the Golden crest, an Ultras tifo and the Team bus.' },
+      { title: 'President and captain', body: 'The president (and the founder) now make every upgrade decision with the treasury. The captain picks the line-up and tactics; until a club names one, the president does. The head coach is no longer a player role: he is staff you hire and improve through upgrades. Members who were coach are now players.' },
+      { title: 'Your training ground', body: 'The top of the club page now shows your training ground: a few of your squad at work, with the head coach watching. Who is out training changes through the day, and the stand, floodlights, balls and banner grow as you upgrade the club.' },
+    ],
+  },
+  {
     hour: '2026-10-23T13:30:00Z',
     entries: [
       { title: 'Players move like footballers', body: 'Players off the ball no longer jog everywhere all match. When they are where they need to be they stand and watch the play, small adjustments are walked, and they save their running for the moments that matter: closing down, getting back, attacking space. Walking time has nearly doubled, to about half the match like in real football, and the far side of the pitch is calm while the players near the ball stay on their toes. Every player also has his own work rate.' },
