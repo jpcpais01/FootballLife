@@ -692,6 +692,8 @@ export function createHomeScene(host: HTMLElement): HomeScene {
 
   const clear = () => {
     scene.remove(world);
+    // The player's meshes and textures are shared through the character caches: not ours to dispose.
+    if (figure) world.remove(figure.root);
     world.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.isMesh) {
@@ -871,8 +873,7 @@ export function createHomeScene(host: HTMLElement): HomeScene {
       });
 
       if (d.owner) {
-        figure = new Figure(d.owner.kit, d.owner.appearance, d.owner.keeper, GK_KITS[0], d.owner.equipped);
-        figure.root.scale.setScalar(0.95);
+        figure = new Figure(d.owner.kit, d.owner.appearance, d.owner.keeper, GK_KITS[0], d.owner.equipped, { scale: 0.95, detail: 'mid' });
         figure.root.position.set(1.6 + Math.min(1, w * 0.05), 0, 0.9);
         figure.root.rotation.y = -0.5;
         figure.root.traverse((o) => {
