@@ -18,6 +18,7 @@ import { liveRating } from '../../shared/sim/rating.ts';
 import type { Position } from '../../shared/attributes.ts';
 import { state } from '../state.ts';
 import { roar } from '../audio.ts';
+import { showReport, type MyReport } from '../report.ts';
 
 interface Snap {
   clubId: string;
@@ -52,6 +53,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
     clearInterval(poll);
     viewer?.dispose();
     board?.dispose();
+    document.querySelector('.rp-back')?.remove();
   };
 
   // ---------- pre-match ----------
@@ -95,6 +97,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   let stats: [TeamStats, TeamStats] | undefined = data.stats;
   let players: PlayerLine[] | undefined = data.players;
   let motm: number | undefined = data.motm;
+  let mine: MyReport | undefined = data.mine;
   let pens: { score: [number, number]; kicks: { s: 0 | 1; p: number; in: boolean }[] } | undefined = data.pens;
   const serverOffset = data.serverNow - Date.now();
   const kickoff: number = data.kickoffAt;
@@ -216,6 +219,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
   let lastGoals = 0;
   let shownRating = -1;
   let rateEnded = false;
+  let reported = false;
   const rateTone = (r: number) => (r >= 8 ? 'top' : r >= 7 ? 'good' : r >= 6 ? 'ok' : 'low');
   const updateRating = (idx: number, ended: boolean) => {
     if (meIdx < 0) return;
@@ -438,6 +442,20 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
     // Goal flash + ticker on new events.
     const idx = indexAt(t);
     if (idx !== lastIndex || !!ended !== rateEnded) updateRating(idx, !!ended);
+    // A moment after the final whistle, your own match report.
+    if (ended && players && meIdx >= 0 && !reported) {
+      reported = true;
+      const me = lineups[meSide].players[meK];
+      const sc0: [number, number] = [sc[0], sc[1]];
+      setTimeout(() => {
+        if (!alive) return;
+        showReport({
+          line: players![meIdx], motm: motm === meIdx, score: sc0, side: meSide as 0 | 1, pens: pens?.score,
+          opp: lineups[1 - meSide].name, friendly: m.kind === 'friendly', name: me.name,
+          portrait: avatar(me.app as any, lineups[meSide].colors, 96, undefined, { eq: me.eq }), mine,
+        });
+      }, 2600);
+    }
     if (idx !== lastIndex) {
       const from = lastIndex;
       lastIndex = idx;
@@ -506,6 +524,7 @@ export async function matchPage(el: HTMLElement, [id]: string[]) {
           players = d.players;
           motm = d.motm;
           pens = d.pens;
+          mine = d.mine;
           clearInterval(poll);
         }
       } catch {

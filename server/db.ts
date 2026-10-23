@@ -322,7 +322,10 @@ CREATE TABLE IF NOT EXISTS club_donations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS club_donations_club ON club_donations(club_id, created_at DESC);
-UPDATE players SET club_role = 'player' WHERE club_role = 'coach'
+UPDATE players SET club_role = 'player' WHERE club_role = 'coach';
+ALTER TABLE player_match_stats ADD COLUMN IF NOT EXISTS coins INT;
+ALTER TABLE player_match_stats ADD COLUMN IF NOT EXISTS fame INT;
+ALTER TABLE player_match_stats ADD COLUMN IF NOT EXISTS ups JSONB
 `;
 
 async function migrate(db: Db) {

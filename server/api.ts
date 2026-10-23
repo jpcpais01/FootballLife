@@ -738,6 +738,24 @@ route('GET', '/api/league', async (c) => {
   };
 });
 
+/** The signed-in player's own line for the full-time report: what they earned and how it compares. */
+async function myReport(c: Ctx, matchId: string) {
+  if (!c.user) return undefined;
+  const r = await c.db.query<{ player_id: string; coins: number | null; fame: number | null; ups: { attr: string; to: number }[] | null; rating: number; season_id: string | null; kind: string }>(
+    'SELECT s.player_id, s.coins, s.fame, s.ups, s.rating, s.season_id, s.kind FROM player_match_stats s JOIN players p ON p.id = s.player_id WHERE s.match_id = $1 AND p.user_id = $2',
+    [matchId, c.user.id],
+  );
+  const me = r[0];
+  if (!me) return undefined;
+  // Season form before this match, so the card can say whether it was a good day.
+  const f = await c.db.query<{ avg: number | null; best: number | null; n: number }>(
+    `SELECT avg(rating)::float AS avg, max(rating)::float AS best, count(*)::int AS n FROM player_match_stats
+     WHERE player_id = $1 AND match_id <> $2 AND kind <> 'friendly' AND season_id IS NOT DISTINCT FROM $3`,
+    [me.player_id, matchId, me.season_id],
+  );
+  return { coins: me.coins, fame: me.fame, ups: me.ups ?? [], avg: f[0]?.n ? f[0].avg : null, best: f[0]?.n ? f[0].best : null, games: f[0]?.n ?? 0 };
+}
+
 route('GET', '/api/matches/:id', async (c) => {
   const rows = await c.db.query<MatchListRow & { lineups: [LineupSnapshot, LineupSnapshot] | null; result: MatchResult | null; season_id: string | null }>(
     `SELECT m.lineups, m.result, m.season_id, ${MATCH_SELECT.replace('SELECT', '')} WHERE m.id = $1`,
@@ -772,6 +790,7 @@ route('GET', '/api/matches/:id', async (c) => {
   );
   const tracks = tr[0]?.ws ?? [];
   return {
+    mine: finished ? await myReport(c, c.params[0]) : undefined,
     tracks,
     tracksFrom: tw,
     match: dto,
