@@ -18,6 +18,8 @@ const MAX_FAST = 70;
 /** Share of the broadcast that highlights may fill; the rest fast-forwards. */
 const SLOW_SHARE = 0.6;
 
+const PLAY = new Set(['pass', 'cross', 'carry', 'dribble', 'tackle', 'intercept', 'clear', 'shot', 'foul', 'offside']);
+
 /** A highlight window around an event, and how much it matters. */
 function isHighlight(e: MatchEvent): [number, number, number] | null {
   if (e.k === 'goal') return [e.t - 10, e.t + 8, 10];
@@ -34,10 +36,15 @@ export function buildTimeline(events: MatchEvent[], halftimeAt: number, duration
   const budget = duration / LIVE_RATE;
   // 1. Highlight windows, most important first, until the slow-motion budget is spent.
   const cands: [number, number, number][] = [];
+  // The last touch or foul before each event: what put the ball out or stopped play.
+  let cause = -Infinity;
   for (const e of events) {
     const w = isHighlight(e);
+    if (PLAY.has(e.k)) cause = e.t;
     if (!w) continue;
     let [a, b] = w;
+    // A set piece is taken a while after the ball went out or the foul: show what led to it too.
+    if ((e.k === 'corner' || e.k === 'freekick' || e.k === 'penalty') && e.t - cause < 20) a = Math.min(a, cause - 4);
     // Never let a window straddle the half-time break.
     if (a < halftimeAt && b > halftimeAt) {
       if (e.t <= halftimeAt) b = halftimeAt;

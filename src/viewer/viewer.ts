@@ -264,6 +264,9 @@ export class MatchViewer {
 
   /** Celebration burst + crowd roar. */
   goal(side: 0 | 1) {
+    // The beaten keeper turns away in despair, unless he's still getting up from his dive.
+    const gk = this.figures[side === 0 ? 11 : 0];
+    if (!gk.acting) gk.act('keeperMiss');
     this.excitement = 1;
     this.shake = 0.6;
     this.stadium.setCheer(side);
@@ -394,6 +397,7 @@ export class MatchViewer {
       const lining = f.faceTo !== null && t < f.faceUntil && fr.tracked;
       if (lining) face = f.faceTo!;
       else f.faceTo = null;
+      if (f.committed && !lining) face = f.heading;
       f.heading = turnToward(f.heading, face, realDt, lining ? 14 : speed > 5 ? 6 : 9, lining ? 12 : speed > 5 ? 5 : 8);
       f.root.position.set(f.pos.x, 0, f.pos.y);
       f.root.rotation.y = f.heading;
@@ -540,8 +544,22 @@ export class MatchViewer {
         f.faceTo = plan.face;
         f.faceUntil = plan.at + (plan.save ? 0.8 : 0.3);
       }
-      if (plan.save) this.savedAt[i] = plan.at;
+      // Only a ball he actually keeps ends up in his hands (not a shot that beats him, flies wide or is parried).
+      if (plan.save && this.keeps(plan.at)) this.savedAt[i] = plan.at;
       f.act(plan.kind, { contactIn: Math.max(0, lead), side: plan.side }, plan.aim ?? undefined);
+    }
+    // Before the other side's corner or free kick, the keeper organises his defence.
+    if (rate > 1.5) return;
+    const ev = this.playback.events;
+    const next = ev[this.playback.indexAt(t) + 1];
+    if (next && (next.k === 'corner' || next.k === 'freekick') && next.t - t > 2.5 && next.t - t < 7) {
+      const gi = next.s === 0 ? 11 : 0;
+      const gk = this.figures[gi];
+      const key = `dir${next.t}`;
+      if (!this.fired.has(key) && !gk.acting && gk.vel.length() < 1.2) {
+        this.fired.add(key);
+        gk.act('keeperDirect');
+      }
     }
   }
 
@@ -579,9 +597,14 @@ export class MatchViewer {
         break;
       case 'chip':
       case 'cross':
-      case 'shot':
         act = kind;
         foot = true;
+        break;
+      case 'shot':
+        // A ball dropping at chest height or above, struck first time: an overhead scissor kick.
+        act = b0.z > 1.15 && b0.z < 2.2 ? 'scissor' : 'shot';
+        foot = act === 'shot';
+        if (act === 'scissor' && Math.hypot(out.x, out.y) > 0.2) face = Math.atan2(-out.x, -out.y);
         break;
       case 'trap':
       case 'chest':
@@ -609,8 +632,12 @@ export class MatchViewer {
       case 'throw': // older recordings: keeper throws and throw-ins alike
         act = keeper ? 'keeperThrow' : 'throwIn';
         break;
-      case 'throwIn':
       case 'keeperThrow':
+        // Short and along the ground: he bowls it out underarm.
+        act = outSpeed < 13 && after.ball.z < 0.6 ? 'keeperPass' : 'keeperThrow';
+        if (Math.hypot(out.x, out.y) > 0.2) face = Math.atan2(out.x, out.y);
+        break;
+      case 'throwIn':
       case 'keeperSet':
       case 'fall':
       case 'getUp':
@@ -631,7 +658,7 @@ export class MatchViewer {
       side = Math.abs(across) > 0.6 ? (across > 0 ? 1 : -1) : strong;
     }
     const heading = face ?? this.figures[i].heading;
-    const aim = act === 'fall' || act === 'getUp' || act === 'throwIn' || act === 'keeperThrow' || act === 'keeperSet'
+    const aim = act === 'fall' || act === 'getUp' || act === 'throwIn' || act === 'keeperThrow' || act === 'keeperSet' || act === 'keeperPass' || act === 'scissor'
       ? null
       : { ball: new THREE.Vector3(b0.x, b0.z, b0.y), x: me.x, z: me.y, heading };
     void detail;
@@ -674,6 +701,14 @@ export class MatchViewer {
     if (Math.abs(lateral) < 0.75) kind = b.z < 0.45 ? 'keeperScoop' : b.z < 1 ? 'keeperGather' : b.z < 1.75 ? 'catch' : 'keeperHigh';
     else kind = b.z > 1.25 ? 'diveHigh' : 'dive';
     return { kind, side, face, aim: { ball: new THREE.Vector3(b.x, b.z, b.y), x: me.x, z: me.y, heading: face }, at: tc, save: true };
+  }
+
+  /** Whether the shot a keeper meets around game time `at` ends in his hands (crosses he claims have no shot). */
+  private keeps(at: number) {
+    const ev = this.playback.events;
+    let shot: (typeof ev)[number] | null = null;
+    for (let k = Math.max(0, this.playback.indexAt(at - 2)); k < ev.length && ev[k].t <= at + 1.5; k++) if (ev[k].k === 'shot' && ev[k].t >= at - 2) shot = ev[k];
+    return !shot || shot.o === 'saved';
   }
 
   /** Keepers with the ball in their hands: since when (game time), or -1. */
