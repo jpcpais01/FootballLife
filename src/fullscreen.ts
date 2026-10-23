@@ -9,7 +9,14 @@ function lockLandscape() {
   try { o?.lock?.('landscape').catch(() => {}); } catch { /* not supported */ }
 }
 
+// Phones and tablets only: on a computer with a mouse, forcing fullscreen on clicks made the
+// window jump in and out of fullscreen, so desktop stays a normal window.
+function isTouchDevice() {
+  return matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches;
+}
+
 export function fullscreenOnFirstTap() {
+  if (!isTouchDevice()) return;
   const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: (o?: FullscreenOptions) => void };
   const request = el.requestFullscreen?.bind(el) ?? el.webkitRequestFullscreen?.bind(el);
   if (!request || matchMedia('(display-mode: fullscreen)').matches) {
@@ -19,7 +26,7 @@ export function fullscreenOnFirstTap() {
     return;
   }
 
-  const events = ['pointerup', 'touchend', 'keydown'] as const;
+  const events = ['pointerup', 'touchend'] as const;
   const arm = () => { for (const e of events) window.addEventListener(e, go, { capture: true, passive: true }); };
   const disarm = () => { for (const e of events) window.removeEventListener(e, go, true); };
   function go() {
