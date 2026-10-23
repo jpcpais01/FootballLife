@@ -967,25 +967,27 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       ].map((p) => ({ u: p.u, v: p.v * sgn }));
       const atk = outfield(S).filter((i) => i !== taker).sort((a, b) => (BOX_PRIORITY[role(b)] ?? 0) - (BOX_PRIORITY[role(a)] ?? 0));
       const inBox: number[] = [];
-      const corner = e.k === 'corner';
-      if (corner && !routine) {
+      // A free kick out wide but well short of the byline is a different game:
+      // the defence holds a line to play the runners offside, and the attackers
+      // stand level with it, waiting to go.
+      const lineU = clamp(spotS.u + 0.06, 0.8, 0.87);
+      if (e.k === 'freekick' && spotS.u < 0.9) {
+        lineFreeKick(e, atk.slice(0, box.length), atk.slice(box.length), lineU, sgn);
+        return;
+      }
+      if (!routine) {
         routine = { key: e, side: S, from: NaN, job: cornerRoutine(atk.slice(0, box.length), sgn) };
         routines.set(w.mem, routine);
       }
       atk.forEach((i, k) => {
         let p: Pt;
-        if (k < box.length) { p = corner ? packSpot(k, sgn) : box[k]; inBox.push(i); }
+        if (k < box.length) { p = packSpot(k, sgn); inBox.push(i); }
         else if (k < box.length + 2) p = { u: 0.78, v: k % 2 ? 0.2 : -0.2 };
         else p = { u: 0.55, v: k % 2 ? 0.3 : -0.3 };
         set(i, p, S, urgAll);
       });
       // The pack shuffles while the taker places the ball: little steps, nobody still.
-      if (corner) {
-        for (const i of inBox) {
-          const j = 0.55 * Math.sin(w.t * (0.9 + trait(i, 6)) + trait(i, 7) * 6.3);
-          setAbs(i, tx[i] + j * 0.6, ty[i] + j, 0.3);
-        }
-      }
+      jostle(inBox);
       if (gkS >= 0) set(gkS, { u: 0.14, v: 0 }, S, urgAll);
       if (gkO >= 0) set(gkO, { u: 0.008, v: 0 }, O, urgAll);
       // The defending side leaves its quickest forward up as an outlet for the counter,
@@ -1057,6 +1059,21 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
           runners.push(i);
         }
       }
+      // A second man stands over the ball with the taker, so the keeper can't
+      // be sure who strikes it or which way, and the smallest runner joins the
+      // end of the wall to block the keeper's view.
+      const dummy = runners.filter((i) => ['AM', 'WG', 'ST', 'CM'].includes(role(i))).sort((a, b) => d2(a, e.x, e.y) - d2(b, e.x, e.y))[0];
+      if (dummy !== undefined) {
+        const side = Math.sign(e.y || 1);
+        setAbs(dummy, e.x - w.dir[S] * 0.8 - ux * 0.3, e.y - side * 1.3, urgAll);
+        runners.splice(runners.indexOf(dummy), 1);
+      }
+      const pest = runners.sort((a, b) => (BOX_PRIORITY[role(a)] ?? 0) - (BOX_PRIORITY[role(b)] ?? 0))[0];
+      if (pest !== undefined) {
+        const o = 2.4 * 0.75 * (e.y >= 0 ? -1 : 1);
+        setAbs(pest, e.x + ux * 9.4 - uy * o, e.y + uy * 9.4 + ux * o, urgAll);
+        runners.splice(runners.indexOf(pest), 1);
+      }
       const inWall = new Set(wall);
       outfield(O).filter((i) => !inWall.has(i)).forEach((i, k) => {
         const r = runners[k];
@@ -1091,6 +1108,59 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
         if (a !== undefined) setAbs(i, tx[i] * 0.25 + tx[a] * 0.75, ty[i] * 0.25 + ty[a] * 0.75, urgAll);
       });
     }
+  }
+
+  /** Little steps on the spot while the ball is placed: nobody stands still. */
+  function jostle(ids: number[]) {
+    for (const i of ids) {
+      const j = 0.55 * Math.sin(w.t * (0.9 + trait(i, 6)) + trait(i, 7) * 6.3);
+      setAbs(i, tx[i] + j * 0.6, ty[i] + j, 0.3);
+    }
+  }
+
+  /**
+   * A crossed free kick from deep: the defenders hold a line about level with
+   * the edge of the box, each attacker stands on it beside his marker, a pair
+   * wait behind for the second ball, and the rest guard against the counter.
+   * When the kick is struck the runners attack the zones in behind the line.
+   */
+  function lineFreeKick(e: Restart, front: number[], rest: number[], lineU: number, sgn: number) {
+    const S = e.s;
+    const O = (1 - S) as Side;
+    const urgAll = 0.35;
+    if (!routine) {
+      const Z: Pt[] = [{ u: 0.945, v: 0.1 }, { u: 0.95, v: -0.02 }, { u: 0.93, v: -0.16 }, { u: 0.9, v: 0.03 }, { u: 0.905, v: -0.27 }, { u: lineU - 0.03, v: 0.05 }];
+      // Vary which zone the best header attacks.
+      const shift = Math.floor(trait(Math.floor(w.t * 10) % 9973, 11) * 3);
+      const order = front.map((_, k) => (k < 3 ? Z[(k + shift) % 3] : Z[k]));
+      const job = new Float64Array(44).fill(NaN);
+      front.forEach((i, k) => {
+        const a = toAbs({ u: order[k].u, v: order[k].v * sgn }, w.dir[S]);
+        job[i * 2] = a.x;
+        job[i * 2 + 1] = a.y;
+      });
+      routine = { key: e, side: S, from: NaN, job };
+      routines.set(w.mem, routine);
+    }
+    // Spread along the line, leaning to the far post where the ball is aimed.
+    front.forEach((i, k) => set(i, { u: lineU - 0.006, v: (0.18 - k * 0.09) * sgn }, S, urgAll));
+    jostle(front);
+    rest.forEach((i, k) => set(i, k < 2 ? { u: lineU - 0.1, v: k ? 0.14 : -0.14 } : { u: 0.55, v: k % 2 ? 0.3 : -0.3 }, S, urgAll));
+    const gkS = keeper(S);
+    const gkO = keeper(O);
+    if (gkS >= 0) set(gkS, { u: 0.16, v: 0 }, S, urgAll);
+    // The keeper comes off his line a touch to claim anything over the top.
+    if (gkO >= 0) set(gkO, { u: 0.035, v: 0 }, O, urgAll);
+    const def = outfield(O);
+    const outletIdx = def.findIndex((i) => role(i) === 'ST');
+    if (outletIdx >= 0) set(def.splice(outletIdx, 1)[0], { u: 0.42, v: -sgn * 0.1 }, O, urgAll);
+    // Markers stand goal-side of their man, on the same line; the spares fill the gaps.
+    const marked = def.splice(0, front.length);
+    marked.forEach((i, k) => {
+      const a = frame(tx[front[k]], ty[front[k]], S);
+      set(i, { u: a.u + 0.012, v: a.v + 0.018 * sgn }, S, urgAll);
+    });
+    def.forEach((i, k) => set(i, { u: lineU + 0.01, v: (0.32 - k * 0.2) * sgn }, S, urgAll));
   }
 
   /**
