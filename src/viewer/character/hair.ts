@@ -244,7 +244,10 @@ class Mesh {
     return this.pos.length / 3;
   }
   v(p: V3, u: number, v: number, s: number) {
-    this.pos.push(p[0], p[1], p[2]);
+    return this.vx(p[0], p[1], p[2], u, v, s);
+  }
+  vx(x: number, y: number, z: number, u: number, v: number, s: number) {
+    this.pos.push(x, y, z);
     this.uv.push(u, v);
     this.shell.push(s);
     return this.n - 1;
@@ -332,8 +335,8 @@ export function buildHair(a: Appearance, body: BodyBuild, hair: RGB, kit: HairKi
   const out: THREE.Mesh[] = [];
   const st = STYLES[a.hair] ?? null;
   const spec = SCALP[a.hair] ?? SCALP[0];
-  const seed = a.hair * 31 + a.hairColor * 7 + a.skin;
-  const nShell = hi ? 16 : 6;
+  const seed = a.hair * 31 + a.hairColor * 7;
+  const nShell = hi ? 14 : 6;
 
   const thick = (x: number, y: number, z: number, cov: number, s: Style, ga: number, gr: number) => {
     const sideK = smooth(0.075, 0.0, y);
@@ -371,7 +374,7 @@ export function buildHair(a: Appearance, body: BodyBuild, hair: RGB, kit: HairKi
     const W = new THREE.Vector3(...st.whorl).normalize();
     const e1 = new THREE.Vector3().crossVectors(W, Math.abs(W.y) > 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0)).normalize();
     const e2 = new THREE.Vector3().crossVectors(W, e1);
-    const NA = hi ? 120 : 48, NR = hi ? 64 : 26;
+    const NA = hi ? 100 : 48, NR = hi ? 54 : 26;
     const RHO = 2.6;
     const d = new THREE.Vector3();
     const grid: { s: V3; dir: V3; t: number; c: number }[] = [];
@@ -405,19 +408,27 @@ export function buildHair(a: Appearance, body: BodyBuild, hair: RGB, kit: HairKi
     }
     if (any) {
       const tilesU = hi ? 10 : 8;
+      // Only the grid points some haired quad uses get vertices (bare scalp gets none).
+      const hasHair = (k: number) => Math.max(grid[k].t, grid[k + 1].t, grid[k + NA + 1].t, grid[k + NA + 2].t) >= 0.0006;
+      const slot = new Int32Array(grid.length).fill(-1);
+      const pts: number[] = [];
+      for (let j = 0; j < NR; j++) for (let i = 0; i < NA; i++) {
+        const k = j * (NA + 1) + i;
+        if (!hasHair(k)) continue;
+        for (const c of [k, k + 1, k + NA + 1, k + NA + 2]) if (slot[c] < 0) slot[c] = pts.push(c) - 1;
+      }
       for (let sh = 0; sh < nShell; sh++) {
         const f = sh / (nShell - 1);
         const base = m.n;
-        for (let j = 0; j <= NR; j++) for (let i = 0; i <= NA; i++) {
-          const g = grid[j * (NA + 1) + i];
+        for (const k of pts) {
+          const g = grid[k];
           const off = 0.0012 + g.t * f;
-          m.v([g.s[0] + g.dir[0] * off, g.s[1] + g.dir[1] * off, g.s[2] + g.dir[2] * off], (i / NA) * tilesU, (j / NR) * RHO * 2.2, f);
+          m.vx(g.s[0] + g.dir[0] * off, g.s[1] + g.dir[1] * off, g.s[2] + g.dir[2] * off, ((k % (NA + 1)) / NA) * tilesU, (Math.floor(k / (NA + 1)) / NR) * RHO * 2.2, f);
         }
         for (let j = 0; j < NR; j++) for (let i = 0; i < NA; i++) {
           const k = j * (NA + 1) + i;
-          // Only where there is hair at some corner.
-          if (Math.max(grid[k].t, grid[k + 1].t, grid[k + NA + 1].t, grid[k + NA + 2].t) < 0.0006) continue;
-          m.quad(base + k, base + k + NA + 1, base + k + NA + 2, base + k + 1);
+          if (!hasHair(k)) continue;
+          m.quad(base + slot[k], base + slot[k + NA + 1], base + slot[k + NA + 2], base + slot[k + 1]);
         }
       }
     }
@@ -539,7 +550,7 @@ export function buildHair(a: Appearance, body: BodyBuild, hair: RGB, kit: HairKi
           }
           if (dreads) tube(locks, path, 0.0085, 0.006, hi ? 7 : 4, 4);
           // A twist is a short rope of coils.
-          else for (let i = 0; i < path.length - 1; i++) ball(locks, path[i], 0.0105 - i * 0.0012, 1.1, hi ? 8 : 6, seed + k * 3 + i);
+          else for (let i = 0; i < path.length - 1; i++) ball(locks, path[i], 0.0105 - i * 0.0012, 1.1, hi ? 7 : 5, seed + k * 3 + i);
         }
         break;
       }

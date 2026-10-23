@@ -98,6 +98,8 @@ export interface AnimInput {
   lift: number;
   /** A keeper holding the ball: arms gather it in front of the chest. */
   hold?: boolean;
+  /** On a display stand that turns him: planted feet ride with the stand instead of the world. */
+  onStand?: boolean;
 }
 
 /** Bones that carry the ball in a keeper's hold. */
@@ -232,6 +234,8 @@ interface FootLock {
   locked: boolean;
   w: number;
   at: THREE.Vector3;
+  /** The same point in the root's frame. */
+  local: THREE.Vector3;
 }
 
 export class Animator {
@@ -282,7 +286,7 @@ export class Animator {
     this.phase = this.rng();
     this.idleT = this.rng() * 10;
     this.keeperIdle = this.rng() < 0.5 || !hasClip('keeperIdle2') ? 'keeperIdle' : 'keeperIdle2';
-    const lock = (u: number, k: number, f: number): FootLock => ({ up: bones[u], knee: bones[k], foot: bones[f], locked: false, w: 0, at: new THREE.Vector3() });
+    const lock = (u: number, k: number, f: number): FootLock => ({ up: bones[u], knee: bones[k], foot: bones[f], locked: false, w: 0, at: new THREE.Vector3(), local: new THREE.Vector3() });
     this.feet = [lock(B.LeftUpLeg, B.LeftLeg, B.LeftFoot), lock(B.RightUpLeg, B.RightLeg, B.RightFoot)];
   }
 
@@ -669,6 +673,21 @@ export class Animator {
       const f = this.feet[s];
       const canLock = locoW + legW[s] > 0.5 && !skating;
       f.foot.getWorldPosition(vc);
+      if (inp.onStand && !override) {
+        // On a display stand he stands his ground: both feet stay planted a comfortable width
+        // apart, in his own frame (so the stand's turn never drags them), and the idle only sways him.
+        if (!f.locked) {
+          // Left foot (0) to his left, +x.
+          f.local.set(s ? -0.115 : 0.115, minY, s ? 0.02 : -0.01);
+          f.locked = true;
+        }
+        this.root.localToWorld(f.at.copy(f.local));
+        f.w = Math.min(1, f.w + dt / 0.2);
+        this.solveLeg(f, vt.copy(vc).lerp(f.at, f.w));
+        continue;
+      }
+      // On a turning stand the lock is kept in his own frame, so the turn never drags his feet.
+      if (f.locked && inp.onStand) this.root.localToWorld(f.at.copy(f.local));
       if (f.locked) {
         if (!canLock || contact[s] < 0.4 || vc.distanceTo(f.at) > reach) f.locked = false;
       } else if (canLock && contact[s] > 0.6) {
@@ -677,6 +696,7 @@ export class Animator {
         // Plant it exactly on the ground.
         this.root.worldToLocal(f.at);
         f.at.y = Math.max(minY, Math.min(f.at.y, minY + 0.01));
+        f.local.copy(f.at);
         this.root.localToWorld(f.at);
       }
       f.w = f.locked ? Math.min(1, f.w + dt / 0.06) : Math.max(0, f.w - dt / 0.14);

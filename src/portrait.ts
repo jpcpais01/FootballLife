@@ -46,7 +46,7 @@ export async function portraitUrl(a: Appearance, kit: Kit, px = 128, eq?: Equipp
   const key = keyOf(job);
   const hit = cache.get(key);
   if (hit) return hit;
-  const url = (await renderer())(job.app, job.kit, job.eq, job.px);
+  const url = await (await renderer())(job.app, job.kit, job.eq, job.px);
   cache.set(key, url);
   return url;
 }
@@ -68,7 +68,7 @@ async function drain() {
       let url = cache.get(key);
       if (!url) {
         try {
-          url = render(job.app, job.kit, job.eq, job.px, { full: job.full });
+          url = await render(job.app, job.kit, job.eq, job.px, { full: job.full });
         } catch {
           continue;
         }

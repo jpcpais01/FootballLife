@@ -4,14 +4,15 @@
 // are released when they fall out of the cache (three re-uploads anything
 // still in use, so a late dispose is harmless).
 import * as THREE from 'three';
-import { EYE_COLORS, HAIR_COLORS, SKIN_TONES, SLIDERS, type Appearance } from '../../../shared/appearance.ts';
+import { EYE_COLORS, HAIR_COLORS, SKIN_TONES, type Appearance } from '../../../shared/appearance.ts';
 import { B, makeBones, setBindPose } from '../rig/skeleton.ts';
-import { A, Region, baseLand, buildBody, regionAt, type BodyBuild } from './body.ts';
-import { SKIN_GREY, paintBody, type Pattern } from './bodyPaint.ts';
+import { baseLand, buildBody, type BodyBuild } from './body.ts';
+import { SKIN_GREY, type Pattern } from './bodyPaint.ts';
 import { eyeballs, eyeTexture } from './eyes.ts';
 import { buildHair } from './hair.ts';
-import { linear, paintHead, type RGB } from './paint.ts';
-import { BEARD, SCALP } from './styles.ts';
+import { morphWeights } from './look.ts';
+import { linear, type RGB } from './paint.ts';
+import { runPaintJob, type PaintJob, type Painted } from './paintJobs.ts';
 
 /** high: close-ups (the creator, turntable, drills); mid: portraits and the house; low: matches. */
 export type Detail = 'high' | 'mid' | 'low';
@@ -56,9 +57,18 @@ const HEAD_BIND = (() => {
 export function skinHex(a: Appearance) {
   const c = new THREE.Color(SKIN_TONES[a.skin] ?? SKIN_TONES[1]);
   const k = mixK(c);
-  return '#' + new THREE.Color(c.r ** k, c.g ** k, c.b ** k).getHexString();
+  c.setRGB(c.r ** k, c.g ** k, c.b ** k);
+  // Pale tones come down toward real skin and gain a little warmth, or the lights wash them out to white.
+  const v = c.getRGB({ r: 0, g: 0, b: 0 }, THREE.SRGBColorSpace);
+  const l = v.r * 0.3 + v.g * 0.59 + v.b * 0.11;
+  if (l > 0.6) {
+    const to = 0.6 + (l - 0.6) * 0.35;
+    const s = to / l;
+    c.setRGB(to + (v.r * s - to) * 1.55, to + (v.g * s - to) * 1.55, to + (v.b * s - to) * 1.55, THREE.SRGBColorSpace);
+  }
+  return '#' + c.getHexString();
 }
-// Light tones stay as they are (the lights already brighten them); dark ones lift toward 0.8.
+// Dark tones lift toward 0.8 so they read as rich browns.
 const mixK = (c: THREE.Color) => 1 - 0.2 * Math.min(1, Math.max(0, (0.45 - (c.r * 0.3 + c.g * 0.59 + c.b * 0.11)) / 0.3));
 const hairHex = (a: Appearance) => HAIR_COLORS[a.hairColor] ?? HAIR_COLORS[0];
 
@@ -80,24 +90,35 @@ class LRU<T> {
       return v;
     }
     v = make();
+    this.put(k, v);
+    return v;
+  }
+  has(k: string) {
+    return this.m.has(k);
+  }
+  put(k: string, v: T) {
+    this.m.delete(k);
     this.m.set(k, v);
     while (this.m.size > this.max) {
       const [ok, ov] = this.m.entries().next().value as [string, T];
       this.m.delete(ok);
       this.drop(ov);
     }
-    return v;
   }
 }
 
-const shapeKey = (a: Appearance, keeper: boolean) => JSON.stringify([a, keeper]);
-/** The face texture is painted on the base mesh, so the shape sliders don't change it. */
-const paintKey = (a: Appearance, keeper: boolean) => JSON.stringify([Object.entries(a).filter(([k]) => !(k in SLIDERS)), keeper]);
+/** The body depends only on its shape weights, so colours, hair and the like reuse it. */
+const shapeKey = (a: Appearance, keeper: boolean) => JSON.stringify([morphWeights(a), keeper]);
+/** Per-player texture seed: skin and face only, so trying hairstyles keeps the same skin detail. */
+const seedOf = (a: Appearance) => (a.skin * 131 + a.face * 7 + a.marks) % 997;
 const bodies = new LRU<BodyBuild>(40, (b) => {
   b.geometry.dispose();
   b.lashes.dispose();
 });
 const textures = new LRU<THREE.Texture[]>(80, (t) => t.forEach((x) => x.dispose()));
+interface HairPart { geometry: THREE.BufferGeometry; material: THREE.Material }
+const hairs = new LRU<HairPart[]>(40, (h) => h.forEach((x) => x.geometry.dispose()));
+const eyeGeos = new LRU<THREE.BufferGeometry>(40, (g) => g.dispose());
 
 function dataTex(data: Uint8Array, size: number, srgb: boolean) {
   const t = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
@@ -185,18 +206,18 @@ diffuseColor.a = 1.0;`,
 
 // ---------- Build ----------
 
-export function buildCharacter(a: Appearance, keeper: boolean, kit: CharacterKit, detail: Detail): Character {
-  const body = bodies.get(shapeKey(a, keeper), () => buildBody(a, keeper));
-  const skin = linear(skinHex(a));
-  const hair = linear(hairHex(a));
-  const seed = (a.skin * 131 + a.hair * 17 + a.face * 7 + a.marks) % 997;
-  const hi = detail !== 'low';
+const sizes = (detail: Detail) => ({ body: detail === 'high' ? 1024 : 512, head: detail === 'high' ? 1024 : detail === 'mid' ? 512 : 192 });
 
-  const bodySize = detail === 'high' ? 1024 : 512;
+/** The kit and face texture jobs for a look, each with its cache key. */
+function paintJobs(a: Appearance, keeper: boolean, kit: CharacterKit, detail: Detail, body: BodyBuild): [string, PaintJob][] {
+  const sz = sizes(detail);
+  const seed = seedOf(a);
   const kitKey = JSON.stringify([kit.primary, kit.secondary, kit.shorts, kit.pattern, kit.boot, kit.bootAccent, kit.sole, kit.glove, kit.wrist]);
-  const [bodyMap, bodyDetail] = textures.get(`b|${bodySize}|${keeper}|${kitKey}`, () => {
-    const p = paintBody({
-      size: bodySize,
+  const headKey = JSON.stringify([sz.head, kit.primary, kit.secondary, skinHex(a), a.hairColor, a.hair, a.beard, a.brows, a.marks, seed, keeper]);
+  return [
+    [`b|${sz.body}|${keeper}|${kitKey}`, {
+      kind: 'body',
+      size: sz.body,
       uv: body.paint.uv,
       tri: body.paint.tri,
       attr: body.paint.attr,
@@ -213,47 +234,100 @@ export function buildCharacter(a: Appearance, keeper: boolean, kit: CharacterKit
       glove: linear(kit.glove),
       wrist: kit.wrist ? linear(kit.wrist) : null,
       seed,
-    });
-    return [dataTex(p.color, bodySize, true), dataTex(p.detail, bodySize, false)];
-  });
-
-  const headSize = detail === 'high' ? 1024 : detail === 'mid' ? 512 : 192;
-  const collarRGB = linear(kit.primary);
-  const w = { arm: 0, hand: 0, leg: 0, foot: 0, head: 0 };
-  const trimRGB = linear(kit.secondary);
-  const [headMap, headDetail] = textures.get(`h|${headSize}|${kit.primary}|${kit.secondary}|${paintKey(a, keeper)}`, () => {
-    const p = paintHead({
-      size: headSize,
+    }],
+    [`h|${headKey}`, {
+      kind: 'head',
+      size: sz.head,
       uv: body.paint.uv,
       tri: body.paint.headTri,
       attr: body.paint.attr,
       k: body.paint.k,
       land: baseLand(),
-      skin,
-      hair,
-      scalp: SCALP[a.hair] ?? SCALP[0],
-      beard: BEARD[a.beard] ?? BEARD[0],
+      skin: linear(skinHex(a)),
+      hair: linear(hairHex(a)),
+      hairStyle: a.hair,
+      beard: a.beard,
       brows: a.brows,
       marks: a.marks,
-      collar: (t) => {
-        w.arm = t[A.arm];
-        w.hand = t[A.hand];
-        w.leg = t[A.leg];
-        w.foot = t[A.foot];
-        w.head = t[A.head];
-        const x = t[A.pos], y = t[A.pos + 1], z = t[A.pos + 2];
-        if (regionAt(x, y, z, t[A.armT], w, keeper) !== Region.Shirt) return null;
-        // The collar band shows the trim colour where it turns in.
-        return y > 1.74 ? trimRGB : collarRGB;
-      },
+      collar: linear(kit.primary),
+      trim: linear(kit.secondary),
+      keeper,
       seed,
       lite: detail === 'low',
-    });
-    const tex = [dataTex(p.color, headSize, true), dataTex(p.detail, headSize, false)];
-    // The layout wraps round the back of the head.
-    for (const x of tex) x.wrapS = THREE.RepeatWrapping;
-    return tex;
+    }],
+  ];
+}
+
+function texturesOf(job: PaintJob, p: Painted) {
+  const tex = [dataTex(p.color, job.size, true), dataTex(p.detail, job.size, false)];
+  // The face layout wraps round the back of the head.
+  if (job.kind === 'head') for (const x of tex) x.wrapS = THREE.RepeatWrapping;
+  return tex;
+}
+
+// Painting runs on a worker when it can; the jobs in flight, by cache key.
+let worker: Worker | null | undefined;
+let nextId = 0;
+const replies = new Map<number, (p: Painted | null) => void>();
+const inFlight = new Map<string, Promise<void>>();
+function paintWorker() {
+  if (worker === undefined) {
+    try {
+      worker = new Worker(new URL('./paintWorker.ts', import.meta.url), { type: 'module' });
+      worker.onmessage = (e: MessageEvent<{ id: number; color?: Uint8Array; detail?: Uint8Array }>) => {
+        const r = replies.get(e.data.id);
+        replies.delete(e.data.id);
+        r?.(e.data.color && e.data.detail ? { color: e.data.color, detail: e.data.detail } : null);
+      };
+      worker.onerror = () => {
+        // No worker after all: answer everything waiting so it paints here instead.
+        worker = null;
+        for (const r of replies.values()) r(null);
+        replies.clear();
+      };
+    } catch {
+      worker = null;
+    }
+  }
+  return worker;
+}
+function paintOff(key: string, job: PaintJob): Promise<void> {
+  let p = inFlight.get(key);
+  if (p) return p;
+  p = new Promise<Painted | null>((res) => {
+    const w = paintWorker();
+    if (!w) return res(null);
+    const id = ++nextId;
+    replies.set(id, res);
+    w.postMessage({ id, job });
+  }).then((painted) => {
+    inFlight.delete(key);
+    if (!textures.has(key)) textures.put(key, texturesOf(job, painted ?? runPaintJob(job)));
   });
+  inFlight.set(key, p);
+  return p;
+}
+
+/**
+ * Gets a look ready to build without a pause: the body is fitted here, and
+ * any texture not yet cached is painted on a worker. buildCharacter for the
+ * same look afterwards is quick.
+ */
+export function prepareCharacter(a: Appearance, keeper: boolean, kit: CharacterKit, detail: Detail): Promise<void> {
+  const body = bodies.get(shapeKey(a, keeper), () => buildBody(a, keeper));
+  const waits = paintJobs(a, keeper, kit, detail, body).filter(([key]) => !textures.has(key)).map(([key, job]) => paintOff(key, job));
+  return waits.length ? Promise.all(waits).then(() => undefined) : Promise.resolve();
+}
+
+export function buildCharacter(a: Appearance, keeper: boolean, kit: CharacterKit, detail: Detail): Character {
+  const sk = shapeKey(a, keeper);
+  const body = bodies.get(sk, () => buildBody(a, keeper));
+  const skin = linear(skinHex(a));
+  const hair = linear(hairHex(a));
+  const hi = detail !== 'low';
+  const [[bodyKey, bodyJob], [headKey, headJob]] = paintJobs(a, keeper, kit, detail, body);
+  const [bodyMap, bodyDetail] = textures.get(bodyKey, () => texturesOf(bodyJob, runPaintJob(bodyJob)));
+  const [headMap, headDetail] = textures.get(headKey, () => texturesOf(headJob, runPaintJob(headJob)));
 
   const bodyMat = bodyMaterial(bodyMap, bodyDetail, skin, kit.number !== undefined ? numberTexture(kit.number) : null, linear(kit.numberColor), hi);
   const headMat = new THREE.MeshPhysicalMaterial({
@@ -269,11 +343,12 @@ export function buildCharacter(a: Appearance, keeper: boolean, kit: CharacterKit
     sheenColor: new THREE.Color(...skinSheenOf(skin)),
   });
 
-  // Head parts move with the Head bone.
+  // Head parts move with the Head bone. Their geometry is shared through the caches.
   const head = new THREE.Group();
-  const eyes = new THREE.Mesh(eyeballs(body.eyes, hi), eyeMaterial(EYE_COLORS[a.eyeColor] ?? EYE_COLORS[0]));
-  const hairParts = buildHair(a, body, hair, kit, hi);
-  for (const m of [eyes, ...hairParts]) {
+  const eyes = new THREE.Mesh(eyeGeos.get(`${sk}|${hi}`, () => eyeballs(body.eyes, hi)), eyeMaterial(EYE_COLORS[a.eyeColor] ?? EYE_COLORS[0]));
+  const hairKey = JSON.stringify([sk, hi, a.hair, a.hairColor, a.beard, kit.band, kit.earring]);
+  const hairParts = hairs.get(hairKey, () => buildHair(a, body, hair, kit, hi).map((m) => ({ geometry: m.geometry, material: m.material as THREE.Material })));
+  for (const m of [eyes, ...hairParts.map((h) => new THREE.Mesh(h.geometry, h.material))]) {
     m.applyMatrix4(HEAD_BIND);
     m.castShadow = m !== eyes;
     head.add(m);

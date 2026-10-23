@@ -9,7 +9,7 @@ import { BOOT_COLORS, sanitizeAppearance, type Appearance } from '../../shared/a
 import { gear, type Equipped } from '../../shared/cosmetics.ts';
 import { type Pattern } from './character/bodyPaint.ts';
 import { whenCharacterReady } from './character/body.ts';
-import { buildCharacter, type CharacterKit, type Detail } from './character/character.ts';
+import { buildCharacter, prepareCharacter, type CharacterKit, type Detail } from './character/character.ts';
 import { type ActOpts, type ActionKind, type AnimInput, Animator, seeded } from './rig/animator.ts';
 import { duration } from './rig/clip.ts';
 import { getClip, hasClip, loadMocap } from './rig/library.ts';
@@ -159,6 +159,17 @@ export class Figure {
   readonly bones: THREE.Bone[];
   private anim: Animator;
   private skin: THREE.SkinnedMesh;
+  private kit: Kit;
+  private gkKit: Kit;
+  private eq: Equipped | undefined;
+  private number: number | undefined;
+  private detail: Detail;
+  /** What dress() last added to the bones, to take off on a restyle. */
+  private parts: THREE.Object3D[] = [];
+  private styleRun = 0;
+  /** Resolves once he is built and dressed. */
+  readonly ready: Promise<void>;
+  private markReady = () => {};
   /** Between the eyes, in bind space (refined once the body is built). */
   private eyeAt = new THREE.Vector3(0, 1.907, 0.1);
   /** Body height above the root: on a base, or standing on the grass. */
@@ -180,6 +191,8 @@ export class Figure {
   private reachY = 0;
   /** Keeper saves keep their reach: he lands where he stretched to and walks back from there. */
   private reachKeep = false;
+  /** Standing on a stand that turns (the kit turntable): his feet turn with it. */
+  onStand = false;
   /** A keeper with the ball in his hands. Set by the match viewer. */
   hold = false;
 
@@ -193,24 +206,10 @@ export class Figure {
     const g = gear(eq);
     this.celStyle = g.celebration?.style ?? '';
     const k = isKeeper ? gkKit : kit;
-    const boot = g.boots?.c1 ?? BOOT_COLORS[app.boots] ?? BOOT_COLORS[0];
-    const pattern = isKeeper ? 'plain' : kitPattern(kit);
-    const ck: CharacterKit = {
-      primary: k.primary,
-      secondary: k.secondary,
-      shorts: isKeeper ? '#1b1d21' : k.secondary,
-      pattern,
-      boot,
-      bootAccent: g.boots?.c2 ?? contrast(boot),
-      sole: g.boots?.c2 ?? mix(boot, '#101010', 0.55),
-      glove: '#eef2f4',
-      wrist: g.wrist ? g.wrist.c1 ?? k.secondary : app.accessory === 3 ? k.secondary : null,
-      band: g.head ? g.head.c1 ?? k.secondary : app.accessory === 1 ? k.secondary : null,
-      earring: app.accessory === 2,
-      number: opts.number,
-      numberColor: isKeeper ? '#111111' : contrast(k.primary) === '#141414' && pattern === 'plain' ? k.secondary : contrast(k.primary),
-    };
-
+    this.kit = kit;
+    this.gkKit = gkKit;
+    this.eq = eq;
+    this.number = opts.number;
     // Base (team-coloured puck) and a selection ring.
     if (withBase) {
       const base = new THREE.Mesh(geo.base, gloss(k.secondary));
@@ -237,29 +236,16 @@ export class Figure {
     this.body.add(mesh);
     this.root.add(this.body);
     const scale = opts.scale ?? LIFE_SCALE;
-    const detail = opts.detail ?? (scale > LIFE_SCALE ? 'mid' : 'low');
-    const neckIt = g.neck ?? (app.accessory === 4 ? { style: 'chain', c1: '#ffcf3d', metal: true } : undefined);
+    this.detail = opts.detail ?? (scale > LIFE_SCALE ? 'mid' : 'low');
+    const ck = this.kitFor(app);
+    this.ready = new Promise((r) => (this.markReady = r));
+    // A restyle that came in first has the newer look.
     const build = () => {
-      const ch = buildCharacter(app, isKeeper, ck, detail);
-      mesh.geometry = ch.geometry;
-      mesh.material = ch.materials;
-      this.bones[B.Head].add(ch.head);
-      this.eyeAt.set(0, ch.body.headC.y, ch.body.headC.z + 0.075);
-      // Kit extras ride on the chest and neck bones, placed from the fitted body.
-      const toBone = (b: number, o: THREE.Object3D) => {
-        o.applyMatrix4(mesh.skeleton.boneInverses[b]);
-        o.castShadow = true;
-        this.bones[b].add(o);
-      };
-      if (!isKeeper) {
-        const crest = new THREE.Mesh(geo.crest, gloss(k.secondary));
-        crest.position.copy(ch.body.crestAt);
-        toBone(B.Spine2, crest);
-      }
-      if (neckIt) toBone(B.Spine2, neckwear(neckIt.style ?? 'chain', neckIt.c1 ?? '#ffcf3d', !!neckIt.metal || !g.neck, k.secondary, ch.body.neck, ch.body.crestAt.z));
+      if (!this.styleRun) this.dress(app, ck);
     };
     if (opts.sync) whenCharacterReady(build);
-    else whenCharacterReady(() => queueBuild(build));
+    // Textures paint on a worker first, so the build itself is quick.
+    else whenCharacterReady(() => queueBuild(() => void prepareCharacter(app, isKeeper, ck, this.detail).then(() => queueBuild(build))));
     // Who he is decides how he moves: the same player carries himself the same way every match.
     const seed = opts.seed ?? Math.floor(Math.random() * 2 ** 31);
     this.anim = new Animator(this.bones, this.root, seed);
@@ -267,6 +253,76 @@ export class Figure {
     this.root.scale.setScalar(scale);
   }
 
+
+  /** What the character wears for a look: the kit, with his boots and accessories. */
+  private kitFor(app: Appearance): CharacterKit {
+    const isKeeper = this.keeper;
+    const g = gear(this.eq);
+    const k = isKeeper ? this.gkKit : this.kit;
+    const boot = g.boots?.c1 ?? BOOT_COLORS[app.boots] ?? BOOT_COLORS[0];
+    const pattern = isKeeper ? 'plain' : kitPattern(this.kit);
+    return {
+      primary: k.primary,
+      secondary: k.secondary,
+      shorts: isKeeper ? '#1b1d21' : k.secondary,
+      pattern,
+      boot,
+      bootAccent: g.boots?.c2 ?? contrast(boot),
+      sole: g.boots?.c2 ?? mix(boot, '#101010', 0.55),
+      glove: '#eef2f4',
+      wrist: g.wrist ? g.wrist.c1 ?? k.secondary : app.accessory === 3 ? k.secondary : null,
+      band: g.head ? g.head.c1 ?? k.secondary : app.accessory === 1 ? k.secondary : null,
+      earring: app.accessory === 2,
+      number: this.number,
+      numberColor: isKeeper ? '#111111' : contrast(k.primary) === '#141414' && pattern === 'plain' ? k.secondary : contrast(k.primary),
+    };
+  }
+
+  /** Builds the character into the skinned mesh, replacing whatever it wore before. */
+  private dress(app: Appearance, ck: CharacterKit) {
+    const isKeeper = this.keeper;
+    const mesh = this.skin;
+    const g = gear(this.eq);
+    const k = isKeeper ? this.gkKit : this.kit;
+    const ch = buildCharacter(app, isKeeper, ck, this.detail);
+    for (const o of this.parts.splice(0)) o.removeFromParent();
+    mesh.geometry = ch.geometry;
+    mesh.material = ch.materials;
+    this.bones[B.Head].add(ch.head);
+    this.parts.push(ch.head);
+    this.eyeAt.set(0, ch.body.headC.y, ch.body.headC.z + 0.075);
+    // Kit extras ride on the chest and neck bones, placed from the fitted body.
+    const toBone = (b: number, o: THREE.Object3D) => {
+      o.applyMatrix4(mesh.skeleton.boneInverses[b]);
+      o.castShadow = true;
+      this.bones[b].add(o);
+      this.parts.push(o);
+    };
+    if (!isKeeper) {
+      const crest = new THREE.Mesh(geo.crest, gloss(k.secondary));
+      crest.position.copy(ch.body.crestAt);
+      toBone(B.Spine2, crest);
+    }
+    const neckIt = g.neck ?? (app.accessory === 4 ? { style: 'chain', c1: '#ffcf3d', metal: true } : undefined);
+    if (neckIt) toBone(B.Spine2, neckwear(neckIt.style ?? 'chain', neckIt.c1 ?? '#ffcf3d', !!neckIt.metal || !g.neck, k.secondary, ch.body.neck, ch.body.crestAt.z));
+    this.markReady();
+  }
+
+  /**
+   * Changes his look in place, keeping his pose and motion. Anything new to
+   * paint is painted off the main thread first; until then he keeps his old look.
+   */
+  restyle(look: Appearance): Promise<void> {
+    const app = sanitizeAppearance(look);
+    const ck = this.kitFor(app);
+    const run = ++this.styleRun;
+    return new Promise((done) => whenCharacterReady(() => {
+      void prepareCharacter(app, this.keeper, ck, this.detail).then(() => {
+        if (run === this.styleRun) this.dress(app, ck);
+        done();
+      });
+    }));
+  }
 
   /**
    * Plays a one-shot action (kick, trap, header, tackle, keeper set, dive,
@@ -526,6 +582,7 @@ export class Figure {
       look: this.look,
       lift: this.lift,
       hold: this.hold,
+      onStand: this.onStand,
     });
     const sh = this.anim.shift;
     if (sh.lengthSq() > 0) {

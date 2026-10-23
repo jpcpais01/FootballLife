@@ -45,12 +45,16 @@ const eye = new THREE.Vector3();
 
 export interface PortraitOpts { yaw?: number; keeper?: boolean; full?: boolean }
 
-/** Renders one portrait and returns it as an image URL. */
-export function renderPortrait(app: Appearance, kit: Kit, eq: Equipped | undefined, px: number, opts: PortraitOpts = {}): string {
+/**
+ * Renders one portrait and returns it as an image URL. The player is painted
+ * off the main thread and built between frames, so the page never stalls on it.
+ */
+export async function renderPortrait(app: Appearance, kit: Kit, eq: Equipped | undefined, px: number, opts: PortraitOpts = {}): Promise<string> {
+  const fig = new Figure(kit, app, !!opts.keeper, GK_KITS[0], eq, { base: false, scale: SHOWCASE_SCALE, detail: px > 200 ? 'mid' : 'low' });
+  await fig.ready;
   if (!renderer) setup();
   const r = renderer!;
   r.setSize(px, px, false);
-  const fig = new Figure(kit, app, !!opts.keeper, GK_KITS[0], eq, { base: false, scale: SHOWCASE_SCALE, sync: true, detail: px > 200 ? 'mid' : 'low' });
   fig.root.rotation.y = opts.yaw ?? 0.32;
   fig.animate(0, 0, 0);
   scene.add(fig.root);

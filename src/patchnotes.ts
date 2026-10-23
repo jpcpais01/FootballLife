@@ -7,6 +7,13 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T12:00:00Z',
+    entries: [
+      { title: 'Instant player creator', body: 'Changing your look no longer freezes the screen. Faces and kits are now painted in the background, only the part you changed is rebuilt, and your player updates in place without restarting his pose. Trying hairstyles, eye colours or face sliders now feels immediate, and the option previews fill in without stalling the page. Players also load more smoothly in matches and at home.' },
+      { title: 'Better look studio', body: 'The player stage in the Look tab is now much taller and fills the side of the screen, and the face close-up zooms in further. Your player now stands still on the turning stand instead of shuffling and crossing his legs, and pale skin tones have more natural warmth instead of looking white.' },
+    ],
+  },
+  {
     hour: '2026-10-23T11:30:00Z',
     entries: [
       { title: 'All-new players', body: 'Every footballer has been rebuilt from scratch on a realistic human body. Faces have real eyes that catch the light, lips, brows and skin with warmth and texture, and kits are proper fabric with collars, cuffs, stripes, socks and boots that shine. Your shirt number is printed on the back. Every player still moves with the same motion-captured animation.' },
