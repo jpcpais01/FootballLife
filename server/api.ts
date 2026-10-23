@@ -228,7 +228,9 @@ route('GET', '/api/me', async (c) => {
     const m = ms.find((x) => matchStatus(x) !== 'finished');
     if (m) match = { id: m.id, live: matchStatus(m) === 'live', kickoffAt: new Date(m.kickoff_at).toISOString() };
   }
-  return { user: c.user, club: club ? clubBrief(club) : null, unread, match, trainReady: p ? trainingInfo(p).ready : false, daily: p ? dailyBrief(p) : null, player: p ? { ...playerDto(p), coins: p.coins, stars: p.stars ?? 0 } : null, invites: p && !p.club_id ? (await myInvites(c.db, p.id)).filter((i) => i.kind === 'invite').length : 0 };
+  // A season that ended in the last few days gets its awards night when you next open the game.
+  const ended = p ? (await c.db.query<{ number: number }>("SELECT number FROM seasons WHERE status = 'finished' AND ended_at > now() - interval '5 days' ORDER BY number DESC LIMIT 1"))[0] : undefined;
+  return { ceremony: ended?.number ?? null, user: c.user, club: club ? clubBrief(club) : null, unread, match, trainReady: p ? trainingInfo(p).ready : false, daily: p ? dailyBrief(p) : null, player: p ? { ...playerDto(p), coins: p.coins, stars: p.stars ?? 0 } : null, invites: p && !p.club_id ? (await myInvites(c.db, p.id)).filter((i) => i.kind === 'invite').length : 0 };
 });
 
 route('POST', '/api/player', async (c) => {
@@ -735,6 +737,43 @@ route('GET', '/api/league', async (c) => {
     scorers: map(await leaders('sum(s.goals)')),
     assists: map(await leaders('sum(s.assists)')),
     keepers: map(await leaders("sum(CASE WHEN s.clean_sheet THEN 1 ELSE 0 END)", "AND p.position = 'GK'")),
+  };
+});
+
+/** The awards night for a finished season: the final table, the winners, and what you took home. */
+route('GET', '/api/season/ceremony/:n', async (c) => {
+  const p = await myPlayer(c);
+  const season = (await c.db.query<{ id: string; number: number }>("SELECT id, number FROM seasons WHERE number = $1 AND status = 'finished'", [Number(c.params[0])]))[0];
+  if (!season) throw notFound('That season has not finished');
+  const table = await standings(c.db, season.id);
+  const trophies = await c.db.query<{ kind: string; club_id: string | null; player_id: string | null; value: number | null; player: string | null; position: string | null; is_bot: boolean | null; club: string | null; short: string | null; colors: never; badge: never }>(
+    `SELECT t.kind, t.club_id, t.player_id, t.value, p.name player, p.position, p.is_bot, cl.name club, cl.short, cl.colors, cl.badge FROM trophies t
+     LEFT JOIN players p ON p.id = t.player_id LEFT JOIN clubs cl ON cl.id = t.club_id WHERE t.season_id = $1`,
+    [season.id],
+  );
+  const club = (t: (typeof trophies)[number]) => (t.club_id ? { id: t.club_id, name: t.club, short: t.short, colors: t.colors, badge: t.badge } : null);
+  const awards = ['golden_boot', 'playmaker', 'golden_glove', 'pots'].map((k) => trophies.find((t) => t.kind === k && t.player_id)).filter(Boolean).map((t) => ({
+    kind: t!.kind, playerId: t!.player_id, name: t!.player, position: t!.position, isBot: !!t!.is_bot, value: t!.value, club: club(t!), me: t!.player_id === p.id,
+  }));
+  const cup = trophies.find((t) => t.kind === 'cup' && !t.player_id);
+  // Which club you played for that season: the one your league games were for.
+  const mine = (await c.db.query<{ club_id: string; n: number; goals: number; assists: number; avg: number | null; motm: number }>(
+    `SELECT club_id, count(*)::int n, sum(goals)::int goals, sum(assists)::int assists, avg(rating)::float avg, sum(CASE WHEN motm THEN 1 ELSE 0 END)::int motm
+     FROM player_match_stats WHERE player_id = $1 AND season_id = $2 GROUP BY club_id ORDER BY count(*) DESC LIMIT 1`,
+    [p.id, season.id],
+  ))[0];
+  const myPos = mine ? table.findIndex((t) => t.clubId === mine.club_id) : -1;
+  return {
+    season: season.number,
+    table: table.map((t, i) => ({ pos: i + 1, id: t.clubId, clubId: t.clubId, name: t.name, short: t.short, colors: t.colors, badge: t.badge, points: t.points, won: t.won, drawn: t.drawn, lost: t.lost })),
+    champion: table[0] ? { ...table[0], id: table[0].clubId, pos: 1 } : null,
+    cup: cup ? club(cup) : null,
+    awards,
+    me: mine ? {
+      clubId: mine.club_id, pos: myPos + 1, reward: [600, 400, 280][myPos] ?? 120,
+      games: mine.n, goals: mine.goals, assists: mine.assists, avg: mine.avg, motm: mine.motm,
+      honours: trophies.filter((t) => t.player_id === p.id).map((t) => t.kind),
+    } : null,
   };
 });
 

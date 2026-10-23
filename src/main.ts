@@ -10,6 +10,7 @@ import { errorBox, relTime } from './ui.ts';
 import { fullscreenOnFirstTap } from './fullscreen.ts';
 import { initSound, setScene, setSoundPrefs, soundPrefs } from './audio.ts';
 import { openDaily, watchDaily } from './daily.ts';
+import { watchCeremony } from './ceremony.ts';
 
 const dailyDue = () => !!state.daily && (state.daily.checkin || state.daily.ready.length > 0);
 
@@ -488,6 +489,7 @@ async function render(path: string) {
 // (The page element must survive: pages keep listeners on it.)
 document.addEventListener('me-changed', () => {
   watchDaily();
+  void watchCeremony();
   if (!shellMounted || !state.player) return;
   // Rewrite each piece only when its markup changed: a no-op refresh must not flash.
   const top = document.getElementById('me-top');
