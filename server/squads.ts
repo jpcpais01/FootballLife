@@ -20,6 +20,9 @@ export interface PlayerRow {
   attrs: Attributes;
   xp: Partial<Record<string, number>>;
   coins: number;
+  stars: number;
+  /** Daily box opens and ad views, per UTC day (server/stars.ts). */
+  perks: Record<string, unknown>;
   last_train_at: Date | null;
   created_at: Date;
   equipped: Record<string, string>;

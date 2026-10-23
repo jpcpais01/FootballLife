@@ -215,7 +215,7 @@ route('GET', '/api/me', async (c) => {
     const m = ms.find((x) => matchStatus(x) !== 'finished');
     if (m) match = { id: m.id, live: matchStatus(m) === 'live', kickoffAt: new Date(m.kickoff_at).toISOString() };
   }
-  return { user: c.user, club: club ? clubBrief(club) : null, unread, match, trainReady: p ? trainingInfo(p).ready : false, daily: p ? dailyBrief(p) : null, player: p ? { ...playerDto(p), coins: p.coins } : null, invites: p && !p.club_id ? (await myInvites(c.db, p.id)).filter((i) => i.kind === 'invite').length : 0 };
+  return { user: c.user, club: club ? clubBrief(club) : null, unread, match, trainReady: p ? trainingInfo(p).ready : false, daily: p ? dailyBrief(p) : null, player: p ? { ...playerDto(p), coins: p.coins, stars: p.stars ?? 0 } : null, invites: p && !p.club_id ? (await myInvites(c.db, p.id)).filter((i) => i.kind === 'invite').length : 0 };
 });
 
 route('POST', '/api/player', async (c) => {
