@@ -55,12 +55,18 @@ interface Running {
   sx: number;
   sz: number;
   shifted: boolean;
+  /** Legs that keep running underneath the action when the player is moving (0 left, 1 right). */
+  legs: number[];
 }
 
 const LOCO = { fwd: ['walk', 'jog', 'run', 'sprint'], back: ['walkBack', 'runBack'] };
 
 /** Clip per action where it isn't simply the action's own name. */
 const CLIP_OF: Partial<Record<ActionKind, string>> = { passLong: 'cross' };
+
+/** Actions the whole body commits to: no running legs underneath. */
+const WHOLE_BODY = new Set<ActionKind>(['slide', 'dive', 'diveHigh', 'fall', 'getUp', 'header', 'keeperScoop', 'keeperSet', 'throwIn', 'keeperThrow']);
+const LEG_BONES = [[B.LeftUpLeg, B.LeftLeg, B.LeftFoot, B.LeftToeBase], [B.RightUpLeg, B.RightLeg, B.RightFoot, B.RightToeBase]];
 
 /** Which part of the body meets the ball in each action. */
 const EFFECTOR: Partial<Record<ActionKind, 'foot' | 'head' | 'chest' | 'hands'>> = {
@@ -89,6 +95,17 @@ const qx = new THREE.Quaternion();
 const X = new THREE.Vector3(1, 0, 0);
 const Y = new THREE.Vector3(0, 1, 0);
 const feetTmp: [number, number] = [0, 0];
+
+/** Moves one bone of `pose` toward `src` by w (nlerp). */
+function nlerpBone(pose: Pose, src: Pose, b: number, w: number) {
+  const j = b * 4;
+  let x = src.q[j], y = src.q[j + 1], z = src.q[j + 2], ww = src.q[j + 3];
+  if (x * pose.q[j] + y * pose.q[j + 1] + z * pose.q[j + 2] + ww * pose.q[j + 3] < 0) { x = -x; y = -y; z = -z; ww = -ww; }
+  const ox = pose.q[j] + (x - pose.q[j]) * w, oy = pose.q[j + 1] + (y - pose.q[j + 1]) * w;
+  const oz = pose.q[j + 2] + (z - pose.q[j + 2]) * w, ow = pose.q[j + 3] + (ww - pose.q[j + 3]) * w;
+  const n = 1 / Math.hypot(ox, oy, oz, ow);
+  pose.q[j] = ox * n; pose.q[j + 1] = oy * n; pose.q[j + 2] = oz * n; pose.q[j + 3] = ow * n;
+}
 
 /** Rotates `bone` (in world space) so its `from` direction points along `to`. */
 function aimBone(bone: THREE.Object3D, from: THREE.Vector3, to: THREE.Vector3) {
@@ -142,6 +159,8 @@ export class Animator {
   private vF = 0;
   private vS = 0;
   private holdW = 0;
+  /** The locomotion pose on its own, for legs that keep running under an action. */
+  private loco = new Pose();
 
   constructor(bones: THREE.Bone[], root: THREE.Object3D) {
     this.bones = bones;
@@ -162,6 +181,17 @@ export class Animator {
       this.cache.set(key, c);
     }
     return c;
+  }
+
+  /** A hard cut (the player was put on a new spot): no action, blend or planted foot carries over. */
+  reset() {
+    this.action = null;
+    this.fromT = this.fromDur;
+    this.hasLast = false;
+    for (const f of this.feet) {
+      f.locked = false;
+      f.w = 0;
+    }
   }
 
   /** Holds the current pose and blends from it over `dur` seconds. */
@@ -193,9 +223,16 @@ export class Animator {
     // Cutting in on another action: blend from the pose on screen. Otherwise it blends in when it starts.
     const busy = !!this.action && this.action.t >= 0;
     if (busy) this.cut(0.22);
-    this.action = { clip, t, contact, rate, w: busy && t >= 0 ? 1 : 0, sx: 0, sz: 0, shifted: false };
-    return this.effector(clip, contact, EFFECTOR[kind]);
+    const part = EFFECTOR[kind];
+    const eff = this.effector(clip, contact, part);
+    // On the move, the support leg (or both legs for a catch) keeps the stride while the rest plays the action.
+    const legs = WHOLE_BODY.has(kind) ? [] : part === 'foot' ? [1 - this.kickSide] : [0, 1];
+    this.action = { clip, t, contact, rate, w: busy && t >= 0 ? 1 : 0, sx: 0, sz: 0, shifted: false, legs };
+    return eff;
   }
+
+  /** The striking foot of the last foot action planned (0 left, 1 right). */
+  private kickSide = 1;
 
   /** Seconds from the start of an action's clip to its contact frame. */
   contactOf(kind: ActionKind, side: 1 | -1 = 1) {
@@ -213,6 +250,7 @@ export class Animator {
     // The striking foot is the one out in front; the ball sits just beyond the toe.
     const l = P(B.LeftToeBase);
     const r = P(B.RightToeBase);
+    this.kickSide = l.z > r.z ? 0 : 1;
     const toe = l.z > r.z ? l : r;
     return toe.add(new THREE.Vector3(0, 0, 0.1));
   }
@@ -299,9 +337,13 @@ export class Animator {
       sample(this.clip(inp.keeper ? 'keeperIdle' : 'idle'), this.idleT, this.tmp);
       accumulate(acc, this.tmp, idleW);
       totalW += idleW;
+      // Standing: both feet are planted.
+      footL += idleW;
+      footR += idleW;
     }
     normalisePose(acc, totalW);
     pose.copy(acc);
+    this.loco.copy(pose);
     if (totalW > 0) {
       footL /= totalW;
       footR /= totalW;
@@ -313,7 +355,9 @@ export class Animator {
         this.celName = inp.celebrate;
         this.celT = Math.random() * 0.3;
       }
-      this.celW = Math.min(1, this.celW + dt * 5);
+      // Running to the scorer or the corner flag is running; the celebration plays once he gets there.
+      const want = Math.max(0, Math.min(1, 1 - (inp.speed - 1.2) / 1.6));
+      this.celW = this.celW < want ? Math.min(want, this.celW + dt * 4) : Math.max(want, this.celW - dt * 4);
     } else this.celW = Math.max(0, this.celW - dt * 4);
     if (this.celW > 0 && this.celName) {
       this.celT += dt;
@@ -363,21 +407,24 @@ export class Animator {
     const actW = this.action && this.action.t >= 0 ? this.action.w : 0;
     const override = Math.max(actW, this.celW, this.scrubW);
 
+    // ---- Running legs under an action ----
+    const run = this.action && this.action.legs.length ? actW * Math.max(0, Math.min(0.9, (inp.speed - 0.8) / 3)) : 0;
+    const legW = [0, 0];
+    if (run > 0) {
+      for (const leg of this.action!.legs) {
+        legW[leg] = run;
+        for (const b of LEG_BONES[leg]) nlerpBone(pose, this.loco, b, run);
+      }
+      pose.p[1] += (this.loco.p[1] - pose.p[1]) * run * 0.6;
+    }
+
     // ---- Keeper's hold: arms only, under any action ----
     this.holdW = inp.hold ? Math.min(1, this.holdW + dt * 5) : Math.max(0, this.holdW - dt * 5);
     const hw = this.holdW * (1 - actW);
     if (hw > 0) {
       const c = this.clip('catch');
       sample(c, Math.min(duration(c), 0.8), this.tmp);
-      for (const b of ARMS) {
-        const j = b * 4;
-        let x = this.tmp.q[j], y = this.tmp.q[j + 1], z = this.tmp.q[j + 2], w = this.tmp.q[j + 3];
-        if (x * pose.q[j] + y * pose.q[j + 1] + z * pose.q[j + 2] + w * pose.q[j + 3] < 0) { x = -x; y = -y; z = -z; w = -w; }
-        const ox = pose.q[j] + (x - pose.q[j]) * hw, oy = pose.q[j + 1] + (y - pose.q[j + 1]) * hw;
-        const oz = pose.q[j + 2] + (z - pose.q[j + 2]) * hw, ow = pose.q[j + 3] + (w - pose.q[j + 3]) * hw;
-        const n = 1 / Math.hypot(ox, oy, oz, ow);
-        pose.q[j] = ox * n; pose.q[j + 1] = oy * n; pose.q[j + 2] = oz * n; pose.q[j + 3] = ow * n;
-      }
+      for (const b of ARMS) nlerpBone(pose, this.tmp, b, hw);
     }
 
     // ---- Blend out of a cut ----
@@ -432,14 +479,17 @@ export class Animator {
     // Fast-forward or a teleport: the root moves faster than the legs could carry it.
     const skating = !this.hasLast || dt <= 0 || moved > inp.speed * 1.6 + 1.5 * scale;
     this.hasLast = true;
-    const canLock = locoW > 0.5 && moveW > 0.35 && !skating;
+    void moveW;
     const minY = inp.lift + ANKLE_Y - 0.004;
     const contact = [footL, footR];
+    // A slow or standing body re-plants sooner, in small steps.
+    const reach = (inp.speed < 1.5 ? 0.2 : 0.32) * scale;
     for (let s = 0; s < 2; s++) {
       const f = this.feet[s];
+      const canLock = locoW + legW[s] > 0.5 && !skating;
       f.foot.getWorldPosition(vc);
       if (f.locked) {
-        if (!canLock || contact[s] < 0.4 || vc.distanceTo(f.at) > 0.32 * scale) f.locked = false;
+        if (!canLock || contact[s] < 0.4 || vc.distanceTo(f.at) > reach) f.locked = false;
       } else if (canLock && contact[s] > 0.6) {
         f.locked = true;
         f.at.copy(vc);
@@ -451,6 +501,8 @@ export class Animator {
       f.w = f.locked ? Math.min(1, f.w + dt / 0.06) : Math.max(0, f.w - dt / 0.14);
       if (!canLock && skating) f.w = 0;
       vt.copy(vc).lerp(f.at, f.w);
+      // Letting go of a planted foot: lift it through the step instead of dragging it.
+      if (!f.locked && f.w > 0 && f.w < 1) vt.y += Math.sin(Math.PI * f.w) * 0.07 * scale;
       if (locoW > 0) {
         this.root.worldToLocal(vt);
         if (vt.y < minY) vt.y += (minY - vt.y) * locoW;

@@ -938,6 +938,9 @@ export class Figure {
   private reachT = 0;
   private reachLead = 0;
   private reachOn = false;
+  /** The reach shown last frame, and what was left of it when a new action took over (eases out). */
+  private reached = new THREE.Vector3();
+  private reachRest = new THREE.Vector3();
   /** Height the body rises to meet the ball (a keeper's dive or jump), metres. */
   private reachY = 0;
   /** Keeper saves keep their reach: he lands where he stretched to and walks back from there. */
@@ -1051,6 +1054,9 @@ export class Figure {
    */
   act(kind: ActionKind, opts?: ActOpts, aim?: ActAim) {
     const eff = this.anim.act(kind, opts);
+    // A new action never snaps the body off the step the last one took toward the ball.
+    this.reachRest.copy(this.reached);
+    this.reachOn = false;
     if (!eff || !aim) return;
     // Where that body part will be at contact, if the player is where the game puts him.
     const s = this.root.scale.x;
@@ -1072,6 +1078,17 @@ export class Figure {
 
   get acting() {
     return this.anim.acting;
+  }
+
+  /** Put straight onto a new spot (a reset between phases): whatever he was doing ends there. */
+  teleport(heading: number) {
+    this.anim.reset();
+    this.carry.set(0, 0, 0);
+    this.reachOn = false;
+    this.reachRest.set(0, 0, 0);
+    this.reached.set(0, 0, 0);
+    this.faceTo = null;
+    this.heading = heading;
   }
 
   /** Seconds an action takes from its start to the moment it meets the ball, at natural speed. */
@@ -1150,6 +1167,14 @@ export class Figure {
       } else tmpOff.addScaledVector(this.reach, out);
       if (this.reachT <= 0) up = this.reachY * out;
       if (this.reachT < -0.45) this.reachOn = false;
+    }
+    this.reached.set(tmpOff.x - this.carry.x, up, tmpOff.z - this.carry.z);
+    if (this.reachRest.lengthSq() > 1e-6) {
+      this.reachRest.multiplyScalar(Math.exp(-dt / 0.15));
+      this.reached.add(this.reachRest);
+      tmpOff.x += this.reachRest.x;
+      tmpOff.z += this.reachRest.z;
+      up += this.reachRest.y;
     }
     // Into the root's own frame.
     tmpOff.y = up;

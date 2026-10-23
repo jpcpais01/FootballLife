@@ -40,7 +40,14 @@ export interface Frame {
   vel: { x: number; y: number }[] | null;
   /** Body actions from the recording around this moment. */
   acts: Act[];
+  /** Changes when the recording resets everyone (a new kickoff): the view cuts instead of gliding. */
+  cut: number;
 }
+
+/** Faster than any sprint (m/s): a recorded move this quick is a reset, not a run. */
+const JUMP = 16;
+/** Faster than any strike (m/s), for the ball. */
+const BALL_JUMP = 45;
 
 /** How far the taker backs off the ball before running up to strike it. */
 const RUN_UP: Record<string, number> = { penalty: 3.4, corner: 2.4, goalkick: 3, kickoff: 0.8, throwin: 0 };
@@ -65,8 +72,28 @@ export class Playback {
 
   private tracks: Track[] = [];
 
+  /** Per track: how many teleports (restart resets) the recording has made by each sample. */
+  private cuts = new Map<Track, Uint16Array>();
+
   setTracks(tracks: Track[]) {
     this.tracks = tracks.slice().sort((a, b) => a.t0 - b.t0);
+    this.cuts.clear();
+    for (const tr of this.tracks) {
+      const np = tr.p.length / 44;
+      const c = new Uint16Array(Math.max(1, np));
+      for (let i = 1; i < np; i++) {
+        let jump = false;
+        for (let j = 0; j < 22 && !jump; j++) jump = this.jumps(tr, i - 1, j);
+        c[i] = c[i - 1] + (jump ? 1 : 0);
+      }
+      this.cuts.set(tr, c);
+    }
+  }
+
+  /** True when player `j` moves further between samples `i` and `i + 1` than anyone can run: the engine reset him. */
+  private jumps(tr: Track, i: number, j: number) {
+    const a = i * 44 + j * 2;
+    return Math.hypot(tr.p[a + 44] - tr.p[a], tr.p[a + 45] - tr.p[a + 1]) > JUMP / tr.hz;
   }
 
   trackAt(t: number): Track | null {
@@ -93,11 +120,20 @@ export class Playback {
     const i3 = Math.min(np - 1, i1 + 2);
     for (let j = 0; j < 22; j++) {
       const c = (i: number, o: number) => tr.p[i * 44 + j * 2 + o];
-      const cr = (o: number) => catmull(c(i0, o), c(i1, o), c(i2, o), c(i3, o), k);
-      const dr = (o: number) => catmullD(c(i0, o), c(i1, o), c(i2, o), c(i3, o), k) * tr.hz;
+      // A reset is a cut: he is on his new spot at once, and the curve never bends across it.
+      if (i2 > i1 && this.jumps(tr, i1, j)) {
+        pos.push({ x: c(i2, 0), y: c(i2, 1) });
+        vel.push({ x: 0, y: 0 });
+        continue;
+      }
+      const a0 = i0 < i1 && this.jumps(tr, i0, j) ? i1 : i0;
+      const a3 = i3 > i2 && this.jumps(tr, i2, j) ? i2 : i3;
+      const cr = (o: number) => catmull(c(a0, o), c(i1, o), c(i2, o), c(a3, o), k);
+      const dr = (o: number) => catmullD(c(a0, o), c(i1, o), c(i2, o), c(a3, o), k) * tr.hz;
       pos.push({ x: cr(0), y: cr(1) });
       vel.push({ x: dr(0), y: dr(1) });
     }
+    const cut = (this.cuts.get(tr)?.[Math.min(np - 1, i1 + (i2 > i1 && k > 0 ? 1 : 0))] ?? 0) + tr.t0 * 1000;
     const nb = tr.b.length / 3;
     const bh = tr.hz * 2;
     const g = (t - tr.t0) * bh;
@@ -106,14 +142,17 @@ export class Playback {
     const b0 = Math.max(0, b1 - 1);
     const b2 = Math.min(nb - 1, b1 + 1);
     const b3 = Math.min(nb - 1, b1 + 2);
+    const bj = (i: number) => Math.hypot(tr.b[i * 3 + 3] - tr.b[i * 3], tr.b[i * 3 + 4] - tr.b[i * 3 + 1]) > BALL_JUMP / bh;
     // Ball: smooth in the air, but never overshoot a sharp change (a strike or a bounce).
+    const reset = b2 > b1 && bj(b1);
     const bc = (o: number) => {
+      if (reset) return tr.b[b2 * 3 + o];
       const lin = tr.b[b1 * 3 + o] + (tr.b[b2 * 3 + o] - tr.b[b1 * 3 + o]) * bk;
       const cur = catmull(tr.b[b0 * 3 + o], tr.b[b1 * 3 + o], tr.b[b2 * 3 + o], tr.b[b3 * 3 + o], bk);
       return Math.abs(cur - lin) > 0.4 ? lin : cur;
     };
     const ball = { x: bc(0), y: bc(1), z: Math.max(0.11, bc(2)) };
-    return { pos, vel, ball };
+    return { pos, vel, ball, cut };
   }
 
   setEvents(events: MatchEvent[]) {
@@ -157,7 +196,7 @@ export class Playback {
     const fr = this.frameFromEvents(t);
     const tr = this.trackAt(t);
     if (!tr) return fr;
-    const { pos, vel, ball } = this.sample(tr, t);
+    const { pos, vel, ball, cut } = this.sample(tr, t);
     // Who has it: the closest player to a ball on the ground, if it's at his feet.
     let holder = -1;
     let bd = 1.3;
@@ -169,7 +208,7 @@ export class Playback {
       }
     }
     const acts = tr.acts.filter((a) => a[0] > t - 1.2 && a[0] < t + 1.2);
-    return { ...fr, ball, targets: pos, vel, tracked: true, acts, holder: fr.celebrating >= 0 ? -1 : holder, phase: holder >= 0 || fr.phase === 'dead' ? fr.phase : 'flight' };
+    return { ...fr, ball, targets: pos, vel, tracked: true, cut, acts, holder: fr.celebrating >= 0 ? -1 : holder, phase: holder >= 0 || fr.phase === 'dead' ? fr.phase : 'flight' };
   }
 
   private frameFromEvents(t: number): Frame {
@@ -317,7 +356,7 @@ export class Playback {
         if (idx === celebrating || k % 3 !== 0) targets[idx] = { x: corner.x - this.dir(side, t) * (d + 1), y: corner.y - Math.sign(corner.y) * (Math.abs(Math.sin(a)) * d + 1) };
       }
     }
-    return { ball, holder, poss, targets, sentOff, score: this.scoreBefore(i), index: i, celebrating, phase, kicker, kickAt, flightF, aim, restart, tracked: false, vel: null, acts: [] };
+    return { ball, holder, poss, targets, sentOff, score: this.scoreBefore(i), index: i, celebrating, phase, kicker, kickAt, flightF, aim, restart, tracked: false, vel: null, acts: [], cut: -1 };
   }
 }
 
