@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T18:00:00Z',
+    entries: [
+      { title: 'Season badge no longer hidden', body: 'On phones held sideways, the small Season badge with your league place on the home screen slid under the coins and profile bar in the top right. It now sits clear of it, a little further left.' },
+    ],
+  },
+  {
     hour: '2026-10-23T17:00:00Z',
     entries: [
       { title: 'Your match, at full time', body: 'When the final whistle goes, a report card now tells the story of your own game: your rating counts up in a glowing ring, a gold star if you were player of the match, your goals, shots, passing and tackles, and one line on how it went. It shows the coins and fame you earned, any attributes that levelled up, and how the rating compares to your season average, so you know when you have just played your best game of the season.' },

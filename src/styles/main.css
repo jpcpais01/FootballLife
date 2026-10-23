@@ -1273,7 +1273,9 @@ a.bk-tie:hover { border-color: var(--line-2); }
   /* Other dock pages have no top bar at all; sub-pages keep just the back button. */
   .app:not(.at-home):not(.is-sub) .topnav { display: none; }
   .app.at-home:not(.at-match) main { padding-top: 6px; }
-  .home-top { margin: 0 0 8px; align-items: center; min-height: 52px; padding-right: 230px; }
+  .home-top { margin: 0 0 8px; align-items: center; min-height: 52px; padding-right: 350px; }
+  .home-top > :first-child { min-width: 0; }
+  .home-top .chip { flex: none; }
   .home-name { font-size: 30px; margin: 0; }
   .spot-card.hero { min-height: calc((100dvh - 80px) / 0.88); }
   .spot-card .hero-inner { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); padding: 18px 24px; min-height: 0; gap: 18px; height: 100%; }
