@@ -7,6 +7,14 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T13:30:00Z',
+    entries: [
+      { title: 'Players move like footballers', body: 'Players off the ball no longer jog everywhere all match. When they are where they need to be they stand and watch the play, small adjustments are walked, and they save their running for the moments that matter: closing down, getting back, attacking space. Walking time has nearly doubled, to about half the match like in real football, and the far side of the pitch is calm while the players near the ball stay on their toes. Every player also has his own work rate.' },
+      { title: 'Smarter transitions', body: 'When the ball changes hands the teams no longer snap from one shape to the other. Forwards spring forward the moment the ball is won and defenders drop straight back when it is lost, while full-backs and holding midfielders wait a moment to see the ball kept before they push on. A scrappy spell of back-and-forth no longer sends everyone sprinting up and down the pitch.' },
+      { title: 'Defending as a unit', body: 'The back four now steps up and drops off together in clear moves, instead of drifting with every touch. The man closing down the ball commits to it and slows to jockey in the last few metres instead of charging in, and markers stay with their man rather than swapping whenever someone runs past.' },
+    ],
+  },
+  {
     hour: '2026-10-23T13:00:00Z',
     entries: [
       { title: 'Daily check-in streak', body: 'Open the game each day to claim a check-in reward. A week of rewards climbs from 50 coins on day 1 up to 400 coins and a gift on day 7, then the week starts again. Miss a day and the streak starts over, but you never lose anything you have earned.' },
