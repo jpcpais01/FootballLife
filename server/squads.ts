@@ -28,6 +28,10 @@ export interface PlayerRow {
   home: Record<string, unknown>;
   transfer_status: string;
   transfer_note: string;
+  daily: Record<string, unknown>;
+  streak: number;
+  streak_day: string | null;
+  fame: number;
 }
 
 export interface ClubRow {

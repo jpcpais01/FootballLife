@@ -13,6 +13,7 @@ import { newId } from './http.ts';
 import { BOT_CLUBS } from './names.ts';
 import { matchXp } from './progression.ts';
 import { checkAchievements, grantItem, notify } from './rewards.ts';
+import { addFame } from './daily.ts';
 import { clubMessage } from './social.ts';
 import { sanitizeEquipped, type Equipped } from '../shared/cosmetics.ts';
 import { TROPHY_KINDS, type TrophyKind } from '../shared/achievements.ts';
@@ -401,8 +402,10 @@ async function finalizeMatch(db: Db, m: MatchRow) {
         await db.query('UPDATE players SET coins = coins + $2, attrs = $3, xp = $4 WHERE id = $1', [p.id, coins, JSON.stringify(xpRes.attrs), JSON.stringify(xpRes.xp)]);
         const ups = xpRes.levelUps.length ? ` Level up: ${[...new Set(xpRes.levelUps.map((u) => u.attr))].join(', ')}.` : '';
         await collect(db, p.id, m, side, line.goals, rng);
+        await addFame(db, p.id, 20 + (outcome === 'win' ? 15 : 0) + line.goals * 10 + line.assists * 6 + (res.motm === side * 11 + i ? 25 : 0));
         await notify(db, p.id, 'result', `${cupName ? `${cupName}: ` : ''}${outcome === 'win' ? 'Win' : outcome === 'draw' ? 'Draw' : 'Defeat'} vs ${opp} (${score}). Rating ${line.rating.toFixed(1)}, +${coins} coins.${ups}`, { matchId: m.id });
       } else {
+        await addFame(db, p.id, 10);
         await notify(db, p.id, 'result', `Friendly vs ${opp} finished ${score}. Rating ${line.rating.toFixed(1)}.`, { matchId: m.id });
       }
     }

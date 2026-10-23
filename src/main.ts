@@ -9,6 +9,9 @@ import { refreshMe, state } from './state.ts';
 import { errorBox, relTime } from './ui.ts';
 import { fullscreenOnFirstTap } from './fullscreen.ts';
 import { initSound, setScene, setSoundPrefs, soundPrefs } from './audio.ts';
+import { openDaily, watchDaily } from './daily.ts';
+
+const dailyDue = () => !!state.daily && (state.daily.checkin || state.daily.ready.length > 0);
 
 // New deploys install in the background and switch over while the game is out
 // of sight, never by reloading the page under the player.
@@ -134,6 +137,7 @@ function dockHtml(path: string) {
     const badge = n.href === '/club' && state.invites ? html`<b class="nav-dot">${state.invites}</b>`
       : n.icon === 'match' && m?.live ? html`<b class="dk-live">LIVE</b>`
       : n.href === '/training' && state.trainReady ? html`<b class="dk-dot"></b>`
+      : n.href === '/' && dailyDue() ? html`<b class="dk-dot"></b>`
       : '';
     const accent = n.href === '/club' && state.club ? state.club.colors.primary : n.accent;
     const active = n.href.startsWith('/match/') ? path === n.href : isActive(n.href, path);
@@ -181,9 +185,10 @@ function meTop() {
   const p = state.player;
   if (!p) return html``;
   return html`<a href="/shop" class="coin-chip" aria-label="Coins">${icon('coin', 15)}<b>${p.coins.toLocaleString()}</b></a>
+    <button class="top-icon ${dailyDue() ? 'has-dot' : ''}" aria-label="Today: daily goals and rewards" title="Today" data-daily>${icon('target', 19)}</button>
     <button class="top-icon" aria-label="Refresh the game" title="Refresh for updates" data-refresh>${icon('refresh', 18)}</button>
     <button class="top-icon ${state.unread ? 'has-dot' : ''}" aria-label="Inbox" data-inbox>${icon('bell', 19)}</button>
-    <button class="top-avatar" data-menu aria-label="Menu">${avatar(p.appearance, state.club?.colors, 36, undefined, { eq: p.equipped })}</button>`;
+    <button class="top-avatar" data-menu aria-label="Menu">${avatar(p.appearance, state.club?.colors, 36, undefined, { eq: p.equipped })}${state.daily ? html`<b class="av-lv" style="--f:${Math.round(state.daily.fame * 100)}%">${state.daily.level}</b>` : ''}</button>`;
 }
 
 function menu() {
@@ -395,6 +400,11 @@ root.addEventListener('click', async (e) => {
     safeSet('fl-portrait', '1');
     return;
   }
+  if (t.closest('[data-daily]')) {
+    closeMenu();
+    void openDaily();
+    return;
+  }
   if (t.closest('[data-inbox]')) {
     void openInbox();
     return;
@@ -476,6 +486,7 @@ async function render(path: string) {
 // Refresh the coins, avatar, menu and badges in place when the player changes.
 // (The page element must survive: pages keep listeners on it.)
 document.addEventListener('me-changed', () => {
+  watchDaily();
   if (!shellMounted || !state.player) return;
   // Rewrite each piece only when its markup changed: a no-op refresh must not flash.
   const top = document.getElementById('me-top');

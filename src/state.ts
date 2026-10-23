@@ -21,7 +21,8 @@ export interface MePlayer {
 
 export interface MeClub { id: string; name: string; short: string; colors: { primary: string; secondary: string }; badge: Badge; isBot: boolean }
 
-export const state: { user: { id: string; username: string } | null; player: MePlayer | null; club: MeClub | null; loaded: boolean; invites: number; unread: number; match: { id: string; live: boolean; kickoffAt: string } | null; trainReady: boolean } = {
+export const state: { user: { id: string; username: string } | null; player: MePlayer | null; club: MeClub | null; loaded: boolean; invites: number; unread: number; match: { id: string; live: boolean; kickoffAt: string } | null; trainReady: boolean; daily: { checkin: boolean; ready: string[]; level: number; fame: number } | null } = {
+  daily: null,
   match: null,
   trainReady: false,
   invites: 0,
@@ -41,6 +42,7 @@ export async function refreshMe() {
   state.unread = r.unread ?? 0;
   state.match = r.match ?? null;
   state.trainReady = !!r.trainReady;
+  state.daily = r.daily ?? null;
   state.loaded = true;
   document.dispatchEvent(new CustomEvent('me-changed'));
 }

@@ -17,6 +17,8 @@ import { clubPlayers, clubStrength, resolveLineup, syncSquad, type ClubRow, type
 import { ACHIEVEMENTS, ACH_BY_ID } from '../shared/achievements.ts';
 import { featured, ITEM_BY_ID, ITEMS, priceOf, sanitizeEquipped, shopDay, SLOTS, type Slot } from '../shared/cosmetics.ts';
 import { achStats, checkAchievements, notify } from './rewards.ts';
+import { addFame, bump, checkIn, claimGoal, dailyBrief, dailyDto } from './daily.ts';
+import type { GoalEvent } from '../shared/daily.ts';
 import { CHAT_MAX, clubMessage, defaultShirt, leaveClub, MAX_HUMANS, moveToClub, notifyStaff } from './social.ts';
 import { CAR_BY_ID, CAR_COLORS, DEFAULT_HOME, FLOOR_STYLES, FURNITURE, FURNITURE_BY_ID, FURNITURE_SLOTS, HOUSE_BY_ID, HOUSES, RESPRAY_COST, sanitizeHome, WALL_COLORS, type FurnitureSlot } from '../shared/life.ts';
 
@@ -63,6 +65,16 @@ async function myPlayer(c: Ctx): Promise<PlayerRow> {
   const p = (await c.db.query<PlayerRow>('SELECT * FROM players WHERE user_id = $1', [u.id]))[0];
   if (!p) throw bad('Create your player first');
   return p;
+}
+
+/** Counts a visit towards today's goals. Repeat visits stop counting once no goal could need them. */
+async function visit(c: Ctx, event: GoalEvent, p?: PlayerRow) {
+  if (!c.user) return;
+  const me = p ?? (await c.db.query<PlayerRow>('SELECT * FROM players WHERE user_id = $1', [c.user.id]))[0];
+  if (!me) return;
+  const d = me.daily as { day?: string; n?: Record<string, number> };
+  if (d?.day === new Date().toISOString().slice(0, 10) && (d.n?.[event] ?? 0) >= 3) return;
+  await bump(c.db, me, event).catch((e) => console.error('daily bump failed', e));
 }
 
 async function getClub(db: Db, id: string): Promise<ClubRow> {
@@ -203,7 +215,7 @@ route('GET', '/api/me', async (c) => {
     const m = ms.find((x) => matchStatus(x) !== 'finished');
     if (m) match = { id: m.id, live: matchStatus(m) === 'live', kickoffAt: new Date(m.kickoff_at).toISOString() };
   }
-  return { user: c.user, club: club ? clubBrief(club) : null, unread, match, trainReady: p ? trainingInfo(p).ready : false, player: p ? { ...playerDto(p), coins: p.coins } : null, invites: p && !p.club_id ? (await myInvites(c.db, p.id)).filter((i) => i.kind === 'invite').length : 0 };
+  return { user: c.user, club: club ? clubBrief(club) : null, unread, match, trainReady: p ? trainingInfo(p).ready : false, daily: p ? dailyBrief(p) : null, player: p ? { ...playerDto(p), coins: p.coins } : null, invites: p && !p.club_id ? (await myInvites(c.db, p.id)).filter((i) => i.kind === 'invite').length : 0 };
 });
 
 route('POST', '/api/player', async (c) => {
@@ -247,8 +259,11 @@ route('POST', '/api/train', async (c) => {
     [p.id, JSON.stringify(res.attrs), JSON.stringify(res.xp), p.last_train_at],
   );
   if (!updated.length) throw bad('Training already in progress');
+  await bump(c.db, p, 'train');
+  if (typeof c.body.score === 'number' && c.body.score >= 80) await bump(c.db, p, 'drill');
+  const fameUps = await addFame(c.db, p.id, Math.round(15 * perf));
   const achievements = await checkAchievements(c.db, p.id);
-  return { achievements, levelUps: res.levelUps, xp: res.xp, attrs: res.attrs, ovr: overall(res.attrs, p.position), streak: streak > 0, perf };
+  return { achievements, levelUps: res.levelUps, xp: res.xp, attrs: res.attrs, ovr: overall(res.attrs, p.position), streak: streak > 0, perf, fameUps };
 });
 
 route('GET', '/api/home', async (c) => {
@@ -282,6 +297,7 @@ route('GET', '/api/home', async (c) => {
   return {
     player: { ...playerDto(p), coins: p.coins, career: await careerTotals(c.db, p.id) },
     training: trainingInfo(p),
+    daily: dailyDto(p),
     club,
     season: season ? { id: season.id, number: season.number } : null,
     position,
@@ -304,6 +320,21 @@ route('GET', '/api/home', async (c) => {
   };
 });
 
+route('GET', '/api/daily', async (c) => dailyDto(await myPlayer(c)));
+
+route('POST', '/api/daily/checkin', async (c) => {
+  const p = await myPlayer(c);
+  const r = await checkIn(c.db, p);
+  return { ...r, daily: dailyDto(await myPlayer(c)) };
+});
+
+route('POST', '/api/daily/claim', async (c) => {
+  const p = await myPlayer(c);
+  const r = await claimGoal(c.db, p, String(c.body.id ?? ''));
+  await checkAchievements(c.db, p.id);
+  return { ...r, daily: dailyDto(await myPlayer(c)) };
+});
+
 route('GET', '/api/notifications', async (c) => {
   const p = await myPlayer(c);
   return { notifications: await notifications(c.db, p.id) };
@@ -316,6 +347,7 @@ route('POST', '/api/notifications/read', async (c) => {
 });
 
 route('GET', '/api/clubs', async (c) => {
+  await visit(c, 'clubs');
   const season = await currentSeason(c.db);
   const rows = await c.db.query<ClubRow & { humans: string; in_season: boolean }>(
     `SELECT c.*, (SELECT count(*) FROM players p WHERE p.club_id = c.id AND NOT p.is_bot) humans,
@@ -379,6 +411,7 @@ route('GET', '/api/clubs/:id', async (c) => {
   const players = await clubPlayers(c.db, club.id);
   const me = c.user ? (await c.db.query<PlayerRow>('SELECT * FROM players WHERE user_id = $1', [c.user.id]))[0] : undefined;
   const myRole = me && me.club_id === club.id ? me.club_role : undefined;
+  if (me && myRole) await visit(c, 'club', me);
   const { xi, bench } = resolveLineup(club, players);
   const season = await currentSeason(c.db);
   const fixtures = (await c.db.query<MatchListRow>(
@@ -591,6 +624,7 @@ route('GET', '/api/matches/:id', async (c) => {
   );
   const m = rows[0];
   if (!m) throw notFound('Match not found');
+  await visit(c, 'match');
   const dto = matchDto(m);
   const now = Date.now();
   if (!m.result || !m.lineups) return { match: dto, serverNow: now, ready: false };
@@ -641,6 +675,7 @@ route('GET', '/api/matches/:id', async (c) => {
 route('GET', '/api/players/:id', async (c) => {
   const p = (await c.db.query<PlayerRow>('SELECT * FROM players WHERE id = $1', [c.params[0]]))[0];
   if (!p) throw notFound('Player not found');
+  if (c.user && p.user_id !== c.user.id) await visit(c, 'scout');
   const club = p.club_id ? await getClub(c.db, p.club_id) : null;
   const recent = await c.db.query<{ match_id: string; goals: number; assists: number; rating: number; kickoff_at: Date; home: string; away: string; hg: number; ag: number; club_id: string; home_id: string }>(
     `SELECT s.match_id, s.goals, s.assists, s.rating, m.kickoff_at, h.short home, a.short away, m.home_goals hg, m.away_goals ag, s.club_id, m.home_id
@@ -689,6 +724,7 @@ route('GET', '/api/shop', async (c) => {
   const f = featured(day);
   const owned = await ownedIds(c.db, p.id);
   const club = p.club_id ? await getClub(c.db, p.club_id) : null;
+  await visit(c, 'shop', p);
   return {
     kit: club ? club.colors : { primary: '#1d2329', secondary: '#c6ff3d' },
     shirt: p.shirt,
@@ -732,6 +768,7 @@ route('POST', '/api/locker/equip', async (c) => {
     eq[slot] = itemId;
   } else delete eq[slot];
   await c.db.query('UPDATE players SET equipped = $2 WHERE id = $1', [p.id, JSON.stringify(eq)]);
+  await bump(c.db, p, 'locker');
   return { ok: true, equipped: eq };
 });
 
@@ -904,6 +941,7 @@ route('POST', '/api/clubs/:id/chat', async (c) => {
   lastChat.set(p.id, now);
   const id = newId('cm_');
   await c.db.query("INSERT INTO club_messages (id, club_id, player_id, kind, text) VALUES ($1, $2, $3, 'msg', $4)", [id, club.id, p.id, text]);
+  await bump(c.db, p, 'chat');
   return { ok: true, id };
 });
 
@@ -940,6 +978,7 @@ route('GET', '/api/house/:id', async (c) => {
     'SELECT id, kind, label, data, created_at FROM collectibles WHERE player_id = $1 ORDER BY created_at DESC LIMIT 60', [p.id]);
   const trophies = await c.db.query<{ kind: string; season_number: number }>('SELECT kind, season_number FROM trophies WHERE player_id = $1 ORDER BY season_number DESC', [p.id]);
   const mine = !!c.user && p.user_id === c.user.id;
+  if (mine) await visit(c, 'home', p);
   return {
     mine,
     player: playerDto(p, false),
