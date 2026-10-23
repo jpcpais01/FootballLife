@@ -85,7 +85,11 @@ const even = series(A, B, N);
 console.log('even 50 v 50', even);
 check('goals per match in a realistic band', +even.goals > 1.8 && +even.goals < 3.6, even.goals);
 check('shots per match in a realistic band', +even.shots > 16 && +even.shots < 34, even.shots);
-check('home edge is small', even.W > even.L && even.W / N < 0.55, `${even.W}/${even.D}/${even.L}`);
+// Equal sides are noisy over one series, so the home edge is judged with the sides swapped too.
+const swapped = series(B, A, N, 1001);
+const homeW = even.W + swapped.W;
+const homeL = even.L + swapped.L;
+check('home edge is small', homeW > homeL && homeW / (2 * N) < 0.55, `${even.W}/${even.D}/${even.L} + ${swapped.W}/${swapped.D}/${swapped.L}`);
 
 const strong = series(team('Strong', 62), team('Weak', 48), N);
 console.log('62 v 48', strong);
