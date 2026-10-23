@@ -7,6 +7,15 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T14:50:00Z',
+    entries: [
+      { title: 'A new training ground', body: 'Training now happens at the club academy at golden hour: real grass with mowing stripes and worn patches, a modern academy building, a covered stand, trees swaying in the breeze, floodlights, cones, ladders, hurdles, mannequins and a cart full of balls. The goal has a proper net that bulges when you score, and the light, shadows and colours match the stadium.' },
+      { title: 'Your player, true to size', body: 'The round stand under your player is gone. He now stands on the grass at his real size, with the goal, targets and gates scaled around him, and between drills the camera circles him while he does keepy-ups.' },
+      { title: 'Drills that feel great', body: 'Every shot and pass leaves a trail, the turf flies when you strike, and a perfect hit drops into slow motion as the camera pushes in on the target. Kicks, the net, saves, the countdown and the whistle all have their own sounds. The timing bar is new, with a glowing perfect zone, a ripple where you stopped it, and points and combos popping up after each rep.' },
+      { title: 'Training menu on the pitch', body: 'Pick your drill from the list on the left of the training ground while your player waits on the right, then start from the big button in the corner. On a sideways phone the whole screen is the training ground. The results card counts your score up, stamps your grade and shows how each rep went.' },
+    ],
+  },
+  {
     hour: '2026-10-23T14:40:00Z',
     entries: [
       { title: 'Streetwear', body: 'Your player now has a life off the pitch. Over a hundred new items to wear away from the club: tees, hoodies, puffers, jackets, jeans, cargos, shorts, sneakers, caps, beanies, glasses, chains and bracelets, all modelled on your 3D player. Your club kit stays for matchday. Your profile and home show your street look.' },
