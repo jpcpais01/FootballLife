@@ -5,6 +5,7 @@ import { navigate } from '../router.ts';
 import { state } from '../state.ts';
 import { errorBox, kickoffLabel, skeleton } from '../ui.ts';
 import { trophyArt } from '../gearArt.ts';
+import { seasonView, type SeasonMe } from './season.ts';
 
 export async function leaguePage(el: HTMLElement) {
   mount(el, html`${skeleton(300, 1)}`);
@@ -21,7 +22,16 @@ export async function leaguePage(el: HTMLElement) {
   const current = matches.find((m) => m.status !== 'finished')?.round ?? rounds[rounds.length - 1];
   let round = current;
   const want = new URLSearchParams(location.search).get('tab');
-  let tab: 'table' | 'fixtures' | 'cup' | 'leaders' | 'honours' = want === 'cup' || want === 'fixtures' || want === 'leaders' || want === 'honours' ? want : 'table';
+  type Tab = 'you' | 'table' | 'fixtures' | 'cup' | 'leaders' | 'honours';
+  const TABS: Tab[] = state.player ? ['you', 'table', 'fixtures', 'cup', 'leaders', 'honours'] : ['table', 'fixtures', 'cup', 'leaders', 'honours'];
+  let tab: Tab = TABS.includes(want as Tab) ? (want as Tab) : 'table';
+  // Your own season loads on first look, so the table stays quick.
+  let me: SeasonMe | null = null;
+  let meErr = '';
+  const loadMe = async () => {
+    try { me = await api.get('/api/season/me'); } catch (e) { meErr = (e as Error).message; }
+    if (tab === 'you') render();
+  };
   const played = matches.filter((m) => m.status === 'finished').length;
 
   const leaders = (title: string, rows: any[], unit: string): Raw => html`<div class="card"><div class="card-head"><div class="h2">${title}</div></div>
@@ -78,7 +88,7 @@ export async function leaguePage(el: HTMLElement) {
     mount(el, html`
       <div class="page-head"><div><div class="eyebrow">Division 1</div><div class="h1" style="margin-top:6px">Season ${d.season.number}</div></div>
         <div class="chip">${played}/${matches.length} matches played</div></div>
-      <div class="tabs">${(['table', 'fixtures', 'cup', 'leaders', 'honours'] as const).map((t) => html`<button class="${t === tab ? 'on' : ''}" data-tab="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`)}</div>
+      <div class="tabs">${TABS.map((t) => html`<button class="${t === tab ? 'on' : ''}" data-tab="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`)}</div>
       <div class="fade-in">
       ${tab === 'table' ? html`<div class="card flush" id="tbl">${standingsTable(d.table, myClub)}</div>
         <p class="tiny dim" style="margin-top:10px">3 points for a win, 1 for a draw. Ties broken by goal difference, then goals scored. Final positions earn season rewards for every human player.</p>` : ''}
@@ -87,6 +97,7 @@ export async function leaguePage(el: HTMLElement) {
           <div style="text-align:center"><div class="h2">Round ${round}</div><div class="tiny muted">${roundMatches[0] ? kickoffLabel(roundMatches[0].kickoffAt) : ''}</div></div>
           <button class="btn sm" data-r="1" ${round >= rounds[rounds.length - 1] ? 'disabled' : ''}>›</button></div>
         ${roundMatches.map((m) => matchRow(m, myClub ?? undefined))}</div>` : ''}
+      ${tab === 'you' ? (me?.season ? seasonView(me) : meErr ? errorBox(meErr) : me ? html`<div class="card empty">No active season.</div>` : skeleton(260, 2)) : ''}
       ${tab === 'cup' ? cup() : ''}
       ${tab === 'honours' ? honours() : ''}
       ${tab === 'leaders' ? html`<div class="grid cols-3 stagger">${leaders('Top scorers', d.scorers, 'G')}${leaders('Top assists', d.assists, 'A')}${leaders('Clean sheets', d.keepers, 'CS')}</div>` : ''}
@@ -97,9 +108,15 @@ export async function leaguePage(el: HTMLElement) {
   el.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
     const tb = t.closest('[data-tab]') as HTMLElement | null;
-    if (tb) { tab = tb.dataset.tab as typeof tab; render(); }
+    if (tb) {
+      tab = tb.dataset.tab as Tab;
+      if (tab === 'you' && !me && !meErr) void loadMe();
+      render();
+      history.replaceState(history.state, '', tab === 'table' ? '/league' : `/league?tab=${tab}`);
+    }
     const r = t.closest('[data-r]') as HTMLElement | null;
     if (r) { round = Math.max(rounds[0], Math.min(rounds[rounds.length - 1], round + Number(r.dataset.r))); render(); }
   });
+  if (tab === 'you') void loadMe();
   render();
 }

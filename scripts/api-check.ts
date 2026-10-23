@@ -115,6 +115,8 @@ check('dashboard has results + notifications', home.recent.length >= 1 && home.n
 const lg2 = await call('ana', 'GET', '/api/league');
 check('standings updated after round 1', lg2.table.reduce((s: number, r: { played: number }) => s + r.played, 0) === 10);
 check('top scorers list', Array.isArray(lg2.scorers));
+const mySeason = await call('ana', 'GET', '/api/season/me');
+check('my season has games, races and the club path', mySeason.season && Array.isArray(mySeason.games) && mySeason.races.golden_boot && mySeason.club?.path.length >= 1, `${mySeason.games?.length} games, path ${mySeason.club?.path}`);
 const prof = await call('bo', 'GET', `/api/players/${home.player.id}`);
 check('profile has career', prof.career.apps >= 1, prof.career);
 
