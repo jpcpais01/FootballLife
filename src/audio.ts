@@ -42,6 +42,101 @@ export function roar() {
   crowd?.roar();
 }
 
+export type Sfx = 'kick' | 'net' | 'board' | 'perfect' | 'miss' | 'whoosh' | 'catch' | 'tick' | 'whistle';
+
+/** A short game sound (training drills): made on the spot, quiet when all sound is off. */
+export function sfx(kind: Sfx, level = 1) {
+  if (!ctx || ctx.state !== 'running') return;
+  const p = soundPrefs();
+  if (!p.music && !p.crowd) return;
+  const t = ctx.currentTime;
+  const out = gain(0.9 * level, master);
+  const env = (g: GainNode, peak: number, a: number, d: number) => {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + a + d);
+  };
+  const tone = (type: OscillatorType, f0: number, f1: number, peak: number, a: number, d: number, at = 0) => {
+    const o = ctx!.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t + at);
+    o.frequency.exponentialRampToValueAtTime(f1, t + at + a + d);
+    const g = gain(0, out);
+    g.gain.setValueAtTime(0.0001, t + at);
+    g.gain.exponentialRampToValueAtTime(peak, t + at + a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + at + a + d);
+    o.connect(g);
+    o.start(t + at);
+    o.stop(t + at + a + d + 0.05);
+  };
+  const hiss = (type: BiquadFilterType, f0: number, f1: number, q: number, peak: number, a: number, d: number) => {
+    const src = ctx!.createBufferSource();
+    src.buffer = white;
+    const f = ctx!.createBiquadFilter();
+    f.type = type;
+    f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t);
+    f.frequency.exponentialRampToValueAtTime(f1, t + a + d);
+    const g = gain(0, out);
+    env(g, peak, a, d);
+    src.connect(f).connect(g);
+    src.start(t, Math.random() * 0.5);
+    src.stop(t + a + d + 0.05);
+  };
+  switch (kind) {
+    case 'kick':
+      tone('sine', 150, 48, 0.9, 0.004, 0.16);
+      hiss('bandpass', 2400, 900, 1.2, 0.35, 0.002, 0.05);
+      break;
+    case 'net':
+      hiss('bandpass', 3800, 1600, 0.8, 0.28, 0.02, 0.4);
+      break;
+    case 'board':
+      tone('triangle', 320, 180, 0.5, 0.003, 0.12);
+      hiss('lowpass', 1800, 600, 0.7, 0.3, 0.002, 0.06);
+      break;
+    case 'catch':
+      hiss('lowpass', 900, 300, 0.7, 0.7, 0.003, 0.12);
+      tone('sine', 110, 60, 0.5, 0.004, 0.1);
+      break;
+    case 'perfect':
+      tone('sine', 1318.5, 1318.5, 0.32, 0.005, 0.35);
+      tone('sine', 1975.5, 1975.5, 0.26, 0.005, 0.5, 0.07);
+      tone('triangle', 2637, 2637, 0.08, 0.005, 0.6, 0.07);
+      break;
+    case 'miss':
+      tone('sine', 240, 150, 0.35, 0.01, 0.28);
+      tone('sine', 236, 146, 0.25, 0.01, 0.28);
+      break;
+    case 'whoosh':
+      hiss('bandpass', 500, 2600, 1.4, 0.4, 0.12, 0.3);
+      break;
+    case 'tick':
+      tone('sine', 1100, 1000, 0.25, 0.002, 0.08);
+      break;
+    case 'whistle': {
+      const o = ctx.createOscillator();
+      o.frequency.value = 2900;
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 28;
+      const depth = gain(90);
+      lfo.connect(depth).connect(o.frequency);
+      const g = gain(0, out);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
+      g.gain.setValueAtTime(0.22, t + 0.3);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+      o.connect(g);
+      o.start(t);
+      lfo.start(t);
+      o.stop(t + 0.45);
+      lfo.stop(t + 0.45);
+      break;
+    }
+  }
+  setTimeout(() => out.disconnect(), 1500);
+}
+
 /** Arms the first-tap unlock. Call once at startup. */
 export function initSound() {
   const events = ['pointerdown', 'pointerup', 'touchend', 'keydown'] as const;

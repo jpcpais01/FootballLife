@@ -2,6 +2,7 @@
 // and bank XP scaled by how well you did. While recovering you can still practise.
 import { ATTR_GROUPS, ATTR_LABELS, KEY_ATTRS, xpToNext, type Attr, type Position } from '../../shared/attributes.ts';
 import { api } from '../api.ts';
+import { sfx } from '../audio.ts';
 import { afterPaint, html, mount } from '../dom.ts';
 import { icon } from '../icons.ts';
 import { refreshMe } from '../state.ts';
@@ -20,7 +21,7 @@ const CATEGORY: Record<string, Attr[]> = {
 
 const FOCI = [
   { id: 'position', name: 'Position drills', sub: 'Your five key attributes', icon: 'sparkle', accent: '#c6ff3d' },
-  { id: 'attacking', name: 'Finishing', sub: 'Shooting and movement', icon: 'ball', accent: '#ff5d73' },
+  { id: 'attacking', name: 'Finishing', sub: 'Shooting and movement', icon: 'target', accent: '#ff5d73' },
   { id: 'technical', name: 'Passing', sub: 'Touch, vision and range', icon: 'send', accent: '#3dd6ff' },
   { id: 'physical', name: 'Speed & power', sub: 'Pace, stamina, strength', icon: 'fast', accent: '#ffb020' },
   { id: 'defending', name: 'Tackling', sub: 'Marking and timing', icon: 'shield', accent: '#a78bfa' },
@@ -51,6 +52,7 @@ function targetsOf(focus: string, pos: Position): Attr[] {
 
 const grade = (s: number) => (s >= 90 ? 'S' : s >= 75 ? 'A' : s >= 55 ? 'B' : s >= 35 ? 'C' : 'D');
 const mult = (s: number) => Math.round((0.8 + s / 200) * 100) / 100;
+const accentOf = (focus: string) => FOCI.find((f) => f.id === focus)?.accent ?? '#e5e7eb';
 
 let parked: TrainingGround | null = null;
 
@@ -86,20 +88,19 @@ export async function trainingPage(el: HTMLElement) {
 
   mount(el, html`
     <div class="tr">
-      <div class="page-head"><div><div class="eyebrow">Development</div><div class="h1" style="margin-top:6px">Training ground</div></div>
-        <div class="row" style="gap:8px" id="chips"></div></div>
       <div class="tr-stage" id="stage">
         <div class="tr-3d" id="tg"></div>
         <div class="tr-shade"></div>
         <div class="tr-hud">
           <div class="tr-top">
             <div class="tr-title" id="title"></div>
-            <div class="tr-tally" id="tally"></div>
+            <div class="tr-side"><div class="tr-chips" id="chips"></div><div class="tr-tally" id="tally"></div></div>
           </div>
+          <div class="tr-menu" id="drills"></div>
           <div class="tr-pop" id="pop"></div>
           <div class="tr-bottom">
             <div class="tr-meter" id="meter" hidden>
-              <div class="tr-track"><i class="good" id="mgood"></i><i class="perfect" id="mperfect"></i><b class="needle" id="needle"></b></div>
+              <div class="tr-track" id="track"><i class="good" id="mgood"></i><i class="perfect" id="mperfect"></i><b class="needle" id="needle"></b></div>
               <div class="tr-hint"><kbd>Space</kbd> or tap to <span id="verb">strike</span></div>
             </div>
             <div class="tr-cta" id="cta"></div>
@@ -107,7 +108,6 @@ export async function trainingPage(el: HTMLElement) {
         </div>
         <div class="tr-results" id="results" hidden></div>
       </div>
-      <div class="tr-drills" id="drills"></div>
       <div class="card" id="progress"></div>
     </div>`);
 
@@ -116,13 +116,14 @@ export async function trainingPage(el: HTMLElement) {
   // ---- Static parts ----
   const renderChips = () => {
     $('#chips').innerHTML = html`
-      ${ready() && streakOn() ? html`<span class="chip lime">${icon('sparkle', 13)} Regularity bonus +15%</span>` : ''}
+      ${ready() && streakOn() ? html`<span class="chip lime">${icon('flame', 13)} Regularity +15%</span>` : ''}
       <span class="chip ${ready() ? 'lime' : ''}">${icon('clock', 13)} ${ready() ? 'Session ready' : html`Recovering · <span data-cd="${d.training.availableAt}">${countdown(d.training.availableAt)}</span>`}</span>`.html;
   };
 
   const renderTitle = () => {
     const dr = DRILLS[drillFor(focus, pos)];
-    $('#title').innerHTML = html`<div class="eyebrow">${practice ? 'Practice' : 'Drill'}</div><div class="tr-name">${dr.name}</div><div class="tr-how">${dr.how}</div>`.html;
+    $('#stage').style.setProperty('--ac', accentOf(focus));
+    $('#title').innerHTML = html`<div class="eyebrow">Training ground · ${practice ? 'Practice' : 'Drill'}</div><div class="tr-name">${dr.name}</div><div class="tr-how">${dr.how}</div>`.html;
   };
 
   const renderCta = () => {
@@ -132,12 +133,12 @@ export async function trainingPage(el: HTMLElement) {
       return;
     }
     cta.innerHTML = ready()
-      ? html`<button class="btn white lg" data-start>${icon('play', 16)} Start drill</button>
-          <button class="btn ghost" data-quick title="Skip the drill and train at the standard rate">Quick session</button>
+      ? html`<div class="tr-go"><button class="btn white lg tr-start" data-start>${icon('play', 18)} Start drill</button>
+          <button class="btn ghost" data-quick title="Skip the drill and train at the standard rate">Quick session</button></div>
           <div class="tr-note">Your score scales the XP: ×0.8 to ×1.3</div>`.html
       : html`<div class="tr-rest"><div class="tr-ring" style="--p:${restProgress()}"><span>${icon('clock', 18)}</span></div>
           <div><div class="h3">Recovering</div><div class="small muted">Next session in <b data-cd="${d.training.availableAt}">${countdown(d.training.availableAt)}</b></div></div></div>
-          <button class="btn" data-start>${icon('play', 15)} Practise for fun</button>`.html;
+          <button class="btn tr-start" data-start>${icon('play', 15)} Practise for fun</button>`.html;
   };
   const restProgress = () => {
     const end = new Date(d.training.availableAt).getTime();
@@ -151,17 +152,14 @@ export async function trainingPage(el: HTMLElement) {
       ${FOCI.map((f) => {
         const t = targetsOf(f.id, pos);
         const k = t.filter((a) => keys.has(a)).length;
-        return html`<button class="tr-card ${focus === f.id ? 'on' : ''}" data-focus="${f.id}" style="--ac:${f.accent}" ${phase !== 'idle' ? 'disabled' : ''}>
-          <span class="tr-ic">${icon(f.icon, 22)}</span>
-          <span class="tr-cn">${f.name}</span>
-          <span class="tr-cs">${f.sub}</span>
-          <span class="tr-cd">${DRILLS[drillFor(f.id, pos)].name}${k ? html` · <b>${k} key</b>` : ''}</span>
+        return html`<button class="tr-item ${focus === f.id ? 'on' : ''}" data-focus="${f.id}" style="--ac:${f.accent}" ${phase !== 'idle' ? 'disabled' : ''}>
+          <span class="tr-ic">${icon(f.icon, 18)}</span>
+          <span class="tr-it"><b>${f.name}</b><small>${DRILLS[drillFor(f.id, pos)].name}${k ? html` · <em>${k} key</em>` : ''}</small></span>
         </button>`;
       })}
-      <label class="tr-card tr-single ${single ? 'on' : ''}" style="--ac:#e5e7eb">
-        <span class="tr-ic">${icon('dumbbell', 22)}</span>
-        <span class="tr-cn">Specialist</span>
-        <select class="input" id="single" ${phase !== 'idle' ? 'disabled' : ''}><option value="">One attribute…</option>${ATTR_GROUPS.map((g) => html`<optgroup label="${g.name}">${g.attrs.map((a) => html`<option value="${a}" ${focus === a ? 'selected' : ''}>${ATTR_LABELS[a]}${keys.has(a) ? ' ●' : ''}</option>`)}</optgroup>`)}</select>
+      <label class="tr-item tr-single ${single ? 'on' : ''}" style="--ac:#e5e7eb">
+        <span class="tr-ic">${icon('dumbbell', 18)}</span>
+        <span class="tr-it"><b>Specialist</b><select id="single" ${phase !== 'idle' ? 'disabled' : ''}><option value="">One attribute…</option>${ATTR_GROUPS.map((g) => html`<optgroup label="${g.name}">${g.attrs.map((a) => html`<option value="${a}" ${focus === a ? 'selected' : ''}>${ATTR_LABELS[a]}${keys.has(a) ? ' ●' : ''}</option>`)}</optgroup>`)}</select></span>
       </label>`.html;
   };
 
@@ -184,6 +182,11 @@ export async function trainingPage(el: HTMLElement) {
       <p class="tiny dim" style="margin:14px 0 0">Highlighted attributes improve with the selected drill. Key attributes train 25% faster; bars show XP toward the next point.</p>`.html;
   };
 
+  const setPhase = (p: typeof phase) => {
+    phase = p;
+    $('#stage').dataset.phase = p;
+  };
+
   const renderAll = () => {
     renderChips();
     renderTitle();
@@ -191,6 +194,7 @@ export async function trainingPage(el: HTMLElement) {
     renderDrills();
     renderProgress();
   };
+  setPhase('idle');
   renderAll();
 
   // ---- 3D ----
@@ -201,6 +205,7 @@ export async function trainingPage(el: HTMLElement) {
     tg = parked;
     parked = null;
     tg.attach($('#tg'));
+    tg.setView('hero');
     tg.reset();
   } else {
     const { createTrainingGround } = await import('../viewer/trainingGround.ts');
@@ -210,6 +215,20 @@ export async function trainingPage(el: HTMLElement) {
   const kit = d.club?.colors ?? { primary: '#1d2329', secondary: '#c6ff3d' };
   tg.setPlayer(d.player.appearance, d.player.equipped ?? {}, kit, pos === 'GK');
   tg.setDrill(drillFor(focus, pos));
+
+  /** Switching drills: a quick dip so the cut to the new spot reads as intended. */
+  const pickFocus = (f: string) => {
+    if (f === focus) return;
+    focus = f;
+    const host = $('#tg');
+    host.classList.remove('swap');
+    void host.offsetWidth;
+    host.classList.add('swap');
+    later(140, () => tg?.setDrill(drillFor(focus, pos)));
+    renderTitle();
+    renderDrills();
+    renderProgress();
+  };
 
   // ---- The timing game ----
   let needle = 0;
@@ -225,11 +244,11 @@ export async function trainingPage(el: HTMLElement) {
   const tally = () => {
     $('#tally').innerHTML = phase === 'playing' || phase === 'countdown' ? html`
       <div class="tr-dots">${Array.from({ length: REPS }, (_, i) => html`<i class="${outcomes[i] ?? (i === outcomes.length ? 'now' : '')}"></i>`)}</div>
-      <div class="tr-pts"><b class="num">${Math.round(total)}</b>${combo > 1 ? html`<span class="tr-combo">×${combo} combo</span>` : ''}</div>`.html : '';
+      <div class="tr-pts">${combo > 1 ? html`<span class="tr-combo">${icon('flame', 12)} ×${combo}</span>` : ''}<b class="num">${Math.round(total)}</b></div>`.html : '';
   };
-  const pop = (text: string, cls: string) => {
+  const pop = (text: string, cls: string, sub = '') => {
     const p = $('#pop');
-    p.innerHTML = html`<span class="${cls}">${text}</span>`.html;
+    p.innerHTML = html`<span class="${cls}">${text}</span>${sub ? html`<small>${sub}</small>` : ''}`.html;
     p.classList.remove('go');
     void p.offsetWidth;
     p.classList.add('go');
@@ -256,6 +275,14 @@ export async function trainingPage(el: HTMLElement) {
     cancelAnimationFrame(raf);
     const off = Math.abs(needle - zone.c);
     const o: Outcome = off <= zone.perfect / 2 ? 'perfect' : off <= zone.good / 2 ? 'good' : 'miss';
+    // The bar answers at once: a flash in the outcome's colour and a ripple where the needle stopped.
+    const tr = $('#track');
+    tr.dataset.hit = o;
+    const ripple = document.createElement('i');
+    ripple.className = `ripple ${o}`;
+    ripple.style.left = `${Math.max(0, Math.min(1, needle)) * 100}%`;
+    tr.appendChild(ripple);
+    later(700, () => ripple.remove());
     const fn = pressed;
     pressed = null;
     fn(o);
@@ -271,6 +298,7 @@ export async function trainingPage(el: HTMLElement) {
       dir = needle === 0 ? 1 : -1;
       $('#mgood').style.cssText = `left:${(zone.c - good / 2) * 100}%;width:${good * 100}%`;
       $('#mperfect').style.cssText = `left:${(zone.c - perfect / 2) * 100}%;width:${perfect * 100}%`;
+      delete $('#track').dataset.hit;
       $('#meter').hidden = false;
       $('#meter').classList.remove('done');
       tg?.prepare(i);
@@ -284,24 +312,28 @@ export async function trainingPage(el: HTMLElement) {
   const run = async () => {
     if (phase !== 'idle' || !tg) return;
     practice = !ready();
-    phase = 'countdown';
+    setPhase('countdown');
     total = 0;
     combo = 0;
     outcomes = [];
     renderTitle();
     renderCta();
     renderDrills();
-    $('#stage').classList.add('playing');
+    tg.setView('play');
     tg.reset();
     tally();
+    await sleep(350);
     for (const n of ['3', '2', '1']) {
       pop(n, 'count');
+      sfx('tick');
       await sleep(650);
       if (disposed) return;
     }
-    pop(DRILLS[drillFor(focus, pos)].verb + '!', 'go-word');
-    $('#verb').textContent = DRILLS[drillFor(focus, pos)].verb.toLowerCase();
-    phase = 'playing';
+    const verb = DRILLS[drillFor(focus, pos)].verb;
+    pop(verb + '!', 'go-word');
+    sfx('whistle');
+    $('#verb').textContent = verb.toLowerCase();
+    setPhase('playing');
     for (let i = 0; i < REPS; i++) {
       tally();
       const o = await rep(i);
@@ -309,10 +341,11 @@ export async function trainingPage(el: HTMLElement) {
       $('#meter').classList.add('done');
       if (o === 'perfect') combo++;
       else if (o === 'miss') combo = 0;
-      total += o === 'perfect' ? 100 * (1 + 0.1 * Math.max(0, combo - 1)) : o === 'good' ? 60 : 0;
+      const gain = o === 'perfect' ? 100 * (1 + 0.1 * Math.max(0, combo - 1)) : o === 'good' ? 60 : 0;
+      total += gain;
       outcomes.push(o);
       tally();
-      pop(o === 'perfect' ? (combo > 2 ? `Perfect ×${combo}` : 'Perfect!') : o === 'good' ? 'Good' : 'Miss', o);
+      pop(o === 'perfect' ? 'Perfect' : o === 'good' ? 'Good' : 'Miss', o, o === 'perfect' && combo > 1 ? `Combo ×${combo} · +${Math.round(gain)}` : gain ? `+${Math.round(gain)}` : '');
       await tg.play(o);
       if (disposed) return;
     }
@@ -321,20 +354,33 @@ export async function trainingPage(el: HTMLElement) {
     await finish(score);
   };
 
+  /** Rolls a number up from zero. */
+  const countUp = (node: HTMLElement, to: number, ms = 900) => {
+    const t0 = performance.now();
+    const step = (now: number) => {
+      if (disposed) return;
+      const u = Math.min(1, (now - t0) / ms);
+      node.textContent = String(Math.round(to * (1 - Math.pow(1 - u, 3))));
+      if (u < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  };
+
   const finish = async (score: number | null) => {
     const bonus = !practice && streakOn();
-    phase = 'results';
-    $('#stage').classList.remove('playing');
+    setPhase('results');
     renderCta();
     const res = $('#results');
     const g = score == null ? '—' : grade(score);
-    const head = html`<div class="tr-grade g-${g}">${g}</div>
+    const head = html`<div class="tr-grade g-${g}"><span>${g}</span></div>
       <div class="tr-rh"><div class="eyebrow">${practice ? 'Practice round' : score == null ? 'Quick session' : 'Session complete'}</div>
-      <div class="tr-rs">${score == null ? 'Standard session' : html`<b class="num">${score}</b><span>/100</span>`}</div>
+      <div class="tr-rs">${score == null ? 'Standard session' : html`<b class="num" id="rscore">0</b><span>/100</span>`}</div>
+      ${outcomes.length ? html`<div class="tr-rdots">${outcomes.map((o) => html`<i class="${o}"></i>`)}</div>` : ''}
       ${practice ? html`<div class="small muted">No XP while recovering. Next session in ${countdown(d.training.availableAt)}.</div>` : html`<div class="small muted">XP ×${score == null ? '1.00' : mult(score).toFixed(2)}${bonus ? ' · regularity bonus +15%' : ''}</div>`}</div>`;
     res.innerHTML = html`<div class="tr-rcard">${head}<div id="gains" class="tr-gains">${practice ? '' : html`<div class="small muted">Banking XP…</div>`}</div>
       <div class="row" style="gap:10px;justify-content:center;margin-top:6px"><button class="btn white" data-again>${practice ? 'Practise again' : 'Done'}</button></div></div>`.html;
     res.hidden = false;
+    if (score != null) countUp($('#rscore'), score);
     if (score != null && score >= 75) tg?.cheer();
     if (practice) return;
     try {
@@ -364,6 +410,7 @@ export async function trainingPage(el: HTMLElement) {
             bar.style.width = '100%';
             later(850, () => {
               row.classList.add('pop');
+              sfx('perfect', 0.6);
               bar.style.transition = 'none';
               bar.style.width = '0%';
               void bar.offsetWidth;
@@ -385,8 +432,9 @@ export async function trainingPage(el: HTMLElement) {
 
   const closeResults = () => {
     $('#results').hidden = true;
-    phase = 'idle';
+    setPhase('idle');
     practice = false;
+    tg?.setView('hero');
     tg?.reset();
     tally();
     $('#pop').innerHTML = '';
@@ -398,11 +446,7 @@ export async function trainingPage(el: HTMLElement) {
     const t = e.target as HTMLElement;
     const f = t.closest('[data-focus]') as HTMLElement | null;
     if (f && phase === 'idle') {
-      focus = f.dataset.focus!;
-      tg?.setDrill(drillFor(focus, pos));
-      renderTitle();
-      renderDrills();
-      renderProgress();
+      pickFocus(f.dataset.focus!);
       return;
     }
     if (t.closest('[data-start]')) void run();
@@ -416,15 +460,15 @@ export async function trainingPage(el: HTMLElement) {
       if (again) void run();
     } else if (phase === 'playing' && t.closest('#stage')) strike();
   });
+  // Touch: strike on the press itself, not the release, so timing feels instant.
+  el.addEventListener('pointerdown', (e) => {
+    if (phase !== 'playing' || e.pointerType === 'mouse') return;
+    if (!(e.target as HTMLElement).closest('#stage')) return;
+    strike();
+  });
   el.addEventListener('change', (e) => {
     const s = e.target as HTMLSelectElement;
-    if (s.id === 'single' && s.value) {
-      focus = s.value;
-      tg?.setDrill(drillFor(focus, pos));
-      renderTitle();
-      renderDrills();
-      renderProgress();
-    }
+    if (s.id === 'single' && s.value) pickFocus(s.value);
   });
   const onKey = (e: KeyboardEvent) => {
     if (e.code !== 'Space' && e.code !== 'Enter') return;
@@ -455,4 +499,3 @@ export async function trainingPage(el: HTMLElement) {
     if (tg) { parked?.dispose(); tg.park(); parked = tg; }
   };
 }
-
