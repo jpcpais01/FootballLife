@@ -1,5 +1,6 @@
-// Small 3D stage that shows your toy figure on a podium, used by the locker
-// and shop to preview gear. Drag to spin; it slowly turns on its own.
+// Small 3D stage that shows your player on a podium, used by the locker
+// and shop to preview gear, and standing on a lit floor in the home spotlight.
+// Drag to spin; it slowly turns on its own.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { Appearance } from '../../shared/appearance.ts';
@@ -9,6 +10,8 @@ import { Figure, GK_KITS, SHOWCASE_SCALE, type Kit } from './figures.ts';
 export interface Turntable {
   set(app: Appearance, eq: Equipped, kit: Kit, keeper?: boolean): void;
   celebrate(): void;
+  /** Resolves once the first player is standing on the stage. */
+  shown: Promise<void>;
   /** Frames the face (for the look studio) or the whole player. */
   focus(mode: 'face' | 'body'): void;
   /** Moves the canvas into a new container (after the page re-renders). */
@@ -18,7 +21,36 @@ export interface Turntable {
   dispose(): void;
 }
 
-export function createTurntable(initialHost: HTMLElement): Turntable {
+export interface TurntableOpts {
+  /** podium: the glossy shop stand. floor: he stands on the ground in a pool of light. */
+  stage?: 'podium' | 'floor';
+  /** Drag to spin. Off where the stage sits in a swipeable row; a tap celebrates instead. */
+  drag?: boolean;
+  /** Rim light and floor glow colour. */
+  accent?: string;
+  /** Off the pitch: he wears his casual outfit instead of the kit. */
+  casual?: boolean;
+}
+
+function glowTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  const r = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  r.addColorStop(0, 'rgba(255,255,255,1)');
+  r.addColorStop(0.35, 'rgba(255,255,255,0.45)');
+  r.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = r;
+  g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+export function createTurntable(initialHost: HTMLElement, opts: TurntableOpts = {}): Turntable {
+  const floor = opts.stage === 'floor';
+  const drag = opts.drag ?? true;
+  const accent = new THREE.Color(opts.accent ?? '#c6ff3d');
   let host = initialHost;
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
@@ -26,7 +58,7 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
   renderer.toneMappingExposure = 1.05;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
-  renderer.domElement.style.cssText = 'width:100%;height:100%;display:block;touch-action:pan-y;cursor:grab';
+  renderer.domElement.style.cssText = `width:100%;height:100%;display:block;${drag ? 'touch-action:pan-y;cursor:grab' : 'cursor:pointer'}`;
   host.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -47,22 +79,42 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
   key.shadow.camera.far = 20;
   key.shadow.radius = 4;
   scene.add(key);
-  const rim = new THREE.DirectionalLight(0xc6ff3d, 1.6);
+  const rim = new THREE.DirectionalLight(accent, 1.6);
   rim.position.set(-4, 3, -4);
   scene.add(rim);
   scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x1a1f24, 0.5));
 
-  // Podium: a glossy dark puck with a lime ring.
-  const podium = new THREE.Group();
-  const puck = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.45, 0.24, 64), new THREE.MeshPhysicalMaterial({ color: 0x15191d, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.15 }));
-  puck.position.y = -0.12;
-  puck.receiveShadow = true;
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.025, 8, 96), new THREE.MeshBasicMaterial({ color: 0xc6ff3d }));
-  ring.rotation.x = Math.PI / 2;
-  ring.position.y = 0.005;
-  podium.add(puck, ring);
-  scene.add(podium);
+  const stage = new THREE.Group();
+  const disposables: { dispose(): void }[] = [];
+  if (floor) {
+    // No stand: his shadow falls on an invisible floor inside a soft pool of light.
+    rim.intensity = 2.2;
+    const kick = new THREE.DirectionalLight(accent, 1.1);
+    kick.position.set(4, 2, -3);
+    scene.add(kick);
+    const catcher = new THREE.Mesh(new THREE.CircleGeometry(4, 48), new THREE.ShadowMaterial({ opacity: 0.5 }));
+    catcher.rotation.x = -Math.PI / 2;
+    catcher.receiveShadow = true;
+    const tex = glowTexture();
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 5.2), new THREE.MeshBasicMaterial({ map: tex, color: accent, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false }));
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.y = -0.002;
+    stage.add(pool, catcher);
+    disposables.push(tex, catcher.geometry, catcher.material, pool.geometry, pool.material);
+  } else {
+    // Podium: a glossy dark puck with a lime ring.
+    const puck = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.45, 0.24, 64), new THREE.MeshPhysicalMaterial({ color: 0x15191d, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.15 }));
+    puck.position.y = -0.12;
+    puck.receiveShadow = true;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.025, 8, 96), new THREE.MeshBasicMaterial({ color: accent }));
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.005;
+    stage.add(puck, ring);
+  }
+  scene.add(stage);
 
+  let markShown = () => {};
+  const shown = new Promise<void>((r) => (markShown = r));
   let fig: Figure | null = null;
   let coming: Figure | null = null;
   let figKey = '';
@@ -81,6 +133,7 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
   const look = new THREE.Vector3();
 
   const onDown = (e: PointerEvent) => {
+    if (!drag) return;
     dragging = true;
     lastX = e.clientX;
     renderer.domElement.setPointerCapture(e.pointerId);
@@ -97,6 +150,8 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
     dragging = false;
     renderer.domElement.style.cursor = 'grab';
   };
+  const onTap = () => { celebrateUntil = clock.getElapsed() + 3.6; };
+  if (!drag) renderer.domElement.addEventListener('click', onTap);
   renderer.domElement.addEventListener('pointerdown', onDown);
   renderer.domElement.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
@@ -152,6 +207,7 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
   loop();
 
   return {
+    shown,
     set(app, eq, kit, keeper = false) {
       // Same kit and gear: he changes his look in place, without a pause or a restart of his idle.
       const key = JSON.stringify([kit, eq ?? null, keeper]);
@@ -161,7 +217,8 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
         return;
       }
       figKey = key;
-      const next = new Figure(kit, app, keeper, GK_KITS[0], eq, { scale: SHOWCASE_SCALE, detail: 'mid' });
+      const fo = { scale: SHOWCASE_SCALE, detail: 'mid' as const, base: !floor, casual: opts.casual };
+      const next = new Figure(kit, app, keeper, GK_KITS[0], eq, fo);
       next.onStand = true;
       coming = next;
       // The old player stays on the stand until the new one is ready.
@@ -177,6 +234,7 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
         }
         fig = next;
         scene.add(fig.root);
+        markShown();
       });
     },
     attach(next) {
@@ -207,6 +265,7 @@ export function createTurntable(initialHost: HTMLElement): Turntable {
       renderer.dispose();
       env.dispose();
       pmrem.dispose();
+      for (const d of disposables) d.dispose();
       renderer.domElement.remove();
     },
   };

@@ -125,6 +125,16 @@ export function keyAttrs(attrs: Attributes, pos: Position): Raw {
   return html`<div class="stack" style="gap:9px">${KEY_ATTRS[pos].map((a) => html`<div class="attr key"><span class="n">${ATTR_LABELS[a]}</span><span class="v">${attrs[a]}</span><div class="bar"><i style="width:${attrs[a]}%"></i></div></div>`)}</div>`;
 }
 
+/** Rating band for colouring a 1-100 value. */
+export const attrTier = (v: number) => (v >= 80 ? 'elite' : v >= 60 ? 'high' : v >= 40 ? 'mid' : 'low');
+
+/** The position's key attributes as big segmented meters that fill in one after another. */
+export function attrMeters(attrs: Attributes, pos: Position): Raw {
+  return html`<div class="meters">${KEY_ATTRS[pos].map((a, i) => html`<div class="meter t-${attrTier(attrs[a])}" style="--v:${attrs[a]};--i:${i}">
+      <span class="m-n">${ATTR_LABELS[a]}</span><b class="m-v">${attrs[a]}</b>
+      <div class="m-bar"><i></i></div></div>`)}</div>`;
+}
+
 export function ovrOf(attrs: Attributes, pos: Position) {
   return overall(attrs, pos);
 }
