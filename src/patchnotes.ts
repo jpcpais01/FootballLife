@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-23T19:00:00Z',
+    entries: [
+      { title: 'A referee on the pitch', body: 'Every match now has a referee and two assistants. The referee runs the diagonal, staying close enough to see but out of the way of play, while the assistants move along the touchlines level with the last defender. He blows his whistle for fouls, goals and kick-offs, points the way for free kicks, points to the spot for penalties, jogs over and holds up a yellow or red card to the player he books, and points back to the centre after a goal. Assistants flag offsides and signal which way a throw-in goes. Players shown a red card now walk off the pitch instead of vanishing.' },
+    ],
+  },
+  {
     hour: '2026-10-23T18:00:00Z',
     entries: [
       { title: 'Season badge no longer hidden', body: 'On phones held sideways, the small Season badge with your league place on the home screen slid under the coins and profile bar in the top right. It now sits clear of it, a little further left.' },

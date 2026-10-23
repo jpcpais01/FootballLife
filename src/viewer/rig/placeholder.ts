@@ -431,6 +431,74 @@ function actions(): Clip[] {
   return out;
 }
 
+// ---------- Match officials: signals (right arm; mirror for the left) ----------
+
+/** A referee's or assistant's signal: the right arm moves through `arm` keys over a relaxed standing stance. */
+function signal(name: string, dur: number, contact: number, arm: Partial<Record<keyof Ctl, [number, number][]>>): Clip {
+  return bake(name, dur, false, track({
+    lk: [[0, 0.12], [dur, 0.12]], rk: [[0, 0.12], [dur, 0.12]],
+    lf: [[0, 0.06], [dur, 0.06]], rf: [[0, 0.06], [dur, 0.06]],
+    lt: [[0, 0.12], [dur, 0.12]], rt: [[0, 0.12], [dur, 0.12]],
+    ld: [[0, 1.36], [dur, 1.36]], le: [[0, 0.26], [dur, 0.26]], ltw: [[0, -0.3], [dur, -0.3]],
+    rd: [[0, 1.36], [dur, 1.36]], rfw: [[0, 0.06], [dur, 0.06]], re: [[0, 0.26], [dur, 0.26]], rtw: [[0, -0.3], [dur, -0.3]],
+    ...arm,
+  }), contact);
+}
+
+function officials(): Clip[] {
+  const out: Clip[] = [];
+  // Whistle: hand up to the mouth, a sharp blast, hand back down.
+  out.push(signal('refWhistle', 1.1, 0.3, {
+    rd: [[0, 1.36], [0.28, 2.5], [0.8, 2.5], [1.1, 1.36]],
+    rfw: [[0, 0.06], [0.28, 1.05], [0.8, 1.05], [1.1, 0.06]],
+    re: [[0, 0.26], [0.28, 1.9], [0.8, 1.9], [1.1, 0.26]],
+    rtw: [[0, -0.3], [0.28, -0.45], [0.8, -0.45], [1.1, -0.3]],
+    np: [[0, 0], [0.3, -0.12], [0.45, -0.05], [1.1, 0]],
+    sp: [[0, 0.03], [0.3, -0.04], [1.1, 0.03]],
+  }));
+  // Pointing the way: arm straight, raised a little above level (a free kick's direction, the centre spot).
+  out.push(signal('refPoint', 1.7, 0.4, {
+    rd: [[0, 1.36], [0.38, 1.5], [1.35, 1.5], [1.7, 1.36]],
+    rfw: [[0, 0.06], [0.38, 1.95], [1.35, 1.95], [1.7, 0.06]],
+    re: [[0, 0.26], [0.38, 0.04], [1.35, 0.04], [1.7, 0.26]],
+    rtw: [[0, -0.3], [0.38, 0], [1.35, 0], [1.7, -0.3]],
+    sp: [[0, 0.03], [0.38, -0.05], [1.35, -0.05], [1.7, 0.03]],
+  }));
+  // The penalty spot: arm straight, pointing down at it.
+  out.push(signal('refSpot', 1.8, 0.4, {
+    rd: [[0, 1.36], [0.38, 1.45], [1.45, 1.45], [1.8, 1.36]],
+    rfw: [[0, 0.06], [0.38, 1.2], [1.45, 1.2], [1.8, 0.06]],
+    re: [[0, 0.26], [0.38, 0.04], [1.45, 0.04], [1.8, 0.26]],
+    rtw: [[0, -0.3], [0.38, 0], [1.45, 0], [1.8, -0.3]],
+    sp: [[0, 0.03], [0.38, 0.1], [1.45, 0.1], [1.8, 0.03]],
+  }));
+  // A card: hand to the pocket, then held straight up over the head.
+  out.push(signal('refCard', 2.2, 0.62, {
+    rd: [[0, 1.36], [0.3, 1.45], [0.62, -1.38], [1.75, -1.38], [2.2, 1.36]],
+    rfw: [[0, 0.06], [0.3, -0.45], [0.62, 0.22], [1.75, 0.22], [2.2, 0.06]],
+    re: [[0, 0.26], [0.3, 0.9], [0.62, 0.06], [1.75, 0.06], [2.2, 0.26]],
+    rtw: [[0, -0.3], [0.62, 0], [1.75, 0], [2.2, -0.3]],
+    sp: [[0, 0.03], [0.3, 0.08], [0.62, -0.06], [1.75, -0.06], [2.2, 0.03]],
+    np: [[0, 0], [0.62, -0.05], [1.75, -0.05], [2.2, 0]],
+  }));
+  // Arm (or flag) straight up: an indirect free kick, an offside.
+  out.push(signal('refArmUp', 2.0, 0.4, {
+    rd: [[0, 1.36], [0.4, -1.4], [1.6, -1.4], [2.0, 1.36]],
+    rfw: [[0, 0.06], [0.4, 0.2], [1.6, 0.2], [2.0, 0.06]],
+    re: [[0, 0.26], [0.4, 0.05], [1.6, 0.05], [2.0, 0.26]],
+    rtw: [[0, -0.3], [0.4, 0], [1.6, 0], [2.0, -0.3]],
+  }));
+  // Arm (or flag) straight out to the side: which way a throw-in goes.
+  out.push(signal('refArmOut', 1.7, 0.38, {
+    rd: [[0, 1.36], [0.38, 0.12], [1.35, 0.12], [1.7, 1.36]],
+    rfw: [[0, 0.06], [0.38, 0.12], [1.35, 0.12], [1.7, 0.06]],
+    re: [[0, 0.26], [0.38, 0.04], [1.35, 0.04], [1.7, 0.26]],
+    rtw: [[0, -0.3], [0.38, 0], [1.35, 0], [1.7, -0.3]],
+    sr: [[0, 0], [0.38, 0.05], [1.35, 0.05], [1.7, 0]],
+  }));
+  return out;
+}
+
 // ---------- Celebrations (loops) ----------
 
 function celebrations(): Clip[] {
@@ -496,6 +564,6 @@ export function placeholderClips(): Map<string, Clip> {
   const sl = strafe('strafeLeft');
   add(sl);
   add(mirrorClip(sl, 'strafeRight'));
-  for (const c of [...actions(), ...celebrations()]) add(c);
+  for (const c of [...actions(), ...officials(), ...celebrations()]) add(c);
   return m;
 }

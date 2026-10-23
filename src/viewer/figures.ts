@@ -169,6 +169,8 @@ export class Figure {
   private detail: Detail;
   /** Off the pitch: his own clothes instead of the kit. */
   private casual: boolean;
+  /** A match official: plain shirt, no number or crest. */
+  private official: boolean;
   /** What dress() last added to the bones, to take off on a restyle. */
   private parts: THREE.Object3D[] = [];
   private styleRun = 0;
@@ -201,7 +203,7 @@ export class Figure {
   /** A keeper with the ball in his hands. Set by the match viewer. */
   hold = false;
 
-  constructor(kit: Kit, look: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped, opts: { base?: boolean; number?: number; scale?: number; detail?: Detail; sync?: boolean; seed?: number; casual?: boolean } = {}) {
+  constructor(kit: Kit, look: Appearance, isKeeper: boolean, gkKit: Kit, eq?: Equipped, opts: { base?: boolean; number?: number; scale?: number; detail?: Detail; sync?: boolean; seed?: number; casual?: boolean; official?: boolean } = {}) {
     loadMocap(`${import.meta.env.BASE_URL}anims/mocap.json`);
     // Older and bot looks may lack newer features; fill them in consistently.
     const app = sanitizeAppearance(look);
@@ -216,6 +218,7 @@ export class Figure {
     this.eq = eq;
     this.number = opts.number;
     this.casual = !!opts.casual;
+    this.official = !!opts.official;
     // Base (team-coloured puck) and a selection ring.
     if (withBase) {
       const base = new THREE.Mesh(geo.base, gloss(k.secondary));
@@ -267,7 +270,7 @@ export class Figure {
     if (this.casual) return casualKit(app, this.eq, this.kit);
     const k = isKeeper ? this.gkKit : this.kit;
     const boot = g.boots?.c1 ?? BOOT_COLORS[app.boots] ?? BOOT_COLORS[0];
-    const pattern = isKeeper ? 'plain' : kitPattern(this.kit);
+    const pattern = isKeeper || this.official ? 'plain' : kitPattern(this.kit);
     return {
       primary: k.primary,
       secondary: k.secondary,
@@ -331,7 +334,7 @@ export class Figure {
         const side = watch ? 0 : 1;
         toBone(side ? B.RightForeArm : B.LeftForeArm, buildWristwear(w.style ?? 'cuff', w.c1 ?? '#ffcf3d', w.c2, ch.body, side, 0, hi));
       }
-    } else if (!isKeeper) {
+    } else if (!isKeeper && !this.official) {
       const crest = new THREE.Mesh(geo.crest, gloss(k.secondary));
       crest.position.copy(ch.body.crestAt);
       toBone(B.Spine2, crest);

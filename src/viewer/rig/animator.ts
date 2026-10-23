@@ -16,7 +16,8 @@ import { ANKLE_Y, B, NB, REST } from './skeleton.ts';
 
 export type ActionKind = 'pass' | 'passLong' | 'shot' | 'chip' | 'cross' | 'trap' | 'chest' | 'header' | 'slide' | 'tackle' | 'keeperSet' | 'dive' | 'diveHigh' | 'catch' | 'keeperGather' | 'keeperScoop' | 'keeperHigh' | 'fall' | 'getUp' | 'throwIn' | 'keeperThrow' | 'keeperKick'
   | 'keeperPass' | 'keeperMiss' | 'keeperDirect' | 'scissor' | 'jump' | 'turnL90' | 'turnR90' | 'turnL' | 'turnR'
-  | 'kickUp' | 'kneeA' | 'kneeB' | 'stallA' | 'stallB' | 'stallC' | 'stallD';
+  | 'kickUp' | 'kneeA' | 'kneeB' | 'stallA' | 'stallB' | 'stallC' | 'stallD'
+  | 'refWhistle' | 'refPoint' | 'refSpot' | 'refCard' | 'refArmUp' | 'refArmOut';
 
 export interface ActOpts {
   /** Real seconds from now until the contact frame (foot on ball, hands on ball…). */
@@ -373,7 +374,7 @@ export class Animator {
     // and the arms are held a shade wider or tighter.
     const after = this.style.tempo * (0.92 + vr() * 0.16);
     const flare = (vr() * 2 - 1) * 0.12;
-    this.action = { clip, t, contact, rate, after, flare, hands: part === 'hands' || kind === 'throwIn' || kind === 'keeperThrow', w: busy && t >= 0 ? 1 : 0, sx: 0, sz: 0, syaw: 0, shifted: false, legs };
+    this.action = { clip, t, contact, rate, after, flare, hands: part === 'hands' || kind === 'throwIn' || kind === 'keeperThrow' || kind.startsWith('ref'), w: busy && t >= 0 ? 1 : 0, sx: 0, sz: 0, syaw: 0, shifted: false, legs };
     return eff;
   }
 
