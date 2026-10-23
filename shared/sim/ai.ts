@@ -8,6 +8,14 @@
 // spreads into lanes, keeps a rest defence behind the ball, and the players
 // near the ball keep moving into pockets of space where a pass can find them.
 //
+// On top of the shapes sit a few habits that make it look like football
+// rather than a formation diagram: possession is trusted gradually, so shapes
+// blend instead of flipping on every turnover; players commit to a job (the
+// press, a man to mark, the height of the line) and keep it until something
+// clearly better comes along; and nobody jogs for the sake of it. Off the
+// ball a player stands when he is in position, walks small adjustments and
+// saves his running for the moments that need it.
+//
 // Everything is in absolute pitch metres (x along the pitch, y across).
 import type { Position } from '../attributes.ts';
 import type { Slot, Tactics } from '../formations.ts';
@@ -67,9 +75,54 @@ const hyp = (x: number, y: number) => Math.sqrt(x * x + y * y);
 const clamp = (x: number, a: number, b: number) => (x < a ? a : x > b ? b : x);
 const BOX_PRIORITY: Partial<Record<Position, number>> = { CB: 3, ST: 3, WG: 2, AM: 2, CM: 1.5, DM: 1, FB: 0.5 };
 const L = 105;
+/** Urgency for a brisk walk (any urgency above zero paces the move rather than settling into it). */
+const WALK = 0.002;
+
+/**
+ * What each side remembers between thinks: where it last told everyone to go,
+ * who is settled in position, who is pressing and who is marking whom.
+ * Memory is what turns a formula into a footballer: players commit to a job,
+ * drift rather than snap, and stand still when they are where they need to be.
+ */
+interface Mind {
+  tx: Float64Array;
+  ty: Float64Array;
+  settled: Uint8Array;
+  presser: [number, number];
+  mark: Int16Array;
+  /** The back line's height per side (own frame), moved in steps like a real line. */
+  line: [number, number];
+  t: number;
+}
+const minds = new WeakMap<Float64Array, Mind>();
+function mindOf(w: World): Mind {
+  let m = minds.get(w.mem);
+  if (!m) {
+    m = { tx: new Float64Array(22).fill(NaN), ty: new Float64Array(22).fill(NaN), settled: new Uint8Array(22), presser: [-1, -1], mark: new Int16Array(22).fill(-1), line: [NaN, NaN], t: -1 };
+    minds.set(w.mem, m);
+  }
+  return m;
+}
+/** A fixed personal trait in [0, 1) per player, so no two react quite alike. */
+const trait = (i: number, k: number) => {
+  const x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453;
+  return x - Math.floor(x);
+};
 
 export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64Array) {
   const { slots, sentOff } = w;
+  const mind = mindOf(w);
+  // A long gap (half-time, a restart) wipes the short-term memory.
+  if (w.t - mind.t > 1 || w.restart || w.celebrating >= 0 || w.phase !== 'play') {
+    mind.tx.fill(NaN);
+    mind.settled.fill(0);
+    mind.presser = [-1, -1];
+    mind.mark.fill(-1);
+    mind.line = [NaN, NaN];
+  }
+  mind.t = w.t;
+  /** Players doing a job right now (pressing, tracking, receiving, chasing): they skip the pacing pass. */
+  const busy = new Uint8Array(22);
   const role = (i: number) => slots[i < 11 ? 0 : 1][i % 11].role;
   const sideOf = (i: number) => (i < 11 ? 0 : 1) as Side;
   const teams: number[][] = [[], []];
@@ -128,6 +181,11 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
   // Offside line in the attackers' frame: the second-last defender, the ball, or halfway.
   const defUs = team(D).map((i) => frame(w.px[i], w.py[i], A).u).sort((a, b) => b - a);
   const lineA = Math.max(ballA.u, 0.5, defUs[1] ?? 0.5);
+  /** The offside line a side would be attacking (second-last opponent, ball or halfway). */
+  const lineFor = (s: Side) => {
+    const o = team((1 - s) as Side).map((i) => frame(w.px[i], w.py[i], s).u).sort((a, b) => b - a);
+    return Math.max(frame(w.bx, w.by, s).u, 0.5, o[1] ?? 0.5);
+  };
   const carrier = w.owner >= 0 && sideOf(w.owner) === A ? w.owner : -1;
   const carrierPress = carrier >= 0 ? nearestOpp(A, w.bx, w.by) : 99;
   // A carrier with time and his head up: the moment for runs in behind (and for the line to drop).
@@ -148,8 +206,38 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       }
     }
   } else {
+    // Possession is not a switch. A team that has just won the ball needs a
+    // couple of seconds to trust it before the full-backs fly and the shape
+    // stretches, and the side that lost it peels back from its attacking
+    // shape as it realises. Both shapes are worked out and blended by how
+    // settled the possession is, so a scrappy spell of back-and-forth no
+    // longer whips twenty players from one shape to the other.
+    // How long each job takes to switch. Forwards spring the moment the ball
+    // is won and defenders snap back the moment it is lost; the full-backs and
+    // holding players wait to see it kept before they commit.
+    const SWITCH_A: Partial<Record<Position, number>> = { ST: 0.5, WG: 0.7, AM: 0.8, CM: 1.5, FB: 2.2, DM: 2.4, CB: 2.6 };
+    const SWITCH_D: Partial<Record<Position, number>> = { CB: 0.8, FB: 1.0, DM: 0.9, CM: 1.4, AM: 2.0, WG: 2.2, ST: 2.6 };
+    const blendOf = (i: number) => {
+      const T = (sideOf(i) === A ? SWITCH_A : SWITCH_D)[role(i)] ?? 1.5;
+      const c0 = clamp(sinceWon / T, 0, 1);
+      return c0 * c0 * (3 - 2 * c0);
+    };
+    const mixing = sinceWon < 2.6;
+    if (mixing) {
+      defendShape(A);
+      attackShape(D, lineFor(D));
+    }
+    const ox = Float64Array.from(tx);
+    const oy = Float64Array.from(ty);
     defendShape(D);
-    attackShape(A);
+    attackShape(A, lineA);
+    if (mixing) {
+      for (const i of [...outs[0], ...outs[1]]) {
+        const c = blendOf(i);
+        tx[i] = ox[i] + (tx[i] - ox[i]) * c;
+        ty[i] = oy[i] + (ty[i] - oy[i]) * c;
+      }
+    }
   }
 
   if (w.celebrating >= 0) {
@@ -170,7 +258,11 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
     if (sentOff[i]) continue;
     const at = w.landing ?? { x: w.bx, y: w.by };
     setAbs(i, at.x, at.y, 1);
+    busy[i] = 1;
   }
+  if (w.owner >= 0) busy[w.owner] = 1;
+  pace();
+  (globalThis as { __aiTap?: (w: World, tx: Float64Array, ty: Float64Array, urg: Float64Array) => void }).__aiTap?.(w, tx, ty, urg);
 
   // ---------------------------------------------------------------------------
   /** Out of possession: three lines that slide with the ball and squeeze the space between them. */
@@ -221,14 +313,13 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
   }
 
   /** In possession: width in every lane, a rest defence behind the ball, forwards on the last line. */
-  function attackShape(s: Side) {
+  function attackShape(s: Side, last: number) {
     const tac = w.tactics[s];
     const b = frame(w.bx, w.by, s);
     const ment = tac.mentality === 'attacking' ? 0.03 : tac.mentality === 'defensive' ? -0.03 : 0;
     const widthK = tac.width === 'wide' ? 1.06 : tac.width === 'narrow' ? 0.88 : 1;
     const buildUp = b.u < 0.33;
     const back = clamp(b.u - 0.26 + ment, 0.1, 0.56);
-    const last = lineA;
     const ballSide = Math.sign(b.v) || 1;
     for (const i of teams[s]) {
       const slot = slots[s][i % 11];
@@ -319,9 +410,14 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       // A ball played backwards: step up together.
       if (w.pass && frame(w.pass.x, w.pass.y, D).u > ballD.u + 0.05) line += 0.03;
       line = Math.min(line, Math.max(0.06, ballD.u - 0.04));
+      // The line moves on a call, a few metres at a time, not with every touch of the ball.
+      // Dropping is quicker to trigger than stepping up, as every defender knows.
+      const held = mind.line[D];
+      if (!Number.isNaN(held) && line < held + 0.022 && line > held - 0.016 && held <= Math.max(0.06, ballD.u - 0.02)) line = held;
+      mind.line[D] = line;
       for (const i of back) {
         const p = frame(tx[i], ty[i], D);
-        set(i, { u: line * 0.9 + p.u * 0.1, v: p.v }, D, 0.35);
+        set(i, { u: line * 0.9 + p.u * 0.1, v: p.v }, D, 0.18 + 0.3 * clamp((0.5 - ballD.u) / 0.3, 0, 1));
       }
     }
 
@@ -332,7 +428,14 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
     // Aim where the ball is going to be, not where it was.
     const target = carrier >= 0 ? { x: w.bx + w.vx[carrier] * 0.6, y: w.by + w.vy[carrier] * 0.6 } : w.pass ? { x: w.pass.x, y: w.pass.y } : null;
     if (target && defenders.length) {
-      const press = defenders[0];
+      // The nearest man goes, and once he has gone he sees it through unless a team-mate is clearly better placed.
+      const byTarget = defenders.slice().sort((a, b) => d2(a, target.x, target.y) - d2(b, target.x, target.y));
+      let press = byTarget[0];
+      const prev = mind.presser[D];
+      if (prev >= 0 && prev !== press && !sentOff[prev] && defenders.includes(prev) && d2(prev, target.x, target.y) < d2(press, target.x, target.y) + 3) press = prev;
+      mind.presser[D] = press;
+      defenders.splice(defenders.indexOf(press), 1);
+      defenders.unshift(press);
       const dist = d2(press, target.x, target.y);
       // Triggers: a heavy touch, a pass still on its way, the ball near the touchline, or just lost it.
       const trigger = carrier < 0 || Math.abs(w.by) > 26 || w.t - w.possSince < 3 || ballD.u < 0.25;
@@ -361,8 +464,14 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
           ax += (mx / ml) * 0.9;
           ay += (my / ml) * 0.9;
         }
-        setAbs(press, ax, ay, trigger ? 0.95 : 0.8);
+        // Close down fast, then slow and jockey: the last few metres are a stalk, not a charge.
+        if (carrier >= 0 && dist < 4.5) {
+          ax = target.x + (gx / gl) * 1.7;
+          ay = target.y + (gy / gl) * 1.7;
+          setAbs(press, ax, ay, trigger ? 0.7 : 0.55);
+        } else setAbs(press, ax, ay, trigger ? 0.95 : 0.8);
         taken.add(press);
+        busy[press] = 1;
         const cover = defenders[1];
         if (cover !== undefined) {
           if ((counterPress || ballD.u < 0.2) && d2(cover, target.x, target.y) < 12) {
@@ -376,9 +485,10 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
             setAbs(cover, tx[cover] * 0.4 + (target.x + (gx / gl) * 7.5) * 0.6, ty[cover] * 0.4 + (target.y + (gy / gl) * 7.5) * 0.6, 0.6);
           }
           taken.add(cover);
+          busy[cover] = 1;
         }
       }
-    }
+    } else mind.presser[D] = -1;
     // The runner in behind is tracked by the nearest free defender.
     const runner = w.runner[A];
     if (runner >= 0 && !sentOff[runner]) {
@@ -398,6 +508,7 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
         const gl = hyp(gx, gy) || 1;
         setAbs(best, w.px[runner] + (gx / gl) * 1.5 + w.vx[runner] * 0.4, w.py[runner] + (gy / gl) * 1.5 + w.vy[runner] * 0.4, 0.85);
         taken.add(best);
+        busy[best] = 1;
       }
     }
     // Zonal marking: each man picks up the attacker in his zone, goal-side; tighter near goal.
@@ -406,7 +517,8 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
     for (const i of defenders) {
       if (taken.has(i)) continue;
       let best = -1;
-      let bd = deep ? 11 : 8;
+      const reach = deep ? 11 : 8;
+      let bd = reach;
       for (const a of outs[A]) {
         if (claimed.has(a) || a === carrier) continue;
         const d = hyp(w.px[a] - tx[i], w.py[a] - ty[i]);
@@ -415,6 +527,10 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
           best = a;
         }
       }
+      // Stay with your man while he is still around your zone, rather than swapping every time someone drifts past.
+      const had = mind.mark[i];
+      if (had >= 0 && had !== best && !claimed.has(had) && had !== carrier && !sentOff[had] && hyp(w.px[had] - tx[i], w.py[had] - ty[i]) < reach * 1.35) best = had;
+      mind.mark[i] = best;
       if (best < 0) continue;
       claimed.add(best);
       const ax = w.px[best] + w.vx[best] * 0.3;
@@ -427,13 +543,23 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       const mx = ax + (gx / gl) * gap;
       const my = ay + (gy / gl) * gap;
       const k = inBox ? 0.85 : deep ? 0.6 : 0.4;
-      setAbs(i, tx[i] * (1 - k) + mx * k, ty[i] * (1 - k) + my * k, inBox ? 0.7 : 0.35);
+      setAbs(i, tx[i] * (1 - k) + mx * k, ty[i] * (1 - k) + my * k, inBox ? 0.7 : deep ? 0.4 : 0.22);
     }
-    // Anyone caught upfield of the ball sprints back goal-side.
+    // Caught upfield of the ball: get back goal-side. Defenders and midfielders near the play sprint;
+    // forwards and anyone far from it jog back and pick up the shape.
+    const danger = clamp((0.55 - ballD.u) / 0.35, 0, 1);
     for (const i of outs[D]) {
       if (taken.has(i) || w.chase.includes(i)) continue;
       const u = frame(w.px[i], w.py[i], D).u;
-      if (u > ballD.u + 0.03 && frame(tx[i], ty[i], D).u < u - 0.05) urg[i] = Math.max(urg[i], sinceWon < 6 ? 0.95 : 0.8);
+      // Only when his job is behind the ball and he isn't: a forward leading the press is where he should be.
+      const tu = frame(tx[i], ty[i], D).u;
+      if (!(u > ballD.u + 0.03 && tu < ballD.u && tu < u - 0.05)) continue;
+      const r = role(i);
+      const forward = r === 'ST' || r === 'WG' || (r === 'AM' && danger < 0.5);
+      const far = clamp((dBall[i] - 25) / 30, 0, 1);
+      const need = forward ? 0.4 + danger * 0.25 : 0.65 + danger * 0.3 + (sinceWon < 6 ? 0.1 : 0);
+      urg[i] = Math.max(urg[i], need * (1 - far * 0.35));
+      busy[i] = 1;
     }
   }
 
@@ -451,16 +577,19 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
         p.u = carrierFree ? Math.min(0.94, lineA + 0.07) : lineA - 0.006;
         p.v = clamp(frame(w.px[i], w.py[i], A).v * 0.85 + ballA.v * 0.1, -0.8, 0.8);
         set(i, p, A, carrierFree ? 1 : 0.7);
+        busy[i] = 1;
         continue;
       }
       if (counter && (r === 'ST' || r === 'WG' || r === 'AM')) {
         // Breaking at speed into the space the other team left.
         set(i, { u: Math.min(lineA - 0.01, Math.max(p.u, ballA.u + 0.12)), v: p.v }, A, 0.9);
+        busy[i] = 1;
         continue;
       }
       if (r === 'FB' && ballA.u > 0.58 && Math.sign(p.v) === Math.sign(ballA.v) && Math.abs(ballA.v) > 0.45 && carrier >= 0 && role(carrier) === 'WG') {
         // Overlap round the outside of the winger on the ball.
         set(i, { u: Math.min(0.9, ballA.u + 0.07), v: Math.sign(p.v) * 0.92 }, A, 0.75);
+        busy[i] = 1;
         continue;
       }
     }
@@ -471,6 +600,7 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       const p = frame(w.px[lp.from], w.py[lp.from], A);
       if (r !== 'CB' && r !== 'GK' && r !== 'DM' && p.u > 0.42 && p.u < lineA - 0.02) {
         set(lp.from, { u: Math.min(lineA - 0.01, p.u + 0.12), v: p.v * 0.8 }, A, 0.85);
+        busy[lp.from] = 1;
       }
     }
     // Wide in the final third: bodies attack the box for the cross.
@@ -487,6 +617,7 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
         const s = spots[k];
         // Hold just onside until the cross is struck.
         set(i, { u: Math.min(s.u, w.pass ? 1 : lineA - 0.005), v: s.v * far * (k === 0 ? -1 : 1) }, A, 0.65);
+        busy[i] = 1;
       });
     }
     if (carrier < 0 && recv < 0) return;
@@ -505,7 +636,7 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       const mx0 = w.mem[i * 2];
       if (!look && !Number.isNaN(mx0)) {
         placed.push({ x: mx0, y: w.mem[i * 2 + 1] });
-        setAbs(i, mx0, w.mem[i * 2 + 1], 0.55);
+        setAbs(i, mx0, w.mem[i * 2 + 1], d2(i, bx, by) < 16 ? 0.5 : 0.35);
         continue;
       }
       const score = (x: number, y: number) => {
@@ -555,12 +686,70 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       w.mem[i * 2] = bx2;
       w.mem[i * 2 + 1] = by2;
       placed.push({ x: bx2, y: by2 });
-      setAbs(i, bx2, by2, 0.55);
+      setAbs(i, bx2, by2, d2(i, bx, by) < 16 ? 0.5 : 0.35);
     }
     // Everyone else forgets their old support spot.
     for (const i of teams[A]) if (near.indexOf(i) < 0) w.mem[i * 2] = w.mem[i * 2 + 1] = NaN;
     // The receiver attacks the pass.
-    if (w.pass && recv >= 0) setAbs(recv, w.pass.x, w.pass.y, 1);
+    if (w.pass && recv >= 0) {
+      setAbs(recv, w.pass.x, w.pass.y, 1);
+      busy[recv] = 1;
+    }
+  }
+
+  /**
+   * How a footballer actually moves off the ball. He reads the play with a
+   * moment's lag, so his idea of where to be drifts rather than snaps. When he
+   * is roughly where he should be he stands and watches, and only sets off
+   * again once the game has really moved away from him. The further he is
+   * from the ball the lazier he is about it: the far side ambles, the players
+   * around the ball stay on their toes. Jobs with a purpose (pressing,
+   * tracking a runner, attacking a pass, chasing a loose ball) skip all this.
+   */
+  function pace() {
+    for (let i = 0; i < 22; i++) {
+      if (sentOff[i] || busy[i] || urg[i] >= 0.8) {
+        mind.tx[i] = tx[i];
+        mind.ty[i] = ty[i];
+        mind.settled[i] = 0;
+        continue;
+      }
+      const s = sideOf(i);
+      const gk = i % 11 === 0;
+      const dBall = d2(i, w.bx, w.by);
+      // Reading the play: a personal reaction speed, quicker when it matters.
+      const px = mind.tx[i];
+      if (!Number.isNaN(px)) {
+        const k = clamp(0.22 + trait(i, 1) * 0.14 + urg[i] * 0.3 + (dBall < 15 ? 0.12 : 0), 0.2, 0.7);
+        tx[i] = px + (tx[i] - px) * k;
+        ty[i] = mind.ty[i] + (ty[i] - mind.ty[i]) * k;
+      }
+      mind.tx[i] = tx[i];
+      mind.ty[i] = ty[i];
+      // Holding a line is a team job: defenders in the back line stay tight to it.
+      const r = role(i);
+      const lineJob = s === D && (r === 'CB' || r === 'FB');
+      const e = d2(i, tx[i], ty[i]);
+      const tol = gk ? 0.8 : (lineJob ? 0.9 : 1.3 + clamp((dBall - 12) * 0.07, 0, 3.2)) * (0.85 + trait(i, 2) * 0.3);
+      if (mind.settled[i] ? e > tol * 1.9 : e > tol * 0.55) mind.settled[i] = 0;
+      else mind.settled[i] = 1;
+      if (mind.settled[i]) {
+        // In position: stand and watch, turning with the play.
+        tx[i] = w.px[i];
+        ty[i] = w.py[i];
+        urg[i] = 0;
+        continue;
+      }
+      // Football is walking punctuated by bursts, not a steady jog. Small
+      // adjustments are walked; a real gap, or a moment that matters, gets a
+      // proper run. The far side of the play is never in a hurry.
+      // Work rate is personal: some keep busy wherever the ball is, others save their legs.
+      const lazy = clamp(((dBall - 22) / 35) * (0.7 + trait(i, 3) * 0.6), 0, 1);
+      const need = urg[i] * (1 - lazy * 0.5);
+      if (need < 0.42 && e < 7 + lazy * 5) urg[i] = WALK;
+      else if (e > 14 || need >= 0.42) urg[i] = Math.max(need, 0.5 - lazy * 0.15);
+      else urg[i] = Math.max(need, 0.28);
+    }
   }
 
   function celebrate(scorer: number) {
