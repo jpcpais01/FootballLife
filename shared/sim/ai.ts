@@ -646,7 +646,7 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
           set(i, { u: a.u + 0.012, v: a.v - Math.sign(a.v || 1) * 0.035 }, S, urgAll);
         } else set(i, edge[Math.min(edge.length - 1, 6 + (k - up.length))], S, urgAll);
       });
-      if (taker >= 0) set(taker, { u: 1 - 11 / 105 - 0.03, v: 0 }, S, 0.4);
+      if (taker >= 0) set(taker, { u: 1 - 11 / 105 - 0.045, v: 0.012 }, S, 0.4);
       if (gkO >= 0) set(gkO, { u: 0.004, v: 0 }, O, urgAll);
       if (gkS >= 0) set(gkS, { u: 0.07, v: 0 }, S, urgAll);
       return;

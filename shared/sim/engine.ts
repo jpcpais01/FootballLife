@@ -31,6 +31,8 @@ const TRACK_HZ = 5;
 const GOAL_X = 52.5;
 const GOAL_HALF = 3.66;
 const BALL_R = 0.11;
+/** Grass drag on a pass along the ground (1/s). */
+const GROUND_K = 0.6;
 // Calibration of the decision model against real match numbers.
 const SHOOT_K = 0.6; // how keen players are to shoot
 const CROSS_K = 1; // how keen wide players are to cross
@@ -111,7 +113,16 @@ interface PendingRestart extends Restart {
   announceAt: number;
   announced: boolean;
   take: () => void;
+  /** When the ball is brought back to the spot (it runs on until then). */
+  fetchAt: number;
+  /** The ball on its way back to the spot (or into the thrower's hands). */
+  fetch: { t0: number; T: number; x0: number; y0: number; z0: number; apex: number } | null;
+  /** The ball is on the spot (or in the thrower's hands). */
+  ready: boolean;
 }
+
+/** Seconds before a restart is taken that the taker starts his run-up. */
+const RUN_UP = 1.4;
 
 class Engine {
   private rng: Rng;
@@ -371,13 +382,17 @@ class Engine {
         r.announced = true;
         this.emit(r.k, r.s, r.x, r.y, { p: r.p, o: r.k === 'freekick' && r.o ? r.o : undefined, hl: r.k === 'penalty' ? 1 : undefined });
       }
-      if (this.t >= r.at) {
+      // Taken once the ball is on the spot and the taker is at it (or, at worst, a while later).
+      const sp = this.strikeSpot(r);
+      const set = r.ready && (r.p < 0 || this.sentOff[r.p] || hyp(this.px[r.p] - sp.x, this.py[r.p] - sp.y) < 0.9);
+      if (this.t >= r.at && (set || this.t >= r.at + 12)) {
         this.restart = null;
         this.phase = 'play';
-        this.place(r.x, r.y, r.k === 'throwin' ? 2.1 : BALL_R);
+        if (r.ready) this.place(this.bx, this.by, this.bz);
+        else this.place(r.x, r.y, r.k === 'throwin' ? 2.1 : BALL_R);
         if (r.p >= 0 && !this.sentOff[r.p]) {
-          this.px[r.p] = r.x - (r.k === 'throwin' ? 0 : this.dir(r.s) * 0.6);
-          this.py[r.p] = r.y + (r.k === 'throwin' ? Math.sign(r.y || 1) * 0.6 : 0);
+          this.px[r.p] = sp.x;
+          this.py[r.p] = sp.y;
         }
         this.poss = r.s;
         r.take();
@@ -448,6 +463,21 @@ class Engine {
       boxRun: this.boxRun,
     };
     plan(w, this.tx, this.ty, this.urg);
+    const r = this.restart;
+    if (r && r.p >= 0 && r.ready && this.t >= r.at - RUN_UP) {
+      // The run-up: the taker steps onto the ball.
+      const sp = this.strikeSpot(r);
+      this.tx[r.p] = sp.x;
+      this.ty[r.p] = sp.y;
+      this.urg[r.p] = r.k === 'penalty' ? 0.55 : 0.35;
+    }
+    for (let i = 0; i < 22; i++) {
+      if (!this.sentOff[i]) continue;
+      // Sent off: he walks to the tunnel.
+      this.tx[i] = 0;
+      this.ty[i] = -38;
+      this.urg[i] = 0;
+    }
     if (this.owner >= 0 && !this.restart) {
       this.tx[this.owner] = this.carryX;
       this.ty[this.owner] = this.carryY;
@@ -469,7 +499,6 @@ class Engine {
       this.accC[i] = this.accel(i);
     }
     for (let i = 0; i < 22; i++) {
-      if (this.sentOff[i]) continue;
       const dx = this.tx[i] - this.px[i];
       const dy = this.ty[i] - this.py[i];
       const d = hyp(dx, dy);
@@ -494,7 +523,6 @@ class Engine {
       this.vy[i] += ay;
     }
     for (let i = 0; i < 22; i++) {
-      if (this.sentOff[i]) continue;
       this.px[i] += this.vx[i] * DT;
       this.py[i] += this.vy[i] * DT;
     }
@@ -522,10 +550,10 @@ class Engine {
   private moveBall() {
     if (this.flight) {
       const f = this.flight;
-      const s = clamp((this.t + DT - f.t0) / f.T, 0, 1);
+      const s = clamp((this.t - f.t0) / f.T + 1e-6, 0, 1);
       let e: number;
       if (f.kind === 'ground') {
-        const k = 0.75;
+        const k = GROUND_K;
         e = (1 - Math.exp(-k * s * f.T)) / (1 - Math.exp(-k * f.T));
       } else if (f.kind === 'air') {
         const k = 0.3;
@@ -604,6 +632,7 @@ class Engine {
       this.outOfPlay();
       return;
     }
+    if (this.restart && this.restartBall(this.restart)) return;
     // Dead ball (in the net, or out of play before the restart): it runs on and settles.
     if (this.bz > BALL_R + 0.01 || Math.abs(this.bvx) + Math.abs(this.bvy) > 0.05) {
       const net = Math.abs(this.bx) > GOAL_X - 0.2 && Math.abs(this.by) < GOAL_HALF + 0.1 && this.bz < 2.5;
@@ -611,11 +640,19 @@ class Engine {
       const back = net ? GOAL_X + 1.8 : GOAL_X + 5;
       if (Math.abs(this.bx) > back) {
         this.bx = Math.sign(this.bx) * back;
-        this.bvx *= -0.15;
+        // The netting swallows the pace; a hoarding sends it back a little.
+        this.bvx *= net ? -0.04 : -0.15;
         this.bvy *= 0.4;
         this.bvz *= 0.4;
       }
-      if (net) this.by = clamp(this.by, -GOAL_HALF + 0.15, GOAL_HALF - 0.15);
+      if (net) {
+        this.by = clamp(this.by, -GOAL_HALF + 0.15, GOAL_HALF - 0.15);
+        // It stays in the goal.
+        if (Math.abs(this.bx) < GOAL_X + 0.4 && this.bvx * Math.sign(this.bx) < 0) {
+          this.bx = Math.sign(this.bx) * (GOAL_X + 0.4);
+          this.bvx = 0;
+        }
+      }
       if (Math.abs(this.by) > 37) {
         this.by = Math.sign(this.by) * 37;
         this.bvy *= -0.15;
@@ -644,6 +681,56 @@ class Engine {
       this.bx += this.bvx * DT;
       this.by += this.bvy * DT;
     }
+  }
+
+  /** Where the taker stands to play a restart. */
+  private strikeSpot(r: Restart) {
+    if (r.k === 'throwin') return { x: r.x, y: r.y + Math.sign(r.y || 1) * 0.6 };
+    if (r.k === 'kickoff') return { x: r.x - this.dir(r.s) * 0.4, y: r.y };
+    return { x: r.x - this.dir(r.s) * 0.6, y: r.y };
+  }
+
+  /**
+   * Brings a dead ball back for the restart: after it has run on, it is tossed
+   * back to the spot (or into the thrower's hands) and sits there until taken.
+   * Returns false while the ball is still running on by itself.
+   */
+  private restartBall(r: PendingRestart) {
+    const hold = r.k === 'throwin' && r.p >= 0 && !this.sentOff[r.p];
+    const target = () => {
+      if (!hold) return { x: r.x, y: r.y, z: BALL_R };
+      // In his hands at the chest, raised above his head as he takes it.
+      const up = clamp(1 - (r.at - this.t) / 0.8, 0, 1);
+      const sg = Math.sign(r.y || 1);
+      return { x: this.px[r.p], y: this.py[r.p] - sg * 0.3, z: 1.05 + up * 1.05 };
+    };
+    if (!r.fetch && !r.ready) {
+      if (this.t < r.fetchAt) return false;
+      const g = target();
+      const d = hyp(g.x - this.bx, g.y - this.by);
+      // Nudged into place if it's right there; otherwise tossed back.
+      const T = d < 2 ? 0.3 + d * 0.25 : clamp(0.6 + d / 15, 0.9, 2.6);
+      const apex = d < 2 && !hold ? 0 : Math.max(0.4, (9.81 * T * T) / 8 - Math.max(0, g.z - this.bz) / 2);
+      r.fetch = { t0: this.t, T, x0: this.bx, y0: this.by, z0: this.bz, apex: Math.min(apex, 9) };
+    }
+    const g = target();
+    if (r.fetch) {
+      const f = r.fetch;
+      const s = clamp((this.t + DT - f.t0) / f.T, 0, 1);
+      this.bx = f.x0 + (g.x - f.x0) * s;
+      this.by = f.y0 + (g.y - f.y0) * s;
+      this.bz = f.z0 + (g.z - f.z0) * s + f.apex * 4 * s * (1 - s);
+      if (s >= 1) {
+        r.fetch = null;
+        r.ready = true;
+      }
+    } else {
+      this.bx = g.x;
+      this.by = g.y;
+      this.bz = g.z;
+    }
+    this.bvx = this.bvy = this.bvz = 0;
+    return true;
   }
 
   private place(x: number, y: number, z = BALL_R) {
@@ -929,7 +1016,7 @@ class Engine {
       if (d < 4) return;
       const g = this.laneGap(D, this.bx, this.by, x, y);
       const lofted = kind !== 'throw' && (d > 38 || (g < 1.2 && d > 14) || (gk && d > 32));
-      const speed = lofted ? 17 + d * 0.12 : 11 + d * 0.22 + passing * 0.03;
+      const speed = lofted ? 17 + d * 0.12 : kind === 'throw' ? 11 : 9 + d * 0.18 + passing * 0.03;
       const T = d / speed + (lofted ? 0.5 : 0.1);
       const tf = this.fr(x, y, side);
       const open = this.nearest(D, x, y).d;
@@ -1015,7 +1102,11 @@ class Engine {
   // =====================================================================
 
   private launch(kind: Flight['kind'], x1: number, y1: number, T: number, apex: number, z1: number, done: () => void, curl = 0) {
-    this.flight = { t0: this.t, T: Math.max(0.25, T), x0: this.bx, y0: this.by, z0: this.bz, x1, y1, z1, apex, kind, curl, done };
+    // Whole steps, so the ball lands exactly on a frame and carries straight on.
+    T = Math.ceil(Math.max(0.25, T) / DT - 1e-6) * DT;
+    // A ball in the air falls under gravity: its height follows from its hang time.
+    if (kind === 'air') apex = clamp((9.81 * T * T) / 8, 0.3, 16);
+    this.flight = { t0: this.t, T, x0: this.bx, y0: this.by, z0: this.bz, x1, y1, z1, apex, kind, curl, done };
     this.owner = -1;
     this.receiving = false;
     this.inHands = false;
@@ -1060,8 +1151,8 @@ class Engine {
     const lofted = opt.lofted;
     const z = lofted ? r1(clamp(d / 6, 2, 9)) : undefined;
     const o = fromKeeper ? 'gk' : through ? 'through' : long ? 'long' : 'short';
-    const speed = lofted ? 17 + d * 0.12 : 11 + d * 0.22 + this.a(h, 'passing') * 0.03;
-    const T = d / speed + (lofted ? 0.5 : 0.1);
+    const speed = lofted ? 17 + d * 0.12 : kind === 'throw' ? 11 : 9 + d * 0.18 + this.a(h, 'passing') * 0.03;
+    const T = d / speed + (lofted ? 0.5 : kind === 'throw' ? 0.3 : 0.1);
     const kicker = h;
     const gkHands = this.role(h) === 'GK' && this.inHands;
     const kickAct: ActKind = kind === 'throw'
@@ -1076,7 +1167,10 @@ class Engine {
       const mistimed = through && this.rng.chance(0.08 * (oppTac.mentality === 'attacking' || oppTac.pressing === 'high' ? 1.5 : 1));
       this.passInfo = { to, x: tgt.x, y: tgt.y, cross: false };
       // Played so he can get there: the ball and the runner arrive together.
-      this.launch(lofted ? 'air' : 'ground', tgt.x, tgt.y, Math.max(T, this.reach(to, tgt.x, tgt.y)), lofted ? (z ?? 2) : 0, BALL_R, () => {
+      const reachT = this.reach(to, tgt.x, tgt.y);
+      // Thrown balls drop in at his feet; they can't be held up for a runner the way a pass can.
+      const fly: Flight['kind'] = lofted || kind === 'throw' ? 'air' : 'ground';
+      this.launch(fly, tgt.x, tgt.y, kind === 'throw' ? Math.max(T, Math.min(reachT, T * 1.4)) : Math.max(T, reachT), lofted ? (z ?? 2) : 0, kind === 'throw' ? 0.5 : BALL_R, () => {
         if (offside || mistimed) {
           this.emit('pass', side, this.bx, this.by, { p: kicker, q: to, z, o });
           this.t += 0.6;
@@ -1087,7 +1181,7 @@ class Engine {
           this.loose = true;
           this.bvx *= 0.5;
           this.bvy *= 0.5;
-          this.deadBall({ k: 'freekick', x: at.x, y: at.y, s: D, p: taker }, this.rng.range(10, 18), () => this.pass(false));
+          this.deadBall({ k: 'freekick', x: at.x, y: at.y, s: D, p: taker }, this.rng.range(7, 11), () => this.pass(false));
           return;
         }
         this.emit('pass', side, this.bx, this.by, { p: kicker, q: to, z, o, hl: through && this.fr(this.bx, this.by, side).u > 0.8 ? 1 : undefined });
@@ -1106,7 +1200,7 @@ class Engine {
       const at = outWide
         ? this.abs({ u: clamp(tf.u, 0.03, 0.97), v: Math.sign(tf.v || (this.rng.chance(0.5) ? 1 : -1)) * 1.03 }, side)
         : this.abs({ u: 1.03, v: clamp(tf.v, -0.9, 0.9) }, side);
-      this.launch(lofted ? 'air' : 'ground', at.x, at.y, T * 1.1, lofted ? (z ?? 2) : 0, BALL_R, () => {
+      this.launch(lofted || kind === 'throw' ? 'air' : 'ground', at.x, at.y, T * 1.1, lofted ? (z ?? 2) : 0, BALL_R, () => {
         this.emit('pass', side, this.bx, this.by, { p: kicker, q: to, z, o: o + '-out' });
         this.loose = true;
         this.outOfPlay(true);
@@ -1124,7 +1218,7 @@ class Engine {
         this.passInfo = null;
         this.chase = [dGk];
         this.landing = { x: tgt.x, y: tgt.y };
-        this.launch(lofted ? 'air' : 'ground', tgt.x, tgt.y, Math.max(T, tGk), lofted ? (z ?? 2) : 0, lofted ? 1.2 : BALL_R, () => {
+        this.launch(lofted || kind === 'throw' ? 'air' : 'ground', tgt.x, tgt.y, Math.max(T, tGk), lofted ? (z ?? 2) : 0, lofted ? 1.2 : BALL_R, () => {
           this.emit('intercept', D, this.bx, this.by, { p: dGk, q: kicker });
           if (inBox) {
             // Gathered: low balls with a dive at the runner's feet, high ones caught.
@@ -1152,7 +1246,7 @@ class Engine {
     this.passInfo = null;
     this.chase = [icp.idx];
     this.landing = { x: ix, y: iy };
-    this.launch(lofted ? 'air' : 'ground', ix, iy, Math.max(T * k, this.reach(icp.idx, ix, iy)), lofted ? (z ?? 2) * 0.9 : 0, lofted ? 0.9 : BALL_R, () => {
+    this.launch(lofted || kind === 'throw' ? 'air' : 'ground', ix, iy, Math.max(T * k, this.reach(icp.idx, ix, iy)), lofted ? (z ?? 2) * 0.9 : 0, lofted ? 0.9 : BALL_R, () => {
       this.emit('intercept', D, this.bx, this.by, { p: icp.idx, q: kicker, z: z ? r1(z * 0.6) : undefined });
       this.give(icp.idx, lofted ? 'header' : 'trap');
     });
@@ -1274,12 +1368,14 @@ class Engine {
     this.lastPass = null;
     this.owner = -1;
     this.loose = false;
-    const delay = this.rng.range(12, 26);
+    const delay = this.rng.range(9, 16);
     const cv = Math.abs(b.v);
     if (b.u > 0.84 && cv < 0.4) {
       const taker = this.bestOf(side, (i) => this.mix(i, { finishing: 3, shooting: 1, decisions: 2 }));
       const spot = this.abs({ u: 1 - 11 / 105, v: 0 }, side);
-      this.deadBall({ k: 'penalty', x: spot.x, y: spot.y, s: side, p: taker }, delay + 10, () => this.shoot(false, 'penalty'), 10);
+      // Given straight away; the spot kick follows once the box has been cleared.
+      const wait = this.rng.range(9.5, 12);
+      this.deadBall({ k: 'penalty', x: spot.x, y: spot.y, s: side, p: taker }, wait, () => this.shoot(false, 'penalty'), wait - 0.2);
       return;
     }
     if (b.u > 0.7 && cv < 0.55 && this.rng.chance(0.45)) {
@@ -1301,12 +1397,6 @@ class Engine {
     if (kind !== 'yellow') this.sentOff[i] = true;
     this.emit('card', side, this.bx, this.by, { p: i, o: kind, hl: kind !== 'yellow' ? 1 : undefined });
     this.t -= 1;
-    if (this.sentOff[i]) {
-      // Off he goes, toward the tunnel.
-      this.px[i] = 0;
-      this.py[i] = -38;
-      this.vx[i] = this.vy[i] = 0;
-    }
   }
 
   private cross(setPiece: boolean, corner: boolean) {
@@ -1494,7 +1584,7 @@ class Engine {
     const f = this.fr(spot.x, spot.y, thrower);
     const roles = f.u < 0.4 ? ['FB', 'CB'] : ['FB', 'WG', 'CM'];
     const taker = this.pickNear(thrower, roles, spot.x, spot.y);
-    this.deadBall({ k: 'throwin', x: spot.x, y: spot.y, s: thrower, p: taker }, this.rng.range(8, 15), () => {
+    this.deadBall({ k: 'throwin', x: spot.x, y: spot.y, s: thrower, p: taker }, this.rng.range(6, 10), () => {
       this.owner = taker;
       this.pass(false, 'throw');
     });
@@ -1519,7 +1609,7 @@ class Engine {
     const spot = this.abs({ u: 0.05, v: this.rng.range(-0.2, 0.2) }, side);
     const gk = this.gk(side);
     const taker = this.sentOff[gk] ? this.bestOf(side, (i) => this.a(i, 'passing')) : gk;
-    this.deadBall({ k: 'goalkick', x: spot.x, y: spot.y, s: side, p: taker }, this.rng.range(10, 18), () => {
+    this.deadBall({ k: 'goalkick', x: spot.x, y: spot.y, s: side, p: taker }, this.rng.range(8, 13), () => {
       this.owner = taker;
       this.pass(true);
     });
@@ -1529,14 +1619,14 @@ class Engine {
     const v = this.fr(this.bx, this.by, side).v >= 0 ? 1 : -1;
     const spot = this.abs({ u: 0.995, v: v * 0.99 }, side);
     const taker = this.bestOf(side, (i) => this.a(i, 'crossing'));
-    this.deadBall({ k: 'corner', x: spot.x, y: spot.y, s: side, p: taker }, this.rng.range(15, 28), () => {
+    this.deadBall({ k: 'corner', x: spot.x, y: spot.y, s: side, p: taker }, this.rng.range(9, 14), () => {
       this.owner = taker;
       this.cross(true, true);
     });
   }
 
   /** The ball is dead: players take up the restart shape, then the taker plays it. */
-  private deadBall(r: Restart, delay: number, take: () => void, announceBefore = 0) {
+  private deadBall(r: Restart, delay: number, take: () => void, announceBefore = 0, fetchAfter = 1.6) {
     this.phase = 'dead';
     this.owner = -1;
     this.flight = null;
@@ -1551,6 +1641,9 @@ class Engine {
       at,
       announceAt: at - announceBefore,
       announced: false,
+      fetchAt: this.t + fetchAfter,
+      fetch: null,
+      ready: false,
       take: () => {
         this.lastEvX = this.bx;
         this.lastEvY = this.by;
@@ -1685,8 +1778,8 @@ class Engine {
       const curl = Math.sign(y || 1) * this.dir(side) * bendMag;
       this.launch('shot', x, y, T, apex, z1, done, curl);
     };
-    const flightT = (y: number) => hyp(gx - this.bx, y - this.by) / speed;
-    const keeperGoes = (y: number, z: number, save: boolean, wrongWay = false) => {
+    const flightT = (y: number, x = gx) => Math.ceil(hyp(x - this.bx, y - this.by) / speed / DT - 1e-6) * DT;
+    const keeperGoes = (y: number, z: number, save: boolean, wrongWay = false, x = gx) => {
       if (this.sentOff[gk]) return;
       // He sets himself as it's struck.
       if (this.dist(gk, gx, 0) < 14) this.act(gk, 'keeperSet');
@@ -1694,7 +1787,7 @@ class Engine {
       if (Math.abs(y) > GOAL_HALF + 0.9 || z > 3.1) return;
       const dy = y - this.py[gk];
       // Timed to the moment the ball gets to him.
-      const tAt = this.t + Math.max(0.15, flightT(y));
+      const tAt = this.t + Math.max(0.3, flightT(y, x));
       // Local side for the figure: +1 is the keeper's own left as he faces the play.
       let sideSign = -Math.sign(dy || 1) * this.dir(D);
       if (wrongWay) sideSign = -sideSign;
@@ -1749,13 +1842,25 @@ class Engine {
     if (this.rng.chance(onTargetP)) {
       // On target, but close enough to the keeper for him to get there.
       const parry = this.rng.chance(style === 'drive' || style === 'curler' ? 0.45 : 0.3);
-      const y = clamp(gkY + (aimY - gkY) * this.rng.range(0.15, 0.8), -GOAL_HALF + 0.3, GOAL_HALF - 0.3);
+      // Met where the keeper is: off his line if he has come out to narrow the angle.
+      const ds = this.dir(side);
+      let xs = gx - ds * 0.6;
+      if (!this.sentOff[gk] && ds * (xs - this.px[gk]) > 0) xs = this.px[gk] - ds * 0.3;
+      if (ds * (xs - this.bx) < 1.5) xs = this.bx + ds * 1.5;
+      const k = clamp((xs - this.bx) / (gx - this.bx || 1), 0, 1);
+      const yAt = this.by + (aimY - this.by) * k;
+      const y = clamp(gkY + (yAt - gkY) * this.rng.range(0.15, 0.8), -GOAL_HALF + 0.3, GOAL_HALF - 0.3);
       const z = r1(clamp(aimZ, 0.2, 2.1));
-      keeperGoes(y, z, !parry);
-      fly(gx - this.dir(side) * 0.6, y, z, () => {
+      keeperGoes(y, z, !parry, false, xs);
+      fly(xs, y, z, () => {
         this.emit('shot', side, this.bx, this.by, { p: h, q: gk, o: parry ? 'parried' : 'saved', xg: xgR, z, hl: 1 });
         this.lastTouch = D;
         if (parry) {
+          // Pushed away wide of the post and behind.
+          const out = Math.sign(this.by || (this.rng.chance(0.5) ? 1 : -1));
+          this.bvx = ds * this.rng.range(3, 6);
+          this.bvy = out * this.rng.range(5, 9);
+          this.bvz = this.rng.range(1.5, 4);
           this.loose = true;
           this.outOfPlay(true, 'corner');
           return;
@@ -1818,7 +1923,13 @@ class Engine {
   /** Sets up a kickoff; `snap` puts everyone straight on their spots. */
   private kickoffSetup(side: Side, snap: boolean, at = this.t) {
     const taker = this.bestOf(side, (i) => (['ST', 'AM', 'CM'].includes(this.role(i)) ? 50 : 0) + this.slots[side][i % 11].x * 50 + this.rng.next() * 8);
-    this.place(0, 0);
+    // At the start of a half the ball is already on the spot; after a goal it is fetched from the net.
+    if (snap) this.place(0, 0);
+    else {
+      this.owner = -1;
+      this.flight = null;
+      this.loose = false;
+    }
     this.poss = side;
     this.lastPass = null;
     this.phase = 'dead';
@@ -1831,6 +1942,9 @@ class Engine {
       at,
       announceAt: at,
       announced: false,
+      fetchAt: this.t,
+      fetch: null,
+      ready: snap,
       take: () => {
         this.owner = taker;
         this.ownerSince = this.t;
@@ -1919,8 +2033,10 @@ class Engine {
     const maxN = this.n;
     for (const [g0, g1, r0, r1_] of timeline) {
       if (g1 <= g0 || (g1 - g0) / Math.max(1e-6, r1_ - r0) > 3) continue;
-      const t0 = Math.max(0, g0 - 1);
-      const t1 = Math.min(maxN * DT, g1 + 1);
+      // A second of margin either side, but never across the half-time reset.
+      const ht = this.halftimeAt;
+      const t0 = Math.max(0, g0 - 1, g0 > ht ? ht + 1 : 0);
+      const t1 = Math.min(maxN * DT, g1 + 1, g1 <= ht ? ht : Infinity);
       const step = Math.round(1 / (TRACK_HZ * DT));
       const n0 = Math.round(t0 / DT);
       const n1 = Math.round(t1 / DT);
