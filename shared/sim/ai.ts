@@ -516,7 +516,10 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
         let s = Math.min(nearestOpp(A, x, y), 7) * 0.6 + Math.min(laneGap(A, bx, by, x, y), 4) * 1.0;
         s += clamp(f.u - ballA.u, -0.15, 0.2) * 9;
         s -= hyp(x - base.x, y - base.y) * 0.13;
-        if (db < 7) s -= (7 - db) * 0.7;
+        // Close enough for a simple ball (8-16 m is ideal), never on top of the man on the ball.
+        if (db < 5) s -= (5 - db) * 1.2;
+        else if (db < 8) s -= (8 - db) * 0.15;
+        else if (db > 18) s -= (db - 18) * 0.06;
         if (db > 32) s -= (db - 32) * 0.25;
         for (const q of placed) {
           const dq = hyp(x - q.x, y - q.y);
