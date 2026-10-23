@@ -5,7 +5,7 @@
 // projection), plus the eyes, lashes and the landmarks the painters need.
 import * as THREE from 'three';
 import type { Appearance } from '../../../shared/appearance.ts';
-import { BONES, NB, makeBones, setBindPose, type BoneName } from '../rig/skeleton.ts';
+import { B, BONES, NB, makeBones, setBindPose, type BoneName } from '../rig/skeleton.ts';
 import { morphWeights } from './look.ts';
 import { rasterMax } from './raster.ts';
 import { dirToUV } from './uv.ts';
@@ -166,7 +166,53 @@ for (const s of ['Left', 'Right']) {
 /** Head scale over the fitted body: a touch larger reads better at game distances. */
 const HEAD_K = 1.1;
 
-function fitMatrices(P: Float32Array, land: Record<string, number[]>) {
+/** Palm-down in the T-pose (Mixamo's rest, which the mocap is measured from), carried into the bind pose. */
+const PALM = (['Left', 'Right'] as const).map((s) => {
+  const bones = makeBones();
+  setBindPose(bones);
+  bones[0].updateMatrixWorld(true);
+  const q = bones[B[`${s}Hand`]].getWorldQuaternion(new THREE.Quaternion());
+  return new THREE.Vector3(0, -1, 0).applyQuaternion(q);
+});
+
+/**
+ * The MakeHuman hand's own frame: where the back of the hand points from the
+ * wrist (to the knuckles, not the curled fingertips) and the palm's normal,
+ * from the flat of the hand between the wrist and the knuckles.
+ */
+function handFrame(P: Float32Array, bd: Bundle, bone: number, wrist: THREE.Vector3, tip: THREE.Vector3) {
+  const len = wrist.distanceTo(tip);
+  const c = new THREE.Vector3();
+  const pts: number[] = [];
+  for (let i = 0; i < bd.nv; i++) {
+    let w = 0;
+    for (let k = 0; k < 4; k++) if (bd.skinI[i * 4 + k] === bone) w += bd.skinW[i * 4 + k];
+    if (w < 200) continue;
+    const d = Math.hypot(P[i * 3] - wrist.x, P[i * 3 + 1] - wrist.y, P[i * 3 + 2] - wrist.z) / len;
+    if (d < 0.25 || d > 0.55) continue;
+    pts.push(i);
+    c.x += P[i * 3], c.y += P[i * 3 + 1], c.z += P[i * 3 + 2];
+  }
+  c.divideScalar(pts.length);
+  const C = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  for (const i of pts) {
+    const d = [P[i * 3] - c.x, P[i * 3 + 1] - c.y, P[i * 3 + 2] - c.z];
+    for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) C[a * 3 + b] += d[a] * d[b];
+  }
+  // The palm is flat: its normal is the axis it varies least along (inverse power iteration).
+  const M = new THREE.Matrix3().fromArray(C);
+  const tr = (C[0] + C[4] + C[8]) * 1e-6;
+  M.elements[0] += tr, M.elements[4] += tr, M.elements[8] += tr;
+  M.invert();
+  const n = new THREE.Vector3(1, 1, 1).normalize();
+  for (let it = 0; it < 40; it++) n.applyMatrix3(M).normalize();
+  const dir = c.sub(wrist);
+  dir.addScaledVector(n, -dir.dot(n)).normalize();
+  return { dir, n };
+}
+
+function fitMatrices(P: Float32Array, bd: Bundle) {
+  const land = bd.land;
   const L = (k: string) => {
     const v = new THREE.Vector3();
     for (const i of land[k]) v.x += P[i * 3], v.y += P[i * 3 + 1], v.z += P[i * 3 + 2];
@@ -180,26 +226,46 @@ function fitMatrices(P: Float32Array, land: Record<string, number[]>) {
     mh[k] = mh.Hips.clone().lerp(mh.Neck, t);
   }
   const s0 = BIND.Hips.distanceTo(BIND.Head) / mh.Hips.distanceTo(mh.Head);
+  // Each bone turns MakeHuman's segment onto ours.
+  const turn = BONES.map((n) => {
+    if (n === 'Head') return new THREE.Quaternion();
+    const c = CHILD[n];
+    return new THREE.Quaternion().setFromUnitVectors(mh[c].clone().sub(mh[n]).normalize(), BIND[c].clone().sub(BIND[n]).normalize());
+  });
+  // MakeHuman rests with the elbows bent and the hands cocked forward. The forearm is
+  // straightened above; the hand has to follow it, in line, with the palm where the T-pose
+  // has it. Kept as MakeHuman had it, the hands were cocked forward against the mocap and
+  // the palms faced forward in every pose.
+  (['Left', 'Right'] as const).forEach((s, si) => {
+    const hb = B[`${s}Hand`];
+    const fb = B[`${s}ForeArm`];
+    const axis = BIND[`${s}HandTip`].clone().sub(BIND[`${s}Hand`]).normalize();
+    const hf = handFrame(P, bd, hb, mh[`${s}Hand`], mh[`${s}HandTip`]);
+    const q = turn[hb];
+    q.setFromUnitVectors(hf.dir.clone().applyQuaternion(turn[fb]), axis).multiply(turn[fb]);
+    // Of the flat of the hand's two faces, the one that lands nearer the T-pose palm is the palm.
+    const n1 = hf.n.applyQuaternion(q);
+    if (n1.dot(PALM[si]) < 0) n1.negate();
+    n1.addScaledVector(axis, -n1.dot(axis)).normalize();
+    const roll = Math.atan2(n1.clone().cross(PALM[si]).dot(axis), n1.dot(PALM[si]));
+    q.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, roll));
+    // The forearm takes half that twist, as its two bones share it in life.
+    turn[fb].premultiply(new THREE.Quaternion().setFromAxisAngle(axis, roll / 2));
+  });
   const mats: THREE.Matrix4[] = [];
   const a = new THREE.Vector3();
-  const b = new THREE.Vector3();
-  const q = new THREE.Quaternion();
   for (let i = 0; i < NB; i++) {
     const n = BONES[i];
     const H = mh[n];
     const h = BIND[n];
     const c = CHILD[n];
     a.subVectors(mh[c], H);
-    b.subVectors(BIND[c], h);
     const head = n === 'Head';
     const rigid = head || n.endsWith('Hand');
     const lat = head ? s0 * HEAD_K : s0;
-    const k = rigid ? lat : b.length() / a.length();
-    a.normalize();
-    b.normalize();
     // The head and hands keep their own proportions; limbs stretch along their length only.
-    if (rigid) q.identity();
-    else q.setFromUnitVectors(a, b);
+    const k = rigid ? lat : BIND[c].distanceTo(h) / a.length();
+    a.normalize();
     const S = new THREE.Matrix4().set(
       lat + (k - lat) * a.x * a.x, (k - lat) * a.x * a.y, (k - lat) * a.x * a.z, 0,
       (k - lat) * a.y * a.x, lat + (k - lat) * a.y * a.y, (k - lat) * a.y * a.z, 0,
@@ -207,7 +273,7 @@ function fitMatrices(P: Float32Array, land: Record<string, number[]>) {
       0, 0, 0, 1,
     );
     mats[i] = new THREE.Matrix4().makeTranslation(h.x, h.y, h.z)
-      .multiply(new THREE.Matrix4().makeRotationFromQuaternion(q))
+      .multiply(new THREE.Matrix4().makeRotationFromQuaternion(turn[i]))
       .multiply(S)
       .multiply(new THREE.Matrix4().makeTranslation(-H.x, -H.y, -H.z));
   }
@@ -370,7 +436,7 @@ export function buildBody(a: Appearance, cut: Cut): BodyBuild {
   }
 
   // 2. Fit onto our bind pose with MakeHuman's weights folded onto our bones.
-  const { mats, s0 } = fitMatrices(P, bd.land);
+  const { mats, s0 } = fitMatrices(P, bd);
   const Q = new Float32Array(nv * 3);
   const v = new THREE.Vector3();
   const me = mats.map((m) => m.elements);
