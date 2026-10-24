@@ -7,6 +7,12 @@ export interface PatchGroup {
 
 export const PATCH_NOTES: PatchGroup[] = [
   {
+    hour: '2026-10-24T00:00:00Z',
+    entries: [
+      { title: 'Throw-ins come alive', body: 'Nobody stands still waiting for a throw-in any more. The four nearest team-mates each take an option: one comes short to feet, one runs down the line, one sits inside to switch the play and one drops back for a safe ball. Each drifts away from his marker, then darts into the space on his own rhythm, so there is always someone moving to take the throw. Defenders pick them up goal-side, tight on the ones closest to the ball.' },
+    ],
+  },
+  {
     hour: '2026-10-23T23:00:00Z',
     entries: [
       { title: 'Awards night', body: 'When a season ends, the next time you open the game it gets its own ceremony. First comes where your club finished and the coins it earned. Then the champions are unveiled with their points and record, then the cup winners, then the Golden Boot, Playmaker, Golden Glove and Player of the Season, each with its trophy, the winner and their numbers. A big "That\'s you!" lights up if one of them is yours. It closes with your own season in numbers and any silverware you took home. Tap to move through it, or skip.' },
