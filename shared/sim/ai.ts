@@ -1099,15 +1099,48 @@ export function plan(w: World, tx: Float64Array, ty: Float64Array, urg: Float64A
       }
       return;
     }
-    if (e.k === 'throwin') {
-      const near = outfield(S).filter((i) => i !== taker).sort((a, b) => d2(a, e.x, e.y) - d2(b, e.x, e.y)).slice(0, 2);
-      near.forEach((i, k) => set(i, { u: spotS.u + (k ? -0.07 : 0.06), v: spotS.v * 0.62 }, S, urgAll));
-      const mark = outfield(O).sort((a, b) => d2(a, e.x, e.y) - d2(b, e.x, e.y)).slice(0, 2);
-      mark.forEach((i, k) => {
-        const a = near[k] ?? near[0];
-        if (a !== undefined) setAbs(i, tx[i] * 0.25 + tx[a] * 0.75, ty[i] * 0.25 + ty[a] * 0.75, urgAll);
-      });
-    }
+    if (e.k === 'throwin') throwIn(e, spotS);
+  }
+
+  /**
+   * A throw-in is the one restart where the receivers have to make it happen:
+   * nobody stands still waiting. The nearest four take the four options, a
+   * short one to feet, a runner down the line, a man inside to switch it and
+   * a safe ball back, and each keeps moving: drifting away, then darting into
+   * the space. Their markers stay goal-side, tight on the ones near the ball.
+   */
+  function throwIn(e: Restart, spot: Pt) {
+    const S = e.s;
+    const O = (1 - S) as Side;
+    const side = Math.sign(spot.v || 1);
+    const up = clamp(spot.u, 0.06, 0.88);
+    const near = outfield(S).filter((i) => i !== e.p).sort((a, b) => d2(a, e.x, e.y) - d2(b, e.x, e.y)).slice(0, 4);
+    // Most attacking first: they take the run down the line; the most defensive goes back.
+    const depth: Partial<Record<Position, number>> = { ST: 6, WG: 5, AM: 4, CM: 3, FB: 2.5, DM: 2, CB: 1 };
+    near.sort((a, b) => (depth[role(b)] ?? 0) - (depth[role(a)] ?? 0));
+    // Each option is a pair of spots: where he drifts to, and where he darts into.
+    const options: [Pt, Pt][] = [
+      [{ u: up + 0.05, v: spot.v - side * 0.12 }, { u: Math.min(0.95, up + 0.13), v: spot.v - side * 0.04 }],
+      [{ u: up + 0.035, v: spot.v - side * 0.26 }, { u: up - 0.01, v: spot.v - side * 0.15 }],
+      [{ u: up + 0.01, v: spot.v - side * 0.5 }, { u: up + 0.04, v: spot.v - side * 0.38 }],
+      [{ u: up - 0.1, v: spot.v - side * 0.16 }, { u: up - 0.07, v: spot.v - side * 0.24 }],
+    ];
+    const taken = new Set<number>();
+    near.forEach((i, k) => {
+      const [a, b] = options[k];
+      // A slow drift away, then a sharp move into the space, on each man's own rhythm.
+      const ph = (w.t * (0.32 + 0.12 * trait(i, 12)) + trait(i, 13)) % 1;
+      const f = ph < 0.65 ? 0 : clamp((ph - 0.65) / 0.2, 0, 1);
+      const darting = f > 0 && f < 1;
+      set(i, { u: a.u + (b.u - a.u) * f, v: a.v + (b.v - a.v) * f }, S, darting ? 0.75 : WALK);
+      // The nearest free defender picks him up, goal-side and a little inside.
+      const p = frame(tx[i], ty[i], S);
+      const m = outfield(O).filter((j) => !taken.has(j)).sort((x, y) => d2(x, tx[i], ty[i]) - d2(y, tx[i], ty[i]))[0];
+      if (m === undefined) return;
+      taken.add(m);
+      const tight = k < 2 ? 0.012 : 0.03;
+      set(m, { u: p.u + tight, v: p.v - side * 0.03 }, S, darting ? 0.7 : 0.3);
+    });
   }
 
   /** Little steps on the spot while the ball is placed: nobody stands still. */
